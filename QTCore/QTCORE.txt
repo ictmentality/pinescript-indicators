@@ -1,0 +1,279 @@
+//@version=6
+library("QTCore", overlay=false)
+
+// ============================================================================
+// QT CORE (SKELETON) — Fixed cycles only (Daily / m90 / Micro / Nano)
+// - Data-first: timestamps + OHLC + state flags
+// - No drawings, no styling opinions
+// - Timestamp anchoring only (bar_time), never bar_index
+// - State-trigger correctness everywhere: realized = (time_close > ts)
+// - Non-repaint: request.security(..., lookahead_off) only (to be added in Step 2)
+// - Strict OHLC sourcing: if aligned stream data is unavailable => return na/has=false
+// - Weekly cycle intentionally excluded for now
+//
+// NOTE: This is a compile-ready skeleton. Step 2 will fill in the aligned-TF OHLC
+//       aggregation + printed-cycle backfill behaviors.
+// ============================================================================
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+const int MS_SEC  = 1000
+const int MS_MIN  = 60 * MS_SEC
+const int LEN_24H = 24 * 60 * MS_MIN
+const int LEN_6H  = 6  * 60 * MS_MIN
+const int LEN_90M = 90 * MS_MIN
+const int LEN_22M30S = 22 * MS_MIN + 30 * MS_SEC  // 22.5 minutes
+
+// ============================================================================
+// USER-DEFINED TYPES (UDTs)
+// ============================================================================
+
+export type QTConfig
+    string tz
+    int    dayStartHour
+    int    dayStartMin
+    int    keepCycles
+
+    // Aligned TFs per QT cycle (canonical)
+    string tfDaily      // "15"
+    string tfM90        // "5"
+    string tfMicro      // "30S"
+    string tfNano       // "5S"
+
+export type QuarterRecord
+    int   boundaryTs
+    float o
+    float h
+    float l
+    float c
+    int   oTs
+    int   hTs
+    int   lTs
+    int   cTs
+    bool  has
+    bool  isEmpty
+    bool  isFinal
+    bool  evtStart
+    bool  evtFinalize
+
+export type CycleResult
+    // Cycle window
+    int  startTs
+    int  endTs
+    bool startRealized
+    bool endRealized
+
+    // Quarter boundaries (Q1 is the cycle start)
+    int  q1Ts
+    int  q2Ts
+    int  q3Ts
+    int  q4Ts
+
+    // State-trigger realization (early mode)
+    bool q2Realized
+    bool q3Realized
+    bool q4Realized
+
+    // Where we are right now
+    int  curQuarterIndex   // 1..4
+    bool inWindow
+
+    // Quarter records (OHLC + timestamps + flags; Step 2 will populate)
+    QuarterRecord q1
+    QuarterRecord q2
+    QuarterRecord q3
+    QuarterRecord q4
+
+export type FixedCycleState
+    // Printed-cycle retention (cycle starts)
+    int[] starts
+    int   lastStartTs
+
+    // Reserved for later (Step 2+): quarter OHLC history retention arrays
+
+export type CycleState
+    FixedCycleState daily
+    FixedCycleState m90
+    FixedCycleState micro
+    FixedCycleState nano
+
+// ============================================================================
+// CONSTRUCTORS
+// ============================================================================
+
+export qt_config_default() =>
+    QTConfig cfg = QTConfig.new(
+        "America/New_York",
+        18, 0,
+        32,
+        "15",
+        "5",
+        "30S",
+        "5S"
+    )
+    cfg
+
+
+export qt_state_new() =>
+    FixedCycleState d = FixedCycleState.new(array.new_int(), int(na))
+    FixedCycleState m = FixedCycleState.new(array.new_int(), int(na))
+    FixedCycleState u = FixedCycleState.new(array.new_int(), int(na))
+    FixedCycleState n = FixedCycleState.new(array.new_int(), int(na))
+    CycleState st = CycleState.new(d, m, u, n)
+    st
+
+
+// ============================================================================
+// HELPERS (timestamp math only)
+// ============================================================================
+
+f_qt_day_start(int t, QTConfig cfg) =>
+    // Anchor: cfg.dayStartHour:cfg.dayStartMin in cfg.tz
+    // NOTE: This matches the proven pattern in the working runner.
+    int y  = year(t, cfg.tz)
+    int mo = month(t, cfg.tz)
+    int da = dayofmonth(t, cfg.tz)
+    int h  = hour(t, cfg.tz)
+    int mi = minute(t, cfg.tz)
+    int base = timestamp(cfg.tz, y, mo, da, cfg.dayStartHour, cfg.dayStartMin)
+    int out  = (h > cfg.dayStartHour or (h == cfg.dayStartHour and mi >= cfg.dayStartMin)) ? base : base - LEN_24H
+    out
+
+f_next_ds_after(int t, QTConfig cfg) =>
+    int ds0 = f_qt_day_start(t, cfg)
+    ds0 <= t ? ds0 + LEN_24H : ds0
+
+f_cycle_start(int t, int baseTs, int lenMs) =>
+    // Computes start = baseTs + floor((t - baseTs)/lenMs) * lenMs
+    // Assumes baseTs is the correct anchor for t (e.g., DS for the day containing t)
+    int k = int(math.floor((t - baseTs) / lenMs))
+    baseTs + k * lenMs
+
+f_quarter_index(int t, int cycleStart, int lenMs) =>
+    int qLen = int(lenMs / 4)
+    int qi0  = int(math.floor((t - cycleStart) / qLen))  // 0..3
+    int qi1  = qi0 < 0 ? 0 : (qi0 > 3 ? 3 : qi0)
+    qi1 + 1
+
+f_make_empty_q(int qStart) =>
+    QuarterRecord.new(
+        qStart,
+        na, na, na, na,
+        int(na), int(na), int(na), int(na),
+        false, true, false,
+        false, false
+    )
+
+f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
+    // No mutation of input param: copy first, return the new array.
+    int[] out = array.copy(startsIn)
+    int sz = array.size(out)
+    int last = sz > 0 ? array.get(out, sz - 1) : int(na)
+    if na(last) or startTs > last
+        array.push(out, startTs)
+
+    // Cap to keepCycles (drop oldest)
+    while array.size(out) > keepCycles
+        array.shift(out)
+
+    out
+
+// ============================================================================
+// CORE FIXED-CYCLE UPDATE (SKELETON)
+// - Step 2 will add aligned-TF OHLC aggregation via request.security(..., lookahead_off)
+// - For now: timestamps + realized flags + printed-start retention only
+// ============================================================================
+
+f_fixed_cycle_update(
+    FixedCycleState stIn,
+    QTConfig cfg,
+    int t,
+    int tClose,
+    int lenMs
+) =>
+    int ds     = f_qt_day_start(t, cfg)
+    int cStart = f_cycle_start(t, ds, lenMs)
+    int cEnd   = cStart + lenMs
+    int qLen   = int(lenMs / 4)
+
+    int q1Ts = cStart
+    int q2Ts = cStart + 1 * qLen
+    int q3Ts = cStart + 2 * qLen
+    int q4Ts = cStart + 3 * qLen
+
+    bool q2R = tClose > q2Ts
+    bool q3R = tClose > q3Ts
+    bool q4R = tClose > q4Ts
+
+    bool sR  = tClose > cStart
+    bool eR  = tClose > cEnd
+
+    bool inW = t >= cStart and t < cEnd
+    int  qi  = f_quarter_index(t, cStart, lenMs)
+
+    // Printed start retention
+    int[] starts2 = stIn.starts
+    int  last2    = stIn.lastStartTs
+    if na(last2) or cStart != last2
+        starts2 := f_push_printed_start(stIn.starts, cStart, cfg.keepCycles)
+        last2   := cStart
+
+    FixedCycleState stOut = FixedCycleState.new(starts2, last2)
+
+    // OHLC placeholders — Step 2 will fill these with aligned-TF aggregated quarter OHLC.
+    CycleResult res = CycleResult.new(
+        cStart, cEnd,
+        sR, eR,
+        q1Ts, q2Ts, q3Ts, q4Ts,
+        q2R, q3R, q4R,
+        qi, inW,
+        f_make_empty_q(q1Ts),
+        f_make_empty_q(q2Ts),
+        f_make_empty_q(q3Ts),
+        f_make_empty_q(q4Ts)
+    )
+
+    [stOut, res]
+
+// ============================================================================
+// EXPORTED API — Fixed cycles only (no Weekly)
+// ============================================================================
+
+export qt_daily_update(CycleState st, QTConfig cfg, int t, int tClose) =>
+    [d2, r] = f_fixed_cycle_update(st.daily, cfg, t, tClose, LEN_24H)
+    CycleState out = CycleState.new(d2, st.m90, st.micro, st.nano)
+    [out, r]
+
+export qt_m90_update(CycleState st, QTConfig cfg, int t, int tClose) =>
+    [m2, r] = f_fixed_cycle_update(st.m90, cfg, t, tClose, LEN_6H)
+    CycleState out = CycleState.new(st.daily, m2, st.micro, st.nano)
+    [out, r]
+
+export qt_micro_update(CycleState st, QTConfig cfg, int t, int tClose) =>
+    [u2, r] = f_fixed_cycle_update(st.micro, cfg, t, tClose, LEN_90M)
+    CycleState out = CycleState.new(st.daily, st.m90, u2, st.nano)
+    [out, r]
+
+export qt_nano_update(CycleState st, QTConfig cfg, int t, int tClose) =>
+    [n2, r] = f_fixed_cycle_update(st.nano, cfg, t, tClose, LEN_22M30S)
+    CycleState out = CycleState.new(st.daily, st.m90, st.micro, n2)
+    [out, r]
+
+
+// ============================================================================
+// STEP 2 PLACEHOLDERS (DO NOT USE YET)
+// - These will be implemented as small patches next.
+// - Goal: for each cycle + each quarter boundary, aggregate quarter OHLC on aligned TF.
+// - Strict mode: if aligned stream data is missing, leave OHLC as na/has=false.
+// ============================================================================
+//
+// Planned internal helper (conceptual):
+//   f_aligned_quarter_ohlc(tf, cfg, quarterStartTs, quarterEndTs) => QuarterRecord
+//
+// Planned approach:
+//   - Run quarter-boundary + running OHLC logic on the aligned TF using request.security(..., lookahead_off).
+//   - Cache/freeze completed quarters; keep current quarter live.
+//   - Use first printed aligned bar on/after quarterStartTs as the quarter open.
+//   - Update H/L/C as aligned bars print within the quarter window.
+//   - Never index lower-tf arrays unless n > 0 (if we decide to use request.security_lower_tf() for seconds TF).

@@ -1,0 +1,156 @@
+//@version=6
+indicator("QT Core — Test Harness", overlay=true, max_labels_count=500)
+
+// paste the copied import line here:
+// import <you>/<QT Core>/<version> as qt
+import Jaw1312/QTCore/1 as qt
+
+var qt.QTConfig cfg = qt.qt_config_default()
+var qt.CycleState st = qt.qt_state_new()
+
+
+int t = time
+int tClose = time_close
+
+[stD, d] = qt.qt_daily_update(st, cfg, t, tClose)
+[stM, m] = qt.qt_m90_update(stD, cfg, t, tClose)
+[stU, u] = qt.qt_micro_update(stM, cfg, t, tClose)
+[stN, n] = qt.qt_nano_update(stU, cfg, t, tClose)
+st := stN
+
+
+// ============================================================================
+// Data Window / sanity (numeric date + 24h time) + optional Q-start labels
+// ============================================================================
+
+// Convert epoch ms -> numeric YYYYMMDD + HHMM (24h) in cfg.tz
+f_ymd(int ts, string tz) =>
+    int yy = year(ts, tz)
+    int mo = month(ts, tz)
+    int dd = dayofmonth(ts, tz)
+    yy * 10000 + mo * 100 + dd
+
+f_hhmm(int ts, string tz) =>
+    int hh = hour(ts, tz)
+    int mm = minute(ts, tz)
+    hh * 100 + mm
+
+f_hhmmssmmm(int ts, string tz) =>
+    int hh = hour(ts, tz)
+    int mm = minute(ts, tz)
+    int msInMin = ts % 60000
+    int ss = msInMin / 1000
+    int ms = msInMin % 1000
+    hh * 10000000 + mm * 100000 + ss * 1000 + ms
+
+
+
+// Toggle which cycles get labels (micro/nano will spam on low TFs)
+showDLabels     = input.bool(true,  "Label Daily Q# on chart")
+showM90Labels   = input.bool(true,  "Label m90 Q# on chart")
+showMicroLabels = input.bool(false, "Label Micro Q# on chart")
+showNanoLabels  = input.bool(false, "Label Nano Q# on chart")
+
+// ---- Data Window: Quarter index (NO pane plots)
+plot(d.curQuarterIndex, "D Q#",     display=display.data_window)
+plot(m.curQuarterIndex, "m90 Q#",   display=display.data_window)
+plot(u.curQuarterIndex, "Micro Q#", display=display.data_window)
+plot(n.curQuarterIndex, "Nano Q#",  display=display.data_window)
+
+// ---- Data Window: Q2 boundary as numeric date + 24h time (easy to verify)
+plot(f_ymd(d.q2Ts, cfg.tz),   "D Q2 date (YYYYMMDD)",    display=display.data_window)
+plot(f_hhmm(d.q2Ts, cfg.tz),  "D Q2 time (HHMM)",        display=display.data_window)
+
+plot(f_ymd(m.q2Ts, cfg.tz),   "m90 Q2 date (YYYYMMDD)",  display=display.data_window)
+plot(f_hhmm(m.q2Ts, cfg.tz),  "m90 Q2 time (HHMM)",      display=display.data_window)
+
+plot(f_ymd(u.q2Ts, cfg.tz),   "Micro Q2 date (YYYYMMDD)", display=display.data_window)
+plot(f_hhmm(u.q2Ts, cfg.tz),  "Micro Q2 time (HHMM)",     display=display.data_window)
+
+plot(f_ymd(n.q2Ts, cfg.tz),   "Nano Q2 date (YYYYMMDD)",  display=display.data_window)
+plot(f_hhmm(n.q2Ts, cfg.tz),  "Nano Q2 time (HHMM)",      display=display.data_window)
+
+plot(f_hhmmssmmm(u.q2Ts, cfg.tz), "Micro Q2 time (HHMMSSmmm)", display=display.data_window)
+plot(f_hhmmssmmm(n.q2Ts, cfg.tz), "Nano Q2 time (HHMMSSmmm)",  display=display.data_window)
+
+plot(n.q2Ts - n.q1Ts, "Nano Q len (ms)", display=display.data_window)
+plot(n.q3Ts - n.q2Ts, "Nano Q len2 (ms)", display=display.data_window)
+
+plot(n.q1Ts % 1000, "Nano Q1 ms remainder", display=display.data_window)
+plot(n.q2Ts % 1000, "Nano Q2 ms remainder", display=display.data_window)
+
+
+// ---- Labels at *current quarter start* (anchored by bar_time via xloc.bar_time)
+var int lastDLabelTs   = na
+var int lastM90LabelTs = na
+var int lastMicroLabelTs = na
+var int lastNanoLabelTs  = na
+
+f_qStartTs(qt.CycleResult r, int qIdx) =>
+    int out = int(na)
+    if qIdx == 1
+        out := r.q1Ts
+    else if qIdx == 2
+        out := r.q2Ts
+    else if qIdx == 3
+        out := r.q3Ts
+    else
+        out := r.q4Ts
+    out
+
+f_qStartOk(qt.CycleResult r, int qIdx) =>
+    bool ok = false
+    if qIdx == 1
+        ok := r.startRealized
+    else if qIdx == 2
+        ok := r.q2Realized
+    else if qIdx == 3
+        ok := r.q3Realized
+    else
+        ok := r.q4Realized
+    ok
+
+// Daily labels
+if showDLabels
+    int tsD = f_qStartTs(d, d.curQuarterIndex)
+    bool okD = f_qStartOk(d, d.curQuarterIndex)
+    if okD and not na(tsD) and tsD != lastDLabelTs
+        label.new(tsD, high, "D Q" + str.tostring(d.curQuarterIndex), xloc=xloc.bar_time, style=label.style_label_down)
+        lastDLabelTs := tsD
+
+// m90 labels
+if showM90Labels
+    int tsM = f_qStartTs(m, m.curQuarterIndex)
+    bool okM = f_qStartOk(m, m.curQuarterIndex)
+    if okM and not na(tsM) and tsM != lastM90LabelTs
+        label.new(tsM, high, "m90 Q" + str.tostring(m.curQuarterIndex), xloc=xloc.bar_time, style=label.style_label_down)
+        lastM90LabelTs := tsM
+
+// Micro labels (OFF by default)
+if showMicroLabels
+    int tsU = f_qStartTs(u, u.curQuarterIndex)
+    bool okU = f_qStartOk(u, u.curQuarterIndex)
+    if okU and not na(tsU) and tsU != lastMicroLabelTs
+        label.new(tsU, high, "Micro Q" + str.tostring(u.curQuarterIndex), xloc=xloc.bar_time, style=label.style_label_down)
+        lastMicroLabelTs := tsU
+
+// Nano labels (OFF by default)
+if showNanoLabels
+    int tsN = f_qStartTs(n, n.curQuarterIndex)
+    bool okN = f_qStartOk(n, n.curQuarterIndex)
+    if okN and not na(tsN) and tsN != lastNanoLabelTs
+        label.new(tsN, high, "Nano Q" + str.tostring(n.curQuarterIndex), xloc=xloc.bar_time, style=label.style_label_down)
+        lastNanoLabelTs := tsN
+
+
+//Plot Q# for debug
+plot(d.curQuarterIndex, "D Q#")
+plot(m.curQuarterIndex, "M90 Q#")
+plot(u.curQuarterIndex, "Micro Q#")
+plot(n.curQuarterIndex, "Nano Q#")
+
+
+plot(d.q2Ts, "D Q2 ts", display=display.data_window)
+plot(m.q2Ts, "m90 Q2 ts", display=display.data_window)
+plot(u.q2Ts, "Micro Q2 ts", display=display.data_window)
+plot(n.q2Ts, "Nano Q2 ts", display=display.data_window)
