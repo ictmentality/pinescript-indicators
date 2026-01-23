@@ -3,7 +3,7 @@ indicator("QT Core — Test Harness (m90 Step 2)", overlay=true, max_labels_coun
 
 // paste the copied import line here:
 // import <you>/<QT Core>/<version> as qt
-import Jaw1312/QTCore/3 as qt
+import Jaw1312/QTCore/4 as qt
 
 // -----------------------------------------------------------------------------
 // Helpers (display-only)
@@ -100,6 +100,8 @@ plot(showStep2M90 ? (m.q2.isFinal ? 1 : 0) : na, "m90 QR q2.isFinal", display=di
 plot(showStep2M90 ? (m.q2.evtStart ? 1 : 0) : na, "m90 QR q2.evtStart", display=display.data_window)
 plot(showStep2M90 ? (m.q2.evtFinalize ? 1 : 0) : na, "m90 QR q2.evtFinalize", display=display.data_window)
 
-// Composite pulses (handy sanity)
-plot(showStep2M90 ? (m.anyStart ? 1 : 0) : na, "m90 anyStart", display=display.data_window)
-plot(showStep2M90 ? (m.anyFinalize ? 1 : 0) : na, "m90 anyFinalize", display=display.data_window)
+bool m_anyStart    = m.q1.evtStart or m.q2.evtStart or m.q3.evtStart or m.q4.evtStart
+bool m_anyFinalize = m.q1.evtFinalize or m.q2.evtFinalize or m.q3.evtFinalize or m.q4.evtFinalize
+
+plot(showStep2M90 ? (m_anyStart ? 1 : 0) : na, "m90 anyStart", display=display.data_window)
+plot(showStep2M90 ? (m_anyFinalize ? 1 : 0) : na, "m90 anyFinalize", display=display.data_window)

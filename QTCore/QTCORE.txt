@@ -356,7 +356,7 @@ f_fixed_cycle_update_step1(FixedCycleState stIn, QTConfig cfg, int t, int tClose
 
     FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2)
 
-    CycleResult res = CycleResult.new(cStart, cEnd, qIdx, q2Realized, q3Realized, q4Realized, startRealized, endRealized, inWindow, q1, q2, q3, q4, prev1, prev2)
+    CycleResult res = CycleResult.new(cStart, cEnd, startRealized, endRealized, q1Ts, q2Ts, q3Ts, q4Ts, q2Realized, q3Realized, q4Realized, qIdx, inWindow, q1, q2, q3, q4)
     [stOut, res]
 
 // CORE FIXED-CYCLE UPDATE (STEP 2: CHART-TF OHLC)
