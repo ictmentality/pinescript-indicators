@@ -7,11 +7,11 @@ library("QTCore", overlay=false)
 // - No drawings, no styling opinions
 // - Timestamp anchoring only (bar_time), never bar_index
 // - State-trigger correctness everywhere: realized = (time_close > ts)
-// - Non-repaint: request.security(..., lookahead_off) only (to be added in Step 2)
-// - Strict OHLC sourcing: if aligned stream data is unavailable => return na/has=false
+// - Non-repaint: any request.security(..., lookahead_off) only (future step)
+// - Step 2 (implemented): quarter OHLC aggregated on chart TF into QuarterRecords
 // - Weekly cycle intentionally excluded for now
 //
-// NOTE: This is a compile-ready skeleton. Step 2 will fill in the aligned-TF OHLC
+// NOTE: Step 2 aggregates quarter OHLC on chart TF. A later step will add aligned-TF OHLC
 //       aggregation + printed-cycle backfill behaviors.
 // ============================================================================
 
@@ -79,7 +79,7 @@ export type CycleResult
     int  curQuarterIndex   // 1..4
     bool inWindow
 
-    // Quarter records (OHLC + timestamps + flags; Step 2 will populate)
+    // Quarter records (OHLC + timestamps + flags; populated on chart TF)
     QuarterRecord q1
     QuarterRecord q2
     QuarterRecord q3
@@ -90,7 +90,18 @@ export type FixedCycleState
     int[] starts
     int   lastStartTs
 
-    // Reserved for later (Step 2+): quarter OHLC history retention arrays
+    // Last realized quarter boundary (start ts of the current quarter)
+    int   lastBoundaryTs
+
+    // Current-cycle quarter records (running OHLC on chart TF)
+    QuarterRecord q1
+    QuarterRecord q2
+    QuarterRecord q3
+    QuarterRecord q4
+
+    // Small history buffer of finalized quarters (most recent first)
+    QuarterRecord prev1
+    QuarterRecord prev2
 
 export type CycleState
     FixedCycleState daily
@@ -116,10 +127,27 @@ export qt_config_default() =>
 
 
 export qt_state_new() =>
-    FixedCycleState d = FixedCycleState.new(array.new_int(), int(na))
-    FixedCycleState m = FixedCycleState.new(array.new_int(), int(na))
-    FixedCycleState u = FixedCycleState.new(array.new_int(), int(na))
-    FixedCycleState n = FixedCycleState.new(array.new_int(), int(na))
+    QuarterRecord nilQ = QuarterRecord.new(
+        int(na),
+        float(na),
+        float(na),
+        float(na),
+        float(na),
+        int(na),
+        int(na),
+        int(na),
+        int(na),
+        false,
+        true,
+        false,
+        false,
+        false
+    )
+
+    FixedCycleState d = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
+    FixedCycleState m = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
+    FixedCycleState u = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
+    FixedCycleState n = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
     CycleState st = CycleState.new(d, m, u, n)
     st
 
@@ -165,6 +193,80 @@ f_make_empty_q(int qStart) =>
         false, false
     )
 
+// ============================================================================
+// STEP 2 HELPERS — Chart-TF quarter OHLC aggregation (minimal, gap-safe)
+// ============================================================================
+
+f_q_clear_evts(QuarterRecord qIn) =>
+    QuarterRecord q = qIn
+    q.evtStart := false
+    q.evtFinalize := false
+    q
+
+f_q_finalize(QuarterRecord qIn) =>
+    QuarterRecord q = qIn
+    q.isFinal := true
+    q.evtFinalize := true
+    if not q.has
+        q.isEmpty := true
+    q
+
+f_finalize_and_roll(QuarterRecord qIn, QuarterRecord prev1In, QuarterRecord prev2In) =>
+    QuarterRecord q = qIn
+    QuarterRecord p1 = prev1In
+    QuarterRecord p2 = prev2In
+    if not q.isFinal and not na(q.boundaryTs)
+        q := f_q_finalize(q)
+        p2 := p1
+        p1 := q
+    [q, p1, p2]
+
+f_q_apply_bar(QuarterRecord qIn, int t, float o, float h, float l, float c, bool isStartBar) =>
+    QuarterRecord q = qIn
+
+    if not q.has
+        q.o := o
+        q.oTs := t
+        q.h := h
+        q.hTs := t
+        q.l := l
+        q.lTs := t
+        q.c := c
+        q.cTs := t
+        q.has := true
+        q.isEmpty := false
+        q.isFinal := false
+        q.evtStart := isStartBar
+    else
+        bool newHigh = na(q.h) or h > q.h
+        bool newLow  = na(q.l) or l < q.l
+        if newHigh
+            q.h := h
+            q.hTs := t
+        if newLow
+            q.l := l
+            q.lTs := t
+        q.c := c
+        q.cTs := t
+        if isStartBar
+            q.evtStart := true
+
+    q
+
+f_q_idx_from_boundary(int boundaryTs, int q1Ts, int q2Ts, int q3Ts, int q4Ts) =>
+    int idx = 0
+    if not na(boundaryTs)
+        if boundaryTs == q1Ts
+            idx := 1
+        else if boundaryTs == q2Ts
+            idx := 2
+        else if boundaryTs == q3Ts
+            idx := 3
+        else if boundaryTs == q4Ts
+            idx := 4
+    idx
+
+
 f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
     // No mutation of input param: copy first, return the new array.
     int[] out = array.copy(startsIn)
@@ -180,9 +282,9 @@ f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
     out
 
 // ============================================================================
-// CORE FIXED-CYCLE UPDATE (SKELETON)
-// - Step 2 will add aligned-TF OHLC aggregation via request.security(..., lookahead_off)
-// - For now: timestamps + realized flags + printed-start retention only
+// CORE FIXED-CYCLE UPDATE (STEP 2: CHART-TF OHLC)
+// - This step aggregates quarter OHLC on chart TF into QuarterRecords
+// - Gap-safe: skipped quarters finalize as isEmpty/isFinal on the next printed bar
 // ============================================================================
 
 f_fixed_cycle_update(
@@ -192,7 +294,8 @@ f_fixed_cycle_update(
     int tClose,
     int lenMs
 ) =>
-    int ds     = f_qt_day_start(t, cfg)
+    int ds = f_qt_day_start(t, cfg)
+
     int cStart = f_cycle_start(t, ds, lenMs)
     int cEnd   = cStart + lenMs
     int qLen   = int(lenMs / 4)
@@ -212,29 +315,179 @@ f_fixed_cycle_update(
     bool inW = t >= cStart and t < cEnd
     int  qi  = f_quarter_index(t, cStart, lenMs)
 
-    // Printed start retention
-    int[] starts2 = stIn.starts
-    int  last2    = stIn.lastStartTs
-    if na(last2) or cStart != last2
-        starts2 := f_push_printed_start(stIn.starts, cStart, cfg.keepCycles)
-        last2   := cStart
+    // Printed start retention + cycle-change detection
+    int[] starts2    = stIn.starts
+    int  lastStart2  = stIn.lastStartTs
+    bool cycleChanged = na(lastStart2) or cStart != lastStart2
+    if cycleChanged
+        starts2    := f_push_printed_start(stIn.starts, cStart, cfg.keepCycles)
+        lastStart2 := cStart
 
-    FixedCycleState stOut = FixedCycleState.new(starts2, last2)
+    // Local copies (clear pulse events each bar)
+    QuarterRecord q1 = f_q_clear_evts(stIn.q1)
+    QuarterRecord q2 = f_q_clear_evts(stIn.q2)
+    QuarterRecord q3 = f_q_clear_evts(stIn.q3)
+    QuarterRecord q4 = f_q_clear_evts(stIn.q4)
 
-    // OHLC placeholders — Step 2 will fill these with aligned-TF aggregated quarter OHLC.
+    QuarterRecord prev1 = f_q_clear_evts(stIn.prev1)
+    QuarterRecord prev2 = f_q_clear_evts(stIn.prev2)
+
+    int lastBoundary2 = stIn.lastBoundaryTs
+
+    // If cycle rolled, finalize remaining old-cycle quarters (gap-safe), then reset records for the new cycle.
+    if cycleChanged
+        int lastIdxOld = f_q_idx_from_boundary(lastBoundary2, q1.boundaryTs, q2.boundaryTs, q3.boundaryTs, q4.boundaryTs)
+
+        if lastIdxOld == 0 or lastIdxOld == 1   
+            [tmpQ1_1, tmpP1_1, tmpP2_1] = f_finalize_and_roll(q1, prev1, prev2)
+            q1 := tmpQ1_1
+            prev1 := tmpP1_1
+            prev2 := tmpP2_1
+
+            [tmpQ2_2, tmpP1_2, tmpP2_2] = f_finalize_and_roll(q2, prev1, prev2)
+            q2 := tmpQ2_2
+            prev1 := tmpP1_2
+            prev2 := tmpP2_2
+
+            [tmpQ3_3, tmpP1_3, tmpP2_3] = f_finalize_and_roll(q3, prev1, prev2)
+            q3 := tmpQ3_3
+            prev1 := tmpP1_3
+            prev2 := tmpP2_3
+
+            [tmpQ4_4, tmpP1_4, tmpP2_4] = f_finalize_and_roll(q4, prev1, prev2)
+            q4 := tmpQ4_4
+            prev1 := tmpP1_4
+            prev2 := tmpP2_4
+
+        else if lastIdxOld == 2
+            [tmpQ2_5, tmpP1_5, tmpP2_5] = f_finalize_and_roll(q2, prev1, prev2)
+            q2 := tmpQ2_5
+            prev1 := tmpP1_5
+            prev2 := tmpP2_5
+
+            [tmpQ3_6, tmpP1_6, tmpP2_6] = f_finalize_and_roll(q3, prev1, prev2)
+            q3 := tmpQ3_6
+            prev1 := tmpP1_6
+            prev2 := tmpP2_6
+
+            [tmpQ4_7, tmpP1_7, tmpP2_7] = f_finalize_and_roll(q4, prev1, prev2)
+            q4 := tmpQ4_7
+            prev1 := tmpP1_7
+            prev2 := tmpP2_7
+
+        else if lastIdxOld == 3
+            [tmpQ3_8, tmpP1_8, tmpP2_8] = f_finalize_and_roll(q3, prev1, prev2)
+            q3 := tmpQ3_8
+            prev1 := tmpP1_8
+            prev2 := tmpP2_8
+
+            [tmpQ4_9, tmpP1_9, tmpP2_9] = f_finalize_and_roll(q4, prev1, prev2)
+            q4 := tmpQ4_9
+            prev1 := tmpP1_9
+            prev2 := tmpP2_9
+
+        else if lastIdxOld == 4
+            [tmpQ4_10, tmpP1_10, tmpP2_10] = f_finalize_and_roll(q4, prev1, prev2)
+            q4 := tmpQ4_10
+            prev1 := tmpP1_10
+            prev2 := tmpP2_10
+
+
+        q1 := f_make_empty_q(q1Ts)
+        q2 := f_make_empty_q(q2Ts)
+        q3 := f_make_empty_q(q3Ts)
+        q4 := f_make_empty_q(q4Ts)
+        lastBoundary2 := int(na)
+
+    // Ensure boundaries are correct (first run or mismatch)
+    if na(q1.boundaryTs) or q1.boundaryTs != q1Ts
+        q1 := f_make_empty_q(q1Ts)
+    if na(q2.boundaryTs) or q2.boundaryTs != q2Ts
+        q2 := f_make_empty_q(q2Ts)
+    if na(q3.boundaryTs) or q3.boundaryTs != q3Ts
+        q3 := f_make_empty_q(q3Ts)
+    if na(q4.boundaryTs) or q4.boundaryTs != q4Ts
+        q4 := f_make_empty_q(q4Ts)
+
+    // Current quarter boundary for this bar
+    int qCurTs = q1Ts
+    if qi == 2
+        qCurTs := q2Ts
+    else if qi == 3
+        qCurTs := q3Ts
+    else if qi == 4
+        qCurTs := q4Ts
+
+    bool startEdge = inW and (tClose > qCurTs) and (na(lastBoundary2) or qCurTs != lastBoundary2)
+
+    // Finalize the quarter we were last in (and any skipped quarters) on the first bar of the new quarter.
+    if startEdge and not cycleChanged
+        int lastIdx = f_q_idx_from_boundary(lastBoundary2, q1Ts, q2Ts, q3Ts, q4Ts)
+        int newIdx  = qi
+
+        if lastIdx == 1
+            [tmpQ1_A, tmpP1_A, tmpP2_A] = f_finalize_and_roll(q1, prev1, prev2)
+            q1 := tmpQ1_A
+            prev1 := tmpP1_A
+            prev2 := tmpP2_A
+
+            if newIdx >= 3
+                [tmpQ2_B, tmpP1_B, tmpP2_B] = f_finalize_and_roll(q2, prev1, prev2)
+                q2 := tmpQ2_B
+                prev1 := tmpP1_B
+                prev2 := tmpP2_B
+
+            if newIdx >= 4
+                [tmpQ3_C, tmpP1_C, tmpP2_C] = f_finalize_and_roll(q3, prev1, prev2)
+                q3 := tmpQ3_C
+                prev1 := tmpP1_C
+                prev2 := tmpP2_C
+
+        else if lastIdx == 2
+            [tmpQ2_D, tmpP1_D, tmpP2_D] = f_finalize_and_roll(q2, prev1, prev2)
+            q2 := tmpQ2_D
+            prev1 := tmpP1_D
+            prev2 := tmpP2_D
+
+            if newIdx >= 4
+                [tmpQ3_E, tmpP1_E, tmpP2_E] = f_finalize_and_roll(q3, prev1, prev2)
+                q3 := tmpQ3_E
+                prev1 := tmpP1_E
+                prev2 := tmpP2_E
+
+        else if lastIdx == 3
+            [tmpQ3_F, tmpP1_F, tmpP2_F] = f_finalize_and_roll(q3, prev1, prev2)
+            q3 := tmpQ3_F
+            prev1 := tmpP1_F
+            prev2 := tmpP2_F
+
+
+    if startEdge
+        lastBoundary2 := qCurTs
+
+    // Update active quarter OHLC on chart TF
+    if qi == 1 and not q1.isFinal
+        q1 := f_q_apply_bar(q1, t, open, high, low, close, startEdge)
+    else if qi == 2 and not q2.isFinal
+        q2 := f_q_apply_bar(q2, t, open, high, low, close, startEdge)
+    else if qi == 3 and not q3.isFinal
+        q3 := f_q_apply_bar(q3, t, open, high, low, close, startEdge)
+    else if qi == 4 and not q4.isFinal
+        q4 := f_q_apply_bar(q4, t, open, high, low, close, startEdge)
+
+    FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2)
+
     CycleResult res = CycleResult.new(
         cStart, cEnd,
         sR, eR,
         q1Ts, q2Ts, q3Ts, q4Ts,
         q2R, q3R, q4R,
         qi, inW,
-        f_make_empty_q(q1Ts),
-        f_make_empty_q(q2Ts),
-        f_make_empty_q(q3Ts),
-        f_make_empty_q(q4Ts)
+        q1, q2, q3, q4
     )
 
     [stOut, res]
+
 
 // ============================================================================
 // EXPORTED API — Fixed cycles only (no Weekly)
@@ -262,18 +515,8 @@ export qt_nano_update(CycleState st, QTConfig cfg, int t, int tClose) =>
 
 
 // ============================================================================
-// STEP 2 PLACEHOLDERS (DO NOT USE YET)
-// - These will be implemented as small patches next.
-// - Goal: for each cycle + each quarter boundary, aggregate quarter OHLC on aligned TF.
-// - Strict mode: if aligned stream data is missing, leave OHLC as na/has=false.
+// FUTURE STEPS (NOT IMPLEMENTED YET)
+// - Tier B aligned-TF OHLC using request.security(..., lookahead_off)
+// - Optional lower-tf aggregation for Micro/Nano correctness (heavy; revisit later)
 // ============================================================================
-//
-// Planned internal helper (conceptual):
-//   f_aligned_quarter_ohlc(tf, cfg, quarterStartTs, quarterEndTs) => QuarterRecord
-//
-// Planned approach:
-//   - Run quarter-boundary + running OHLC logic on the aligned TF using request.security(..., lookahead_off).
-//   - Cache/freeze completed quarters; keep current quarter live.
-//   - Use first printed aligned bar on/after quarterStartTs as the quarter open.
-//   - Update H/L/C as aligned bars print within the quarter window.
-//   - Never index lower-tf arrays unless n > 0 (if we decide to use request.security_lower_tf() for seconds TF).
+

@@ -3,7 +3,7 @@ indicator("QT Core — Test Harness", overlay=true, max_labels_count=500)
 
 // paste the copied import line here:
 // import <you>/<QT Core>/<version> as qt
-import Jaw1312/QTCore/1 as qt
+import Jaw1312/QTCore/3 as qt
 
 var qt.QTConfig cfg = qt.qt_config_default()
 var qt.CycleState st = qt.qt_state_new()
@@ -53,31 +53,14 @@ showNanoLabels  = input.bool(false, "Label Nano Q# on chart")
 
 // ---- Data Window: Quarter index (NO pane plots)
 plot(d.curQuarterIndex, "D Q#",     display=display.data_window)
-plot(m.curQuarterIndex, "m90 Q#",   display=display.data_window)
-plot(u.curQuarterIndex, "Micro Q#", display=display.data_window)
-plot(n.curQuarterIndex, "Nano Q#",  display=display.data_window)
 
 // ---- Data Window: Q2 boundary as numeric date + 24h time (easy to verify)
-plot(f_ymd(d.q2Ts, cfg.tz),   "D Q2 date (YYYYMMDD)",    display=display.data_window)
-plot(f_hhmm(d.q2Ts, cfg.tz),  "D Q2 time (HHMM)",        display=display.data_window)
 
-plot(f_ymd(m.q2Ts, cfg.tz),   "m90 Q2 date (YYYYMMDD)",  display=display.data_window)
-plot(f_hhmm(m.q2Ts, cfg.tz),  "m90 Q2 time (HHMM)",      display=display.data_window)
 
-plot(f_ymd(u.q2Ts, cfg.tz),   "Micro Q2 date (YYYYMMDD)", display=display.data_window)
-plot(f_hhmm(u.q2Ts, cfg.tz),  "Micro Q2 time (HHMM)",     display=display.data_window)
 
-plot(f_ymd(n.q2Ts, cfg.tz),   "Nano Q2 date (YYYYMMDD)",  display=display.data_window)
-plot(f_hhmm(n.q2Ts, cfg.tz),  "Nano Q2 time (HHMM)",      display=display.data_window)
 
-plot(f_hhmmssmmm(u.q2Ts, cfg.tz), "Micro Q2 time (HHMMSSmmm)", display=display.data_window)
-plot(f_hhmmssmmm(n.q2Ts, cfg.tz), "Nano Q2 time (HHMMSSmmm)",  display=display.data_window)
 
-plot(n.q2Ts - n.q1Ts, "Nano Q len (ms)", display=display.data_window)
-plot(n.q3Ts - n.q2Ts, "Nano Q len2 (ms)", display=display.data_window)
 
-plot(n.q1Ts % 1000, "Nano Q1 ms remainder", display=display.data_window)
-plot(n.q2Ts % 1000, "Nano Q2 ms remainder", display=display.data_window)
 
 
 // ---- Labels at *current quarter start* (anchored by bar_time via xloc.bar_time)
@@ -144,13 +127,82 @@ if showNanoLabels
 
 
 //Plot Q# for debug
-plot(d.curQuarterIndex, "D Q#")
-plot(m.curQuarterIndex, "M90 Q#")
-plot(u.curQuarterIndex, "Micro Q#")
-plot(n.curQuarterIndex, "Nano Q#")
 
 
-plot(d.q2Ts, "D Q2 ts", display=display.data_window)
-plot(m.q2Ts, "m90 Q2 ts", display=display.data_window)
-plot(u.q2Ts, "Micro Q2 ts", display=display.data_window)
-plot(n.q2Ts, "Nano Q2 ts", display=display.data_window)
+
+// ============================================================================
+// STEP 1 + STEP 2 — DAILY VALIDATION (Data Window)
+// ============================================================================
+
+showStep1Daily = input.bool(true, "Step 1: QuarterRecord boundaryTs == q#Ts (Daily)")
+showStep2Daily = input.bool(true, "Step 2: QuarterRecord OHLC + flags (Daily)")
+
+// Step 1: boundaryTs should match q#Ts exactly.
+plot(showStep1Daily ? (d.q1Ts == d.q1.boundaryTs ? 1 : 0) : na, "D QR match q1Ts==q1.boundaryTs", display=display.data_window)
+plot(showStep1Daily ? (d.q2Ts == d.q2.boundaryTs ? 1 : 0) : na, "D QR match q2Ts==q2.boundaryTs", display=display.data_window)
+plot(showStep1Daily ? (d.q3Ts == d.q3.boundaryTs ? 1 : 0) : na, "D QR match q3Ts==q3.boundaryTs", display=display.data_window)
+plot(showStep1Daily ? (d.q4Ts == d.q4.boundaryTs ? 1 : 0) : na, "D QR match q4Ts==q4.boundaryTs", display=display.data_window)
+
+// Step 2: OHLC aggregation (chart TF) + event/flags.
+// NOTE: evtStart/evtFinalize are edge pulses; expect them to be 1 only on the first bar that realizes the boundary (time_close > boundaryTs).
+plot(showStep2Daily ? d.q1.o : na, "D QR q1.o", display=display.data_window)
+plot(showStep2Daily ? d.q1.h : na, "D QR q1.h", display=display.data_window)
+plot(showStep2Daily ? d.q1.l : na, "D QR q1.l", display=display.data_window)
+plot(showStep2Daily ? d.q1.c : na, "D QR q1.c", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q1.oTs, cfg.tz)) : na, "D QR q1.oTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q1.hTs, cfg.tz)) : na, "D QR q1.hTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q1.lTs, cfg.tz)) : na, "D QR q1.lTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q1.cTs, cfg.tz)) : na, "D QR q1.cTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? (d.q1.isEmpty ? 1 : 0) : na, "D QR q1.isEmpty", display=display.data_window)
+plot(showStep2Daily ? (d.q1.has ? 1 : 0) : na, "D QR q1.has", display=display.data_window)
+plot(showStep2Daily ? (d.q1.isFinal ? 1 : 0) : na, "D QR q1.isFinal", display=display.data_window)
+plot(showStep2Daily ? (d.q1.evtStart ? 1 : 0) : na, "D QR q1.evtStart", display=display.data_window)
+plot(showStep2Daily ? (d.q1.evtFinalize ? 1 : 0) : na, "D QR q1.evtFinalize", display=display.data_window)
+
+plot(showStep2Daily ? d.q2.o : na, "D QR q2.o", display=display.data_window)
+plot(showStep2Daily ? d.q2.h : na, "D QR q2.h", display=display.data_window)
+plot(showStep2Daily ? d.q2.l : na, "D QR q2.l", display=display.data_window)
+plot(showStep2Daily ? d.q2.c : na, "D QR q2.c", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q2.oTs, cfg.tz)) : na, "D QR q2.oTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q2.hTs, cfg.tz)) : na, "D QR q2.hTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q2.lTs, cfg.tz)) : na, "D QR q2.lTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q2.cTs, cfg.tz)) : na, "D QR q2.cTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? (d.q2.isEmpty ? 1 : 0) : na, "D QR q2.isEmpty", display=display.data_window)
+plot(showStep2Daily ? (d.q2.has ? 1 : 0) : na, "D QR q2.has", display=display.data_window)
+plot(showStep2Daily ? (d.q2.isFinal ? 1 : 0) : na, "D QR q2.isFinal", display=display.data_window)
+plot(showStep2Daily ? (d.q2.evtStart ? 1 : 0) : na, "D QR q2.evtStart", display=display.data_window)
+plot(showStep2Daily ? (d.q2.evtFinalize ? 1 : 0) : na, "D QR q2.evtFinalize", display=display.data_window)
+
+plot(showStep2Daily ? d.q3.o : na, "D QR q3.o", display=display.data_window)
+plot(showStep2Daily ? d.q3.h : na, "D QR q3.h", display=display.data_window)
+plot(showStep2Daily ? d.q3.l : na, "D QR q3.l", display=display.data_window)
+plot(showStep2Daily ? d.q3.c : na, "D QR q3.c", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q3.oTs, cfg.tz)) : na, "D QR q3.oTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q3.hTs, cfg.tz)) : na, "D QR q3.hTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q3.lTs, cfg.tz)) : na, "D QR q3.lTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q3.cTs, cfg.tz)) : na, "D QR q3.cTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? (d.q3.isEmpty ? 1 : 0) : na, "D QR q3.isEmpty", display=display.data_window)
+plot(showStep2Daily ? (d.q3.has ? 1 : 0) : na, "D QR q3.has", display=display.data_window)
+plot(showStep2Daily ? (d.q3.isFinal ? 1 : 0) : na, "D QR q3.isFinal", display=display.data_window)
+plot(showStep2Daily ? (d.q3.evtStart ? 1 : 0) : na, "D QR q3.evtStart", display=display.data_window)
+plot(showStep2Daily ? (d.q3.evtFinalize ? 1 : 0) : na, "D QR q3.evtFinalize", display=display.data_window)
+
+plot(showStep2Daily ? d.q4.o : na, "D QR q4.o", display=display.data_window)
+plot(showStep2Daily ? d.q4.h : na, "D QR q4.h", display=display.data_window)
+plot(showStep2Daily ? d.q4.l : na, "D QR q4.l", display=display.data_window)
+plot(showStep2Daily ? d.q4.c : na, "D QR q4.c", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q4.oTs, cfg.tz)) : na, "D QR q4.oTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q4.hTs, cfg.tz)) : na, "D QR q4.hTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q4.lTs, cfg.tz)) : na, "D QR q4.lTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? float(f_hhmm(d.q4.cTs, cfg.tz)) : na, "D QR q4.cTs (HHMM)", display=display.data_window)
+plot(showStep2Daily ? (d.q4.isEmpty ? 1 : 0) : na, "D QR q4.isEmpty", display=display.data_window)
+plot(showStep2Daily ? (d.q4.has ? 1 : 0) : na, "D QR q4.has", display=display.data_window)
+plot(showStep2Daily ? (d.q4.isFinal ? 1 : 0) : na, "D QR q4.isFinal", display=display.data_window)
+plot(showStep2Daily ? (d.q4.evtStart ? 1 : 0) : na, "D QR q4.evtStart", display=display.data_window)
+plot(showStep2Daily ? (d.q4.evtFinalize ? 1 : 0) : na, "D QR q4.evtFinalize", display=display.data_window)
+
+// Convenience: any start/finalize pulse on this bar (Daily).
+bool anyStart = d.q1.evtStart or d.q2.evtStart or d.q3.evtStart or d.q4.evtStart
+bool anyFin   = d.q1.evtFinalize or d.q2.evtFinalize or d.q3.evtFinalize or d.q4.evtFinalize
+plot(showStep2Daily ? (anyStart ? 1 : 0) : na, "D QR any evtStart", display=display.data_window)
+plot(showStep2Daily ? (anyFin ? 1 : 0) : na, "D QR any evtFinalize", display=display.data_window)
