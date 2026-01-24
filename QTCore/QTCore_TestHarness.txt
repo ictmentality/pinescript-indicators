@@ -1,107 +1,414 @@
 //@version=6
-indicator("QT Core — Test Harness (m90 Step 2)", overlay=true, max_labels_count=500)
+indicator("QT Core — Test Harness (m90 Visual, Old QT Exact)", overlay=true, max_lines_count=500, max_labels_count=500)
 
-// paste the copied import line here:
-// import <you>/<QT Core>/<version> as qt
+// NOTE:
+// - This harness is intentionally focused on m90 View A visuals.
+// - Divider + open-line visuals are ported from your Old QT Indicator's fixed-cycle runner.
+// - QTCore is used to supply the active cycle start (and to keep the engine in-scope as you build it).
+
+// Paste your own library import line here:
 import Jaw1312/QTCore/4 as qt
 
-// -----------------------------------------------------------------------------
-// Helpers (display-only)
-// -----------------------------------------------------------------------------
-f_hhmm(int ts, string tz) =>
-    int hh = hour(ts, tz)
-    int mm = minute(ts, tz)
-    hh * 100 + mm
+// ============================================================================
+// CONSTANTS (matching Old QT Indicator)
+// ============================================================================
+var string TZ = "America/New_York"
 
-// -----------------------------------------------------------------------------
-// State
-// -----------------------------------------------------------------------------
-var qt.QTConfig cfg = qt.qt_config_default()
-var qt.CycleState st = qt.qt_state_new()
+var int MS_SEC = 1000
+var int MS_MIN = 60 * MS_SEC
+var int MS_HR  = 60 * MS_MIN
 
-int t = time
+var int LEN_90M = 90 * MS_MIN
+var int LEN_6H  = 6  * MS_HR
+var int LEN_24H = 24 * MS_HR
+
+// Quarter colors (fixed)
+var color COL_Q1 = color.rgb( 99,  99,  99)   // #636363
+var color COL_Q2 = color.rgb(242,  54,  69)   // #f23645
+var color COL_Q3 = color.rgb( 76, 175,  80)   // #4caf50
+var color COL_Q4 = color.rgb( 41,  98, 255)   // #2962ff
+
+// Vertical opacity: 30% opacity => 70 transparency
+var int V_TRANSP = 70
+f_vcol(color c) =>
+    color.new(c, V_TRANSP)
+
+// Use THIS exactly (your requested mapping)
+lineStyleFrom(string s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        =>          line.style_dotted
+
+// ============================================================================
+// INPUTS (matching Old QT Indicator defaults for opens/styles)
+// ============================================================================
+groupCycles = "TIME CYCLES"
+useM90      = input.bool(true,  "m90", group=groupCycles)
+
+groupAll        = "CYCLE SETTINGS"
+showOpens       = input.bool(true,  "Show Opens", group=groupAll)
+keepCycles      = input.int(1,      "# of Cycles", minval=1, maxval=200, group=groupAll)
+q1OpenCol       = input.color(color.rgb(255, 152, 0), "Q1 Open Color", group=groupAll)
+trueOpenCol     = input.color(color.rgb(0,   0,   0), "Q2 Open Color", group=groupAll)
+q1OpenStyleStr   = input.string("Dashed", "Q1 Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
+trueOpenStyleStr = input.string("Dashed", "Q2 Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
+
+groupDW = "DATA WINDOW (Minimal)"
+showDW  = input.bool(true, "Show minimal m90 timestamps", group=groupDW)
+
+// ============================================================================
+// HELPERS (subset copied from Old QT Indicator)
+// ============================================================================
+f_clamp_int(int x, int lo, int hi) =>
+    int a = x < lo ? lo : x
+    int b = a > hi ? hi : a
+    b
+
+crosses_ts(int ts) =>
+    bool havePrev = bar_index > 0 and not na(time[1])
+    bool overlap  = (time <= ts) and (time_close > ts)
+    bool gapCross = havePrev and (time >= ts) and (time[1] < ts)
+    overlap or gapCross
+
+// ============================================================================
+// OPEN FETCH (m90 uses m1 "containing" policy; implemented with lookahead_off)
+// ============================================================================
+open_at_ts_m1_containing(int ts) =>
+    float out = request.security(
+         syminfo.tickerid,
+         "1",
+         ta.valuewhen(time <= ts and (time + MS_MIN) > ts, open, 0),
+         lookahead=barmerge.lookahead_off
+    )
+
+    // Last-resort fallbacks (only safe when the boundary equals or is inside THIS bar)
+    if na(out) and time == ts
+        out := open
+    if na(out) and crosses_ts(ts)
+        out := open
+
+    out
+
+// ============================================================================
+// DRAWING SETS (ported from Old QT Indicator)
+// ============================================================================
+type vset
+    line[] ln
+    int[]  ts
+
+vset_new() =>
+    vset.new(array.new_line(), array.new_int())
+
+vset_clear(vset s) =>
+    int i = s.ln.size() - 1
+    while i >= 0
+        line.delete(s.ln.get(i))
+        i -= 1
+    s.ln.clear()
+    s.ts.clear()
+    0
+
+vset_trim_since(vset s, int cutoff) =>
+    int i = s.ts.size() - 1
+    while i >= 0
+        if s.ts.get(i) < cutoff
+            line.delete(s.ln.get(i))
+            array.remove(s.ln, i)
+            array.remove(s.ts, i)
+        i -= 1
+    0
+
+vset_has(vset s, int ts) =>
+    bool found = false
+    int i = s.ts.size() - 1
+    while i >= 0 and not found
+        found := s.ts.get(i) == ts
+        i -= 1
+    found
+
+vset_add(vset s, int ts, color c) =>
+    if not vset_has(s, ts)
+        s.ln.push(line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c)))
+        s.ts.push(ts)
+    0
+
+type hset
+    line[] ln
+    int[]  st
+
+hset_new() =>
+    hset.new(array.new_line(), array.new_int())
+
+hset_clear(hset s) =>
+    int i = s.ln.size() - 1
+    while i >= 0
+        line.delete(s.ln.get(i))
+        i -= 1
+    s.ln.clear()
+    s.st.clear()
+    0
+
+hset_trim_since(hset s, int cutoff) =>
+    int i = s.st.size() - 1
+    while i >= 0
+        if s.st.get(i) < cutoff
+            line.delete(s.ln.get(i))
+            array.remove(s.ln, i)
+            array.remove(s.st, i)
+        i -= 1
+    0
+
+hset_has(hset s, int st) =>
+    bool found = false
+    int i = s.st.size() - 1
+    while i >= 0 and not found
+        found := s.st.get(i) == st
+        i -= 1
+    found
+
+hset_add(hset s, int st, int et, float y, color c, string styleStr) =>
+    if not hset_has(s, st)
+        s.ln.push(line.new(st, y, et, y, xloc=xloc.bar_time, extend=extend.none, style=lineStyleFrom(styleStr), width=1, color=c))
+        s.st.push(st)
+    0
+
+hset_sync(hset s, color c, string styleStr) =>
+    int i = s.ln.size() - 1
+    while i >= 0
+        line ln = s.ln.get(i)
+        if not na(ln)
+            line.set_color(ln, c)
+            line.set_style(ln, lineStyleFrom(styleStr))
+            line.set_width(ln, 1)
+        i -= 1
+    0
+
+// ============================================================================
+// PROJECTION HELPERS (ported from Old QT Indicator)
+// ============================================================================
+f_set_or_make_vline(line ln, int ts, color c) =>
+    line out = ln
+    if na(out)
+        out := line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c))
+    else
+        line.set_xy1(out, ts, low)
+        line.set_xy2(out, ts, high)
+        line.set_color(out, f_vcol(c))
+        line.set_style(out, line.style_solid)
+        line.set_width(out, 1)
+    out
+
+f_kill(line ln) =>
+    if not na(ln)
+        line.delete(ln)
+    line(na)
+
+// ============================================================================
+// FIXED-CYCLE RUNNER (ported from Old QT Indicator; m90 parameterization)
+// ============================================================================
+f_push_unique_int(int[] a, int v, int maxSize) =>
+    if array.size(a) == 0 or array.get(a, array.size(a) - 1) != v
+        array.push(a, v)
+        if array.size(a) > maxSize
+            array.shift(a)
+    0
+
+run_fixed_cycle(
+    int curStart,
+    int parentLenMs,
+    int quarterLenMs,
+    bool snapQuarters,
+    int alignMs,
+    int keepEff,
+    int storeMax,
+    int[] starts,
+    vset v,
+    hset hQ1,
+    hset hQ2,
+    line projQ2,
+    line projQ3,
+    line projQ4,
+    line projEnd
+) =>
+    // Record current printed cycle start (one entry per printed cycle)
+    f_push_unique_int(starts, curStart, storeMax)
+
+    int nAvail = array.size(starts)
+    int nUse   = math.min(keepEff, nAvail)
+    int first  = nAvail - nUse
+
+    int cutoff = curStart
+    if nUse > 0
+        cutoff := array.get(starts, first)
+
+    // Trim drawings to cutoff window
+    vset_trim_since(v, cutoff)
+    if showOpens
+        hset_trim_since(hQ1, cutoff)
+        hset_trim_since(hQ2, cutoff)
+
+    // Realized dividers + opens across the kept printed cycles
+    int i = first
+    while i < nAvail
+        int bStart = array.get(starts, i)
+        int bEnd   = bStart + parentLenMs
+
+        int q1 = bStart
+        int q2 = snapQuarters ? (bStart + 1 * quarterLenMs + (alignMs > 0 ? (alignMs - ((bStart + 1 * quarterLenMs) % alignMs)) % alignMs : 0)) : (bStart + 1 * quarterLenMs)
+        int q3 = snapQuarters ? (bStart + 2 * quarterLenMs + (alignMs > 0 ? (alignMs - ((bStart + 2 * quarterLenMs) % alignMs)) % alignMs : 0)) : (bStart + 2 * quarterLenMs)
+        int q4 = snapQuarters ? (bStart + 3 * quarterLenMs + (alignMs > 0 ? (alignMs - ((bStart + 3 * quarterLenMs) % alignMs)) % alignMs : 0)) : (bStart + 3 * quarterLenMs)
+
+        if time_close > q1
+            vset_add(v, q1, COL_Q1)
+        if time_close > q2
+            vset_add(v, q2, COL_Q2)
+        if time_close > q3
+            vset_add(v, q3, COL_Q3)
+        if time_close > q4
+            vset_add(v, q4, COL_Q4)
+
+        if showOpens
+            if time_close > q1
+                float p1 = open_at_ts_m1_containing(q1)
+                if not na(p1)
+                    hset_add(hQ1, q1, bEnd, p1, q1OpenCol, q1OpenStyleStr)
+
+            if time_close > q2
+                float p2 = open_at_ts_m1_containing(q2)
+                if not na(p2)
+                    hset_add(hQ2, q2, bEnd, p2, trueOpenCol, trueOpenStyleStr)
+
+        i += 1
+
+    if showOpens
+        hset_sync(hQ1, q1OpenCol, q1OpenStyleStr)
+        hset_sync(hQ2, trueOpenCol, trueOpenStyleStr)
+
+    // Projections for the currently-active printed cycle.
+    int curEnd = curStart + parentLenMs
+    int curQ2  = snapQuarters ? (curStart + 1 * quarterLenMs + (alignMs > 0 ? (alignMs - ((curStart + 1 * quarterLenMs) % alignMs)) % alignMs : 0)) : (curStart + 1 * quarterLenMs)
+    int curQ3  = snapQuarters ? (curStart + 2 * quarterLenMs + (alignMs > 0 ? (alignMs - ((curStart + 2 * quarterLenMs) % alignMs)) % alignMs : 0)) : (curStart + 2 * quarterLenMs)
+    int curQ4  = snapQuarters ? (curStart + 3 * quarterLenMs + (alignMs > 0 ? (alignMs - ((curStart + 3 * quarterLenMs) % alignMs)) % alignMs : 0)) : (curStart + 3 * quarterLenMs)
+
+    line q2L = projQ2
+    line q3L = projQ3
+    line q4L = projQ4
+    line eL  = projEnd
+
+    if time_close > curQ2
+        q2L := f_kill(q2L)
+    else
+        q2L := f_set_or_make_vline(q2L, curQ2, COL_Q2)
+
+    if time_close > curQ3
+        q3L := f_kill(q3L)
+    else
+        q3L := f_set_or_make_vline(q3L, curQ3, COL_Q3)
+
+    if time_close > curQ4
+        q4L := f_kill(q4L)
+    else
+        q4L := f_set_or_make_vline(q4L, curQ4, COL_Q4)
+
+    if time_close > curEnd
+        eL := f_kill(eL)
+    else
+        eL := f_set_or_make_vline(eL, curEnd, COL_Q1)
+
+    line[] out = array.new_line()
+    array.push(out, q2L)
+    array.push(out, q3L)
+    array.push(out, q4L)
+    array.push(out, eL)
+    out
+
+// ============================================================================
+// QTCORE STATE + m90 VIEW A
+// ============================================================================
+var qt.QTConfig   cfg = qt.qt_config_default()
+var qt.CycleState st  = qt.qt_state_new()
+
+int t      = time
 int tClose = time_close
 
-// Keep Daily update first (shared state), then m90.
-[stD, d] = qt.qt_daily_update(st, cfg, t, tClose)
-[stM, m] = qt.qt_m90_update(stD, cfg, t, tClose)
+[st2, m] = qt.qt_m90_update(st, cfg, t, tClose)
+st := st2
 
-// -----------------------------------------------------------------------------
-// Labels (optional) — to visually confirm boundary realizes where you expect
-// -----------------------------------------------------------------------------
-showM90Labels = input.bool(true, "Label m90 Q# on chart")
+// Exact gating from Old QT Indicator: m90 visible on m5 only
+bool m90Live = useM90 and timeframe.isminutes and timeframe.multiplier == 5
 
-// Use the current quarter boundary for label placement.
-int tsM = m.q1Ts
-if m.curQuarterIndex == 2
-    tsM := m.q2Ts
-else if m.curQuarterIndex == 3
-    tsM := m.q3Ts
-else if m.curQuarterIndex == 4
-    tsM := m.q4Ts
+// m90 drawings (matching Old QT Indicator)
+var vset m90V    = vset_new()
+var hset m90HQ1  = hset_new()
+var hset m90HTru = hset_new()
 
-bool okM = not na(tsM)
-var int lastM90LabelTs = na
+var line m90ProjQ2  = na
+var line m90ProjQ3  = na
+var line m90ProjQ4  = na
+var line m90ProjEnd = na
 
-if showM90Labels
-    if okM and tsM != lastM90LabelTs and tClose > tsM
-        label.new(tsM, high, "m90 Q" + str.tostring(m.curQuarterIndex), xloc=xloc.bar_time, style=label.style_label_down)
-        lastM90LabelTs := tsM
+var int[] m90Starts = array.new_int()
+var int   M90_STORE_MAX = 600
 
-// -----------------------------------------------------------------------------
-// Step 1 checks (timestamps parity)
-// -----------------------------------------------------------------------------
-showStep1M90 = input.bool(true, "Step 1: QuarterRecord boundaryTs checks (m90)")
+int m90KeepEff = keepCycles
+m90KeepEff := showOpens ? f_clamp_int(m90KeepEff, 1, 70) : f_clamp_int(m90KeepEff, 1, 110)
 
-plot(m.curQuarterIndex, "m90 Q#", display=display.data_window)
+if not m90Live or na(m.startTs)
+    if m90V.ln.size() > 0
+        vset_clear(m90V)
+    if m90HQ1.ln.size() > 0
+        hset_clear(m90HQ1)
+    if m90HTru.ln.size() > 0
+        hset_clear(m90HTru)
 
-plot(showStep1M90 ? (m.q1Ts == m.q1.boundaryTs ? 1 : 0) : na, "m90 QR match q1Ts==q1.boundaryTs", display=display.data_window)
-plot(showStep1M90 ? (m.q2Ts == m.q2.boundaryTs ? 1 : 0) : na, "m90 QR match q2Ts==q2.boundaryTs", display=display.data_window)
-plot(showStep1M90 ? (m.q3Ts == m.q3.boundaryTs ? 1 : 0) : na, "m90 QR match q3Ts==q3.boundaryTs", display=display.data_window)
-plot(showStep1M90 ? (m.q4Ts == m.q4.boundaryTs ? 1 : 0) : na, "m90 QR match q4Ts==q4.boundaryTs", display=display.data_window)
+    m90ProjQ2  := f_kill(m90ProjQ2)
+    m90ProjQ3  := f_kill(m90ProjQ3)
+    m90ProjQ4  := f_kill(m90ProjQ4)
+    m90ProjEnd := f_kill(m90ProjEnd)
 
-// -----------------------------------------------------------------------------
-// Step 2 checks (chart-TF OHLC aggregation + finalize/skip + history roll)
-// - For this test harness we only surface q1 and q2 to stay under the 64-plot limit.
-// -----------------------------------------------------------------------------
-showStep2M90 = input.bool(true, "Step 2: QuarterRecord OHLC + flags (m90)")
+    // Also clear start history so re-enabling doesn't backfill unexpectedly
+    if array.size(m90Starts) > 0
+        array.clear(m90Starts)
+else
+    int curSt = m.startTs
 
-// q1
-plot(showStep2M90 ? m.q1.o : na, "m90 QR q1.o", display=display.data_window)
-plot(showStep2M90 ? m.q1.h : na, "m90 QR q1.h", display=display.data_window)
-plot(showStep2M90 ? m.q1.l : na, "m90 QR q1.l", display=display.data_window)
-plot(showStep2M90 ? m.q1.c : na, "m90 QR q1.c", display=display.data_window)
+    line[] projs = run_fixed_cycle(
+        curSt,
+        LEN_6H,
+        LEN_90M,
+        false,
+        0,
+        m90KeepEff,
+        M90_STORE_MAX,
+        m90Starts,
+        m90V,
+        m90HQ1,
+        m90HTru,
+        m90ProjQ2,
+        m90ProjQ3,
+        m90ProjQ4,
+        m90ProjEnd
+    )
 
-plot(showStep2M90 ? float(f_hhmm(m.q1.oTs, cfg.tz)) : na, "m90 QR q1.oTs (HHMM)", display=display.data_window)
-plot(showStep2M90 ? float(f_hhmm(m.q1.hTs, cfg.tz)) : na, "m90 QR q1.hTs (HHMM)", display=display.data_window)
-plot(showStep2M90 ? float(f_hhmm(m.q1.lTs, cfg.tz)) : na, "m90 QR q1.lTs (HHMM)", display=display.data_window)
-plot(showStep2M90 ? float(f_hhmm(m.q1.cTs, cfg.tz)) : na, "m90 QR q1.cTs (HHMM)", display=display.data_window)
+    m90ProjQ2  := array.get(projs, 0)
+    m90ProjQ3  := array.get(projs, 1)
+    m90ProjQ4  := array.get(projs, 2)
+    m90ProjEnd := array.get(projs, 3)
 
-plot(showStep2M90 ? (m.q1.isEmpty ? 1 : 0) : na, "m90 QR q1.isEmpty", display=display.data_window)
-plot(showStep2M90 ? (m.q1.has ? 1 : 0) : na, "m90 QR q1.has", display=display.data_window)
-plot(showStep2M90 ? (m.q1.isFinal ? 1 : 0) : na, "m90 QR q1.isFinal", display=display.data_window)
-plot(showStep2M90 ? (m.q1.evtStart ? 1 : 0) : na, "m90 QR q1.evtStart", display=display.data_window)
-plot(showStep2M90 ? (m.q1.evtFinalize ? 1 : 0) : na, "m90 QR q1.evtFinalize", display=display.data_window)
+// ============================================================================
+// MINIMAL DATA WINDOW OUTPUT (optional)
+// ============================================================================
+int m90_q1 = m.q1Ts
+int m90_q2 = m.q2Ts
+int m90_q3 = m.q3Ts
+int m90_q4 = m.q4Ts
 
-// q2
-plot(showStep2M90 ? m.q2.o : na, "m90 QR q2.o", display=display.data_window)
-plot(showStep2M90 ? m.q2.h : na, "m90 QR q2.h", display=display.data_window)
-plot(showStep2M90 ? m.q2.l : na, "m90 QR q2.l", display=display.data_window)
-plot(showStep2M90 ? m.q2.c : na, "m90 QR q2.c", display=display.data_window)
+plot(showDW ? float(m90_q1) : na, title="m90 q1Ts", display=display.data_window)
+plot(showDW ? float(m90_q2) : na, title="m90 q2Ts", display=display.data_window)
+plot(showDW ? float(m90_q3) : na, title="m90 q3Ts", display=display.data_window)
+plot(showDW ? float(m90_q4) : na, title="m90 q4Ts", display=display.data_window)
 
-plot(showStep2M90 ? float(f_hhmm(m.q2.oTs, cfg.tz)) : na, "m90 QR q2.oTs (HHMM)", display=display.data_window)
-plot(showStep2M90 ? float(f_hhmm(m.q2.hTs, cfg.tz)) : na, "m90 QR q2.hTs (HHMM)", display=display.data_window)
-plot(showStep2M90 ? float(f_hhmm(m.q2.lTs, cfg.tz)) : na, "m90 QR q2.lTs (HHMM)", display=display.data_window)
-plot(showStep2M90 ? float(f_hhmm(m.q2.cTs, cfg.tz)) : na, "m90 QR q2.cTs (HHMM)", display=display.data_window)
-
-plot(showStep2M90 ? (m.q2.isEmpty ? 1 : 0) : na, "m90 QR q2.isEmpty", display=display.data_window)
-plot(showStep2M90 ? (m.q2.has ? 1 : 0) : na, "m90 QR q2.has", display=display.data_window)
-plot(showStep2M90 ? (m.q2.isFinal ? 1 : 0) : na, "m90 QR q2.isFinal", display=display.data_window)
-plot(showStep2M90 ? (m.q2.evtStart ? 1 : 0) : na, "m90 QR q2.evtStart", display=display.data_window)
-plot(showStep2M90 ? (m.q2.evtFinalize ? 1 : 0) : na, "m90 QR q2.evtFinalize", display=display.data_window)
-
-bool m_anyStart    = m.q1.evtStart or m.q2.evtStart or m.q3.evtStart or m.q4.evtStart
-bool m_anyFinalize = m.q1.evtFinalize or m.q2.evtFinalize or m.q3.evtFinalize or m.q4.evtFinalize
-
-plot(showStep2M90 ? (m_anyStart ? 1 : 0) : na, "m90 anyStart", display=display.data_window)
-plot(showStep2M90 ? (m_anyFinalize ? 1 : 0) : na, "m90 anyFinalize", display=display.data_window)
+plot(showDW ? (m.q2Realized ? 1.0 : 0.0) : na, title="m90 q2Realized", display=display.data_window)
+plot(showDW ? (m.q3Realized ? 1.0 : 0.0) : na, title="m90 q3Realized", display=display.data_window)
+plot(showDW ? (m.q4Realized ? 1.0 : 0.0) : na, title="m90 q4Realized", display=display.data_window)
