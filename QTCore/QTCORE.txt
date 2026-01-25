@@ -221,12 +221,12 @@ f_finalize_and_roll(QuarterRecord qIn, QuarterRecord prev1In, QuarterRecord prev
         p1 := q
     [q, p1, p2]
 
-f_q_apply_bar(QuarterRecord qIn, int t, int tO, float o, float h, float l, float c, bool isStartBar) =>
+f_q_apply_bar(QuarterRecord qIn, int t, float o, float h, float l, float c, bool isStartBar) =>
     QuarterRecord q = qIn
 
     if not q.has
         q.o := o
-        q.oTs := tO
+        q.oTs := t
         q.h := h
         q.hTs := t
         q.l := l
@@ -267,32 +267,6 @@ f_q_idx_from_boundary(int boundaryTs, int q1Ts, int q2Ts, int q3Ts, int q4Ts) =>
     idx
 
 
-f_pick_open_from_aligned(string tfAligned, int boundaryTs, int t, int tClose, float oFallback) =>
-    // Returns the first lower-TF bar OPEN whose bar start time is >= boundaryTs
-    // Used only on quarter-start bars that straddle the boundary on a higher chart TF.
-    float oOut = oFallback
-    int   tOut = t
-
-    int curSec = timeframe.in_seconds(timeframe.period)
-    int aliSec = timeframe.in_seconds(tfAligned)
-    bool canLower = tfAligned != "" and not na(curSec) and not na(aliSec) and aliSec > 0 and curSec > aliSec
-    bool straddle = not na(boundaryTs) and (t < boundaryTs) and (tClose > boundaryTs)
-
-    if canLower and straddle
-        int[] tArr = request.security_lower_tf(syminfo.tickerid, tfAligned, time)
-        float[] oArr = request.security_lower_tf(syminfo.tickerid, tfAligned, open)
-        int n = array.size(tArr)
-        if n > 0
-            for i = 0 to n - 1
-                int ti = array.get(tArr, i)
-                if ti >= boundaryTs
-                    oOut := array.get(oArr, i)
-                    tOut := ti
-                    break
-
-    [oOut, tOut]
-
-
 f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
     // No mutation of input param: copy first, return the new array.
     int[] out = array.copy(startsIn)
@@ -310,7 +284,7 @@ f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
 // ============================================================================
 
 // CORE FIXED-CYCLE UPDATE (STEP 1: TIMESTAMPS ONLY)
-// - Used for Micro/Nano until Step 2 OHLC aggregation is enabled for them.
+// - Kept as a fallback (timestamps-only). All fixed cycles currently use Step 2.
 // - Produces boundaryTs + realized flags; QuarterRecord OHLC fields remain `na`.
 f_fixed_cycle_update_step1(FixedCycleState stIn, QTConfig cfg, int t, int tClose, int lenMs) =>
     // Anchor: use the session-day start (18:00 NY) as the base for all fixed cycles.
@@ -396,8 +370,7 @@ f_fixed_cycle_update(
     QTConfig cfg,
     int t,
     int tClose,
-    int lenMs,
-    string tfAligned
+    int lenMs
 ) =>
     int ds = f_qt_day_start(t, cfg)
 
@@ -570,28 +543,15 @@ f_fixed_cycle_update(
     if startEdge
         lastBoundary2 := qCurTs
 
-
-// Quarter Open source:
-// - default: chart-TF bar open/time
-// - if the quarter boundary lands inside this bar (straddle), use the first aligned lower-TF bar OPEN on/after the boundary.
-float oUse = open
-int   oTsUse = t
-if startEdge
-    float tmpO = na
-    int   tmpOTs = int(na)
-    [tmpO, tmpOTs] = f_pick_open_from_aligned(tfAligned, qCurTs, t, tClose, open)
-    oUse := tmpO
-    oTsUse := tmpOTs
-
     // Update active quarter OHLC on chart TF
     if qi == 1 and not q1.isFinal
-        q1 := f_q_apply_bar(q1, t, oTsUse, oUse, high, low, close, startEdge)
+        q1 := f_q_apply_bar(q1, t, open, high, low, close, startEdge)
     else if qi == 2 and not q2.isFinal
-        q2 := f_q_apply_bar(q2, t, oTsUse, oUse, high, low, close, startEdge)
+        q2 := f_q_apply_bar(q2, t, open, high, low, close, startEdge)
     else if qi == 3 and not q3.isFinal
-        q3 := f_q_apply_bar(q3, t, oTsUse, oUse, high, low, close, startEdge)
+        q3 := f_q_apply_bar(q3, t, open, high, low, close, startEdge)
     else if qi == 4 and not q4.isFinal
-        q4 := f_q_apply_bar(q4, t, oTsUse, oUse, high, low, close, startEdge)
+        q4 := f_q_apply_bar(q4, t, open, high, low, close, startEdge)
 
     FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2)
 
@@ -612,22 +572,22 @@ if startEdge
 // ============================================================================
 
 export qt_daily_update(CycleState st, QTConfig cfg, int t, int tClose) =>
-    [d2, r] = f_fixed_cycle_update(st.daily, cfg, t, tClose, LEN_24H, cfg.tfDaily)
+    [d2, r] = f_fixed_cycle_update(st.daily, cfg, t, tClose, LEN_24H)
     CycleState out = CycleState.new(d2, st.m90, st.micro, st.nano)
     [out, r]
 
 export qt_m90_update(CycleState st, QTConfig cfg, int t, int tClose) =>
-    [m2, r] = f_fixed_cycle_update(st.m90, cfg, t, tClose, LEN_6H, cfg.tfM90)
+    [m2, r] = f_fixed_cycle_update(st.m90, cfg, t, tClose, LEN_6H)
     CycleState out = CycleState.new(st.daily, m2, st.micro, st.nano)
     [out, r]
 
 export qt_micro_update(CycleState st, QTConfig cfg, int t, int tClose) =>
-    [u2, r] = f_fixed_cycle_update(st.micro, cfg, t, tClose, LEN_90M, cfg.tfMicro)
+    [u2, r] = f_fixed_cycle_update(st.micro, cfg, t, tClose, LEN_90M)
     CycleState out = CycleState.new(st.daily, st.m90, u2, st.nano)
     [out, r]
 
 export qt_nano_update(CycleState st, QTConfig cfg, int t, int tClose) =>
-    [n2, r] = f_fixed_cycle_update(st.nano, cfg, t, tClose, LEN_22M30S, cfg.tfNano)
+    [n2, r] = f_fixed_cycle_update(st.nano, cfg, t, tClose, LEN_22M30S)
     CycleState out = CycleState.new(st.daily, st.m90, st.micro, n2)
     [out, r]
 
@@ -635,6 +595,5 @@ export qt_nano_update(CycleState st, QTConfig cfg, int t, int tClose) =>
 // ============================================================================
 // FUTURE STEPS (NOT IMPLEMENTED YET)
 // - Tier B aligned-TF OHLC using request.security(..., lookahead_off)
-// - Optional lower-tf aggregation for full OHLC correctness (heavy; revisit later)
+// - Optional lower-tf aggregation for Micro/Nano correctness (heavy; revisit later)
 // ============================================================================
-
