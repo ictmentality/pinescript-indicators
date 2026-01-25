@@ -9,14 +9,25 @@ import Jaw1312/QTCore/6 as qt
 // Inputs
 // Nano Cycle — 4 quarters × 5 minutes 37.5 seconds each (22.5m total)
 // -----------------------------------------------------------------------------
-groupVis  = "Drawings"
-showNano  = input.bool(true,  "Draw Nano boundaries + projections (22m30s cycle; q=5m37.5s)", group=groupVis)
-showOpens = input.bool(false, "Open lines (Q1 + True Open)", group=groupVis)
-storeMax  = input.int(200, "Max stored realized boundary lines (Nano)", minval=10, maxval=500, group=groupVis)
+groupVis = "Drawings"
+showNano = input.bool(true, "Draw Nano quarter dividers (22m30s cycle; q=5m37.5s)", group=groupVis)
+storeMax = input.int(200, "Max stored realized boundary lines (Nano)", minval=10, maxval=500, group=groupVis)
 
 groupDW     = "Data Window"
 dwNanoStep1 = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
 dwNanoStep2 = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
+
+// -----------------------------------------------------------------------------
+// Color palette (from Old QT Indicator) + divider opacity rule
+// -----------------------------------------------------------------------------
+var color COL_Q1 = color.rgb(99, 99, 99)      // #636363
+var color COL_Q2 = color.rgb(242, 54, 69)     // #f23645
+var color COL_Q3 = color.rgb(76, 175, 80)     // #4caf50
+var color COL_Q4 = color.rgb(41, 98, 255)     // #2962ff
+
+var int V_TRANSP = 70
+f_vcol(color c) =>
+    color.new(c, V_TRANSP)
 
 // -----------------------------------------------------------------------------
 // Helpers (display-only)
@@ -27,24 +38,14 @@ f_hhmmss(int ts, string tz) =>
     int ss = second(ts, tz)
     float(hh * 10000 + mm * 100 + ss)
 
-f_qcol(int qi) =>
-    color c = color.new(color.gray, 0)
+f_qbase(int qi) =>
+    color c = COL_Q1
     if qi == 2
-        c := color.new(color.red, 0)
+        c := COL_Q2
     else if qi == 3
-        c := color.new(color.green, 0)
+        c := COL_Q3
     else if qi == 4
-        c := color.new(color.blue, 0)
-    c
-
-f_qcol_faint(int qi) =>
-    color c = color.new(color.gray, 80)
-    if qi == 2
-        c := color.new(color.red, 80)
-    else if qi == 3
-        c := color.new(color.green, 80)
-    else if qi == 4
-        c := color.new(color.blue, 80)
+        c := COL_Q4
     c
 
 f_qi_early(int tClose, int q2Ts, int q3Ts, int q4Ts) =>
@@ -57,9 +58,8 @@ f_qi_early(int tClose, int q2Ts, int q3Ts, int q4Ts) =>
         qi := 2
     qi
 
-// You cannot type-annotate enum params (line.style / line_style). Leave it untyped.
-f_vline_new(int ts, color col, sty) =>
-    line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, color=col, style=sty, width=1)
+f_vline_new(int ts, color baseCol) =>
+    line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, color=f_vcol(baseCol), style=line.style_solid, width=1)
 
 f_line_push(line[] arr, line ln, int maxN) =>
     array.push(arr, ln)
@@ -70,8 +70,8 @@ f_line_push(line[] arr, line ln, int maxN) =>
 // -----------------------------------------------------------------------------
 // QT Core update (Nano only)
 // -----------------------------------------------------------------------------
-var qt.QTConfig   cfg = qt.qt_config_default()
-var qt.CycleState st  = qt.qt_state_new()
+var qt.QTConfig  cfg = qt.qt_config_default()
+var qt.CycleState st = qt.qt_state_new()
 
 int t  = time
 int tc = time_close
@@ -136,7 +136,7 @@ plot(dwNanoStep2 ? (n.q4.has ? 1.0 : 0.0) : na, "Nano QR q4.has", display=displa
 plot(dwNanoStep2 ? (n.q4.isFinal ? 1.0 : 0.0) : na, "Nano QR q4.isFinal", display=display.data_window)
 
 // -----------------------------------------------------------------------------
-// Boundary drawings (realized vlines + dotted projections)
+// Vertical quarter dividers only (realized + projections)
 // -----------------------------------------------------------------------------
 int nQiE = f_qi_early(tc, n.q2Ts, n.q3Ts, n.q4Ts)
 
@@ -150,13 +150,13 @@ var line nProjQ3  = na
 var line nProjQ4  = na
 var line nProjEnd = na
 
-// projections (update every bar)
+// Projections (update every bar) — solid style, same opacity rule
 if showNano
     if na(nProjQ2)
-        nProjQ2  := f_vline_new(n.q2Ts, f_qcol_faint(2), line.style_dotted)
-        nProjQ3  := f_vline_new(n.q3Ts, f_qcol_faint(3), line.style_dotted)
-        nProjQ4  := f_vline_new(n.q4Ts, f_qcol_faint(4), line.style_dotted)
-        nProjEnd := f_vline_new(n.endTs, color.new(color.gray, 80), line.style_dotted)
+        nProjQ2  := f_vline_new(n.q2Ts, COL_Q2)
+        nProjQ3  := f_vline_new(n.q3Ts, COL_Q3)
+        nProjQ4  := f_vline_new(n.q4Ts, COL_Q4)
+        nProjEnd := f_vline_new(n.endTs, COL_Q1)
     else
         line.set_xy1(nProjQ2,  n.q2Ts,  low)
         line.set_xy2(nProjQ2,  n.q2Ts,  high)
@@ -177,49 +177,16 @@ else
         nProjQ4  := na
         nProjEnd := na
 
-// realized boundary events (early mode)
+// Realized boundary events (early mode)
 if showNano and n.inWindow
     int nCurB = nQiE == 1 ? n.q1Ts : nQiE == 2 ? n.q2Ts : nQiE == 3 ? n.q3Ts : n.q4Ts
     if na(nLastB)
         nLastB := nCurB
     else if nCurB != nLastB and tc > nCurB
         if nQiE > 1
-            f_line_push(nanoV, f_vline_new(nCurB, f_qcol(nQiE), line.style_solid), storeMax)
+            f_line_push(nanoV, f_vline_new(nCurB, f_qbase(nQiE)), storeMax)
         nLastB := nCurB
 
     if tc > n.endTs and (na(nLastEnd) or nLastEnd != n.endTs)
-        f_line_push(nanoV, f_vline_new(n.endTs, color.new(color.gray, 0), line.style_solid), storeMax)
+        f_line_push(nanoV, f_vline_new(n.endTs, COL_Q1), storeMax)
         nLastEnd := n.endTs
-
-// -----------------------------------------------------------------------------
-// Optional open lines (Q1 open + True Open) — display-only
-// -----------------------------------------------------------------------------
-var line nOpenQ1 = na
-var line nOpenTO = na
-
-if showOpens and showNano
-    float nO1 = n.q1.o
-    float nOT = n.q2.o
-
-    if not na(nO1)
-        int nX1 = na(n.q1.oTs) ? n.q1Ts : n.q1.oTs
-        if na(nOpenQ1)
-            nOpenQ1 := line.new(nX1, nO1, n.endTs, nO1, xloc=xloc.bar_time, extend=extend.right, color=f_qcol(1), width=1)
-        else
-            line.set_xy1(nOpenQ1, nX1, nO1)
-            line.set_xy2(nOpenQ1, n.endTs, nO1)
-
-    if not na(nOT)
-        int nX2 = na(n.q2.oTs) ? n.q2Ts : n.q2.oTs
-        if na(nOpenTO)
-            nOpenTO := line.new(nX2, nOT, n.endTs, nOT, xloc=xloc.bar_time, extend=extend.right, color=f_qcol(2), width=1)
-        else
-            line.set_xy1(nOpenTO, nX2, nOT)
-            line.set_xy2(nOpenTO, n.endTs, nOT)
-else
-    if not na(nOpenQ1)
-        line.delete(nOpenQ1)
-        nOpenQ1 := na
-    if not na(nOpenTO)
-        line.delete(nOpenTO)
-        nOpenTO := na

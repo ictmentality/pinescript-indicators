@@ -1,0 +1,192 @@
+//@version=6
+indicator("QTCore Test — Nano Only", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// paste the copied import line here:
+// import <you>/<QT Core>/<version> as qt
+import Jaw1312/QTCore/6 as qt
+
+// -----------------------------------------------------------------------------
+// Inputs
+// Nano Cycle — 4 quarters × 5 minutes 37.5 seconds each (22.5m total)
+// -----------------------------------------------------------------------------
+groupVis = "Drawings"
+showNano = input.bool(true, "Draw Nano quarter dividers (22m30s cycle; q=5m37.5s)", group=groupVis)
+storeMax = input.int(200, "Max stored realized boundary lines (Nano)", minval=10, maxval=500, group=groupVis)
+
+groupDW     = "Data Window"
+dwNanoStep1 = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
+dwNanoStep2 = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
+
+// -----------------------------------------------------------------------------
+// Color palette (from Old QT Indicator) + divider opacity rule
+// -----------------------------------------------------------------------------
+var color COL_Q1 = color.rgb(99, 99, 99)      // #636363
+var color COL_Q2 = color.rgb(242, 54, 69)     // #f23645
+var color COL_Q3 = color.rgb(76, 175, 80)     // #4caf50
+var color COL_Q4 = color.rgb(41, 98, 255)     // #2962ff
+
+var int V_TRANSP = 70
+f_vcol(color c) =>
+    color.new(c, V_TRANSP)
+
+// -----------------------------------------------------------------------------
+// Helpers (display-only)
+// -----------------------------------------------------------------------------
+f_hhmmss(int ts, string tz) =>
+    int hh = hour(ts, tz)
+    int mm = minute(ts, tz)
+    int ss = second(ts, tz)
+    float(hh * 10000 + mm * 100 + ss)
+
+f_qbase(int qi) =>
+    color c = COL_Q1
+    if qi == 2
+        c := COL_Q2
+    else if qi == 3
+        c := COL_Q3
+    else if qi == 4
+        c := COL_Q4
+    c
+
+f_qi_early(int tClose, int q2Ts, int q3Ts, int q4Ts) =>
+    int qi = 1
+    if tClose > q4Ts
+        qi := 4
+    else if tClose > q3Ts
+        qi := 3
+    else if tClose > q2Ts
+        qi := 2
+    qi
+
+f_vline_new(int ts, color baseCol) =>
+    line.new(ts, low, ts + 1, high, xloc=xloc.bar_time, extend=extend.both, color=f_vcol(baseCol), style=line.style_solid, width=1)
+
+f_line_push(line[] arr, line ln, int maxN) =>
+    array.push(arr, ln)
+    if array.size(arr) > maxN
+        line old = array.shift(arr)
+        line.delete(old)
+
+// -----------------------------------------------------------------------------
+// QT Core update (Nano only)
+// -----------------------------------------------------------------------------
+var qt.QTConfig  cfg = qt.qt_config_default()
+var qt.CycleState st = qt.qt_state_new()
+
+int t  = time
+int tc = time_close
+
+// ✅ Destructure WITHOUT type annotations
+[st2, n] = qt.qt_nano_update(st, cfg, t, tc)
+st := st2
+
+// -----------------------------------------------------------------------------
+// Data Window — Step 1: boundaryTs checks
+// -----------------------------------------------------------------------------
+plot(dwNanoStep1 ? n.q1Ts : na, "Nano q1Ts", display=display.data_window)
+plot(dwNanoStep1 ? n.q2Ts : na, "Nano q2Ts", display=display.data_window)
+plot(dwNanoStep1 ? n.q3Ts : na, "Nano q3Ts", display=display.data_window)
+plot(dwNanoStep1 ? n.q4Ts : na, "Nano q4Ts", display=display.data_window)
+plot(dwNanoStep1 ? (n.q2Realized ? 1.0 : 0.0) : na, "Nano q2Realized", display=display.data_window)
+plot(dwNanoStep1 ? (n.q3Realized ? 1.0 : 0.0) : na, "Nano q3Realized", display=display.data_window)
+plot(dwNanoStep1 ? (n.q4Realized ? 1.0 : 0.0) : na, "Nano q4Realized", display=display.data_window)
+
+// -----------------------------------------------------------------------------
+// Data Window — Step 2: QuarterRecord (minimal)
+// -----------------------------------------------------------------------------
+float n_q1_o_hhmmss = f_hhmmss(n.q1.oTs, cfg.tz)
+float n_q2_o_hhmmss = f_hhmmss(n.q2.oTs, cfg.tz)
+float n_q3_o_hhmmss = f_hhmmss(n.q3.oTs, cfg.tz)
+float n_q4_o_hhmmss = f_hhmmss(n.q4.oTs, cfg.tz)
+
+plot(dwNanoStep2 ? n.q1.o : na, "Nano QR q1.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q1.h : na, "Nano QR q1.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q1.l : na, "Nano QR q1.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q1.c : na, "Nano QR q1.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q1_o_hhmmss : na, "Nano QR q1.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? (n.q1.isEmpty ? 1.0 : 0.0) : na, "Nano QR q1.isEmpty", display=display.data_window)
+plot(dwNanoStep2 ? (n.q1.has ? 1.0 : 0.0) : na, "Nano QR q1.has", display=display.data_window)
+plot(dwNanoStep2 ? (n.q1.isFinal ? 1.0 : 0.0) : na, "Nano QR q1.isFinal", display=display.data_window)
+
+plot(dwNanoStep2 ? n.q2.o : na, "Nano QR q2.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q2.h : na, "Nano QR q2.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q2.l : na, "Nano QR q2.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q2.c : na, "Nano QR q2.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q2_o_hhmmss : na, "Nano QR q2.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? (n.q2.isEmpty ? 1.0 : 0.0) : na, "Nano QR q2.isEmpty", display=display.data_window)
+plot(dwNanoStep2 ? (n.q2.has ? 1.0 : 0.0) : na, "Nano QR q2.has", display=display.data_window)
+plot(dwNanoStep2 ? (n.q2.isFinal ? 1.0 : 0.0) : na, "Nano QR q2.isFinal", display=display.data_window)
+
+plot(dwNanoStep2 ? n.q3.o : na, "Nano QR q3.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q3.h : na, "Nano QR q3.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q3.l : na, "Nano QR q3.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q3.c : na, "Nano QR q3.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q3_o_hhmmss : na, "Nano QR q3.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? (n.q3.isEmpty ? 1.0 : 0.0) : na, "Nano QR q3.isEmpty", display=display.data_window)
+plot(dwNanoStep2 ? (n.q3.has ? 1.0 : 0.0) : na, "Nano QR q3.has", display=display.data_window)
+plot(dwNanoStep2 ? (n.q3.isFinal ? 1.0 : 0.0) : na, "Nano QR q3.isFinal", display=display.data_window)
+
+plot(dwNanoStep2 ? n.q4.o : na, "Nano QR q4.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q4.h : na, "Nano QR q4.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q4.l : na, "Nano QR q4.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? (n.q4.isEmpty ? 1.0 : 0.0) : na, "Nano QR q4.isEmpty", display=display.data_window)
+plot(dwNanoStep2 ? (n.q4.has ? 1.0 : 0.0) : na, "Nano QR q4.has", display=display.data_window)
+plot(dwNanoStep2 ? (n.q4.isFinal ? 1.0 : 0.0) : na, "Nano QR q4.isFinal", display=display.data_window)
+
+// -----------------------------------------------------------------------------
+// Vertical quarter dividers only (realized + projections)
+// -----------------------------------------------------------------------------
+int nQiE = f_qi_early(tc, n.q2Ts, n.q3Ts, n.q4Ts)
+
+var line[] nanoV = array.new_line()
+
+var int nLastB   = na
+var int nLastEnd = na
+
+var line nProjQ2  = na
+var line nProjQ3  = na
+var line nProjQ4  = na
+var line nProjEnd = na
+
+// Projections (update every bar) — solid style, same opacity rule
+if showNano
+    if na(nProjQ2)
+        nProjQ2  := f_vline_new(n.q2Ts, COL_Q2)
+        nProjQ3  := f_vline_new(n.q3Ts, COL_Q3)
+        nProjQ4  := f_vline_new(n.q4Ts, COL_Q4)
+        nProjEnd := f_vline_new(n.endTs, COL_Q1)
+    else
+        line.set_xy1(nProjQ2,  n.q2Ts,  low)
+        line.set_xy2(nProjQ2,  n.q2Ts + 1,  high)
+        line.set_xy1(nProjQ3,  n.q3Ts,  low)
+        line.set_xy2(nProjQ3,  n.q3Ts + 1,  high)
+        line.set_xy1(nProjQ4,  n.q4Ts,  low)
+        line.set_xy2(nProjQ4,  n.q4Ts + 1,  high)
+        line.set_xy1(nProjEnd, n.endTs, low)
+        line.set_xy2(nProjEnd, n.endTs + 1, high)
+else
+    if not na(nProjQ2)
+        line.delete(nProjQ2)
+        line.delete(nProjQ3)
+        line.delete(nProjQ4)
+        line.delete(nProjEnd)
+        nProjQ2  := na
+        nProjQ3  := na
+        nProjQ4  := na
+        nProjEnd := na
+
+// Realized boundary events (early mode)
+if showNano and n.inWindow
+    int nCurB = nQiE == 1 ? n.q1Ts : nQiE == 2 ? n.q2Ts : nQiE == 3 ? n.q3Ts : n.q4Ts
+    if na(nLastB)
+        nLastB := nCurB
+    else if nCurB != nLastB and tc > nCurB
+        if nQiE > 1
+            f_line_push(nanoV, f_vline_new(nCurB, f_qbase(nQiE)), storeMax)
+        nLastB := nCurB
+
+    if tc > n.endTs and (na(nLastEnd) or nLastEnd != n.endTs)
+        f_line_push(nanoV, f_vline_new(n.endTs, COL_Q1), storeMax)
+        nLastEnd := n.endTs

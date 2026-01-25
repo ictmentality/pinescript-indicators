@@ -1,0 +1,327 @@
+// @version=6
+indicator("GxT Alignment Setup [JAW]", overlay=true, max_labels_count=500)
+
+//=============================================================================
+// PURPOSE
+//-----------------------------------------------------------------------------
+// This script is the SEQUENCER for your GxT Alignment Setup.
+//
+// It is intentionally *not* the Key Level Detector.
+// - Detector (A): finds Swing/FVG levels across TFs, stores them, draws them.
+// - Sequencer (B): listens for "events" (purges / closures / confirmations),
+//   then enforces the step-by-step time & range windows.
+//
+// Pine limitation reminder:
+// - One indicator cannot directly read another indicator's internal arrays/objects.
+// - So this skeleton uses *stub event detectors* (and manual triggers) that you
+//   will later replace with shared library calls (recommended) or duplicated logic.
+//=============================================================================
+
+
+//=============================================================================
+// INPUTS
+//=============================================================================
+groupCore = "Core"
+bool enableSequencer = input.bool(true, "Enable Sequencer", group=groupCore)
+bool debugMode       = input.bool(true, "Debug: show labels", group=groupCore)
+
+// Your global time basis: NY 18:00 session-day
+groupTime = "Time Policy"
+int eligibleDays = input.int(60, "Eligibility: levels formed in last N session-days", minval=1, maxval=120, group=groupTime)
+
+// Manual test triggers (so you can test the step machine before detectors are final)
+groupManual = "Manual Test Triggers (temporary)"
+bool m_step1_fire = input.bool(false, "MANUAL: Fire Step 1 (Daily purge)", group=groupManual)
+bool m_step3_fire = input.bool(false, "MANUAL: Fire Step 3 (H4 purge)", group=groupManual)
+bool m_step4_fire = input.bool(false, "MANUAL: Fire Step 4 (H1/m30 C2 close)", group=groupManual)
+bool m_step5_fire = input.bool(false, "MANUAL: Fire Step 5 (m5/m3 confirmation)", group=groupManual)
+bool m_reset      = input.bool(false, "MANUAL: Reset scenario", group=groupManual)
+
+
+//=============================================================================
+// TIME HELPERS (NY 18:00 session-day clock)
+//-----------------------------------------------------------------------------
+// These helpers give you deterministic D indexing and window computations.
+// Use *time* / *time_close* anchors; never bar_index for event identities.
+//=============================================================================
+var int DAY_MS  = 24 * 60 * 60 * 1000
+var string TZ   = "America/New_York"
+var int EPOCH_SD = timestamp(TZ, 2000, 1, 1, 18, 0)  // stable epoch aligned to 18:00
+
+f_session_start(_t) =>
+    // Returns the session-day start timestamp for _t (NY 18:00 anchor).
+    int y  = year(_t, TZ)
+    int mo = month(_t, TZ)
+    int d  = dayofmonth(_t, TZ)
+    int candidate = timestamp(TZ, y, mo, d, 18, 0)
+    _t >= candidate ? candidate : (candidate - DAY_MS)
+
+D_index(_t) =>
+    // Integer session-day index since EPOCH_SD.
+    int(math.floor((f_session_start(_t) - EPOCH_SD) / DAY_MS))
+
+D_start(_d) =>
+    EPOCH_SD + _d * DAY_MS
+
+D_end(_d) =>
+    D_start(_d) + DAY_MS
+
+isBeforeNoonNY(_t) =>
+    // "Before 12:00 NY" constraint used in Step 3.
+    int y  = year(_t, TZ)
+    int mo = month(_t, TZ)
+    int d  = dayofmonth(_t, TZ)
+    _t < timestamp(TZ, y, mo, d, 12, 0)
+
+
+//=============================================================================
+// SMALL UTIL: convert a boolean input into a "one-shot" trigger edge
+//-----------------------------------------------------------------------------
+// Pine tip: ta.change(x) returns a series numeric delta (not bool).
+// Convert to bool by comparing to 0.
+//=============================================================================
+edge_from_toggle(flagBool) =>
+    bool on = flagBool
+    bool edge = (ta.change(on ? 1 : 0) != 0) and on
+    edge
+
+
+//=============================================================================
+// STEP CONSTANTS
+//=============================================================================
+var int ST_IDLE  = 0
+var int ST_S1    = 1  // Step 1 done: Daily purge captured, waiting Step 2 window
+var int ST_S2    = 2  // Step 2 window active, waiting Step 3 (H4 purge)
+var int ST_S3    = 3  // Step 3 done, waiting Step 4 (H1/m30 C2 close)
+var int ST_S4    = 4  // Step 4 done, waiting Step 5 (m5/m3 confirmation)
+var int ST_S5    = 5  // Step 5 done, waiting Step 6 (entry/stop/target)
+var int ST_DONE  = 6  // Step 6 done
+
+
+//=============================================================================
+// SCENARIO CONTEXT (persistent state)
+//=============================================================================
+var int   st = ST_IDLE
+
+// Step 1 (Daily purge) anchors:
+var bool  scenarioActive = false
+var string s1_levelId    = ""
+var float s1_levelPrice  = na
+var float s1_invalPrice  = na
+var int   s1_purgeTime   = na       // time_close when purge is realized
+var int   s1_D           = na       // session-day index of the purge
+
+// Step 2 window (Daily time filter): D+1 and D+2
+var int s2_winStart = na
+var int s2_winEnd   = na
+
+// Step 3 (H4 purge) anchors:
+var string s3_levelId    = ""
+var float  s3_levelPrice = na
+var float  s3_invalPrice = na       // H4 C2 invalidation (range window reference)
+var int    s3_purgeTime  = na
+
+// Step 4 (H1/m30 C2 close) anchors:
+var int s4_closeTime = na
+var float s4_invalPrice = na
+
+// Step 5 (m5/m3 confirmation) anchors:
+var int s5_confirmTime = na
+var string s5_confirmType = ""
+
+// Step 6 (trade plan)
+var float entryPrice  = na
+var float stopPrice   = na
+var float targetPrice = na
+
+
+//=============================================================================
+// EVENT DETECTORS — STUBS (replace later)
+//=============================================================================
+detectStep1DailyPurge() =>
+    // OUTPUT: [fired, levelId, levelPrice, invalPrice, purgeTime]
+    bool fired = edge_from_toggle(m_step1_fire)
+    string id = fired ? "DAILY_PURGE_ID" : ""
+    float lvl = fired ? close : na
+    float inv = fired ? (close - syminfo.mintick * 20.0) : na
+    int   t   = fired ? time_close : na
+    [fired, id, lvl, inv, t]
+
+detectStep3H4Purge() =>
+    // OUTPUT: [fired, levelId, levelPrice, invalPrice, purgeTime]
+    bool fired = edge_from_toggle(m_step3_fire)
+    string id = fired ? "H4_PURGE_ID" : ""
+    float lvl = fired ? close : na
+    float inv = fired ? (close + syminfo.mintick * 40.0) : na
+    int   t   = fired ? time_close : na
+    [fired, id, lvl, inv, t]
+
+detectStep4H1m30C2Close() =>
+    // OUTPUT: [fired, closeTime]
+    bool fired = edge_from_toggle(m_step4_fire)
+    int  t     = fired ? time_close : na
+    [fired, t]
+
+detectStep5LTFConfirm() =>
+    // OUTPUT: [fired, confirmTime, confirmType]
+    bool fired = edge_from_toggle(m_step5_fire)
+    int  t     = fired ? time_close : na
+    string k   = fired ? "REVERSAL_TYPE_A" : ""
+    [fired, t, k]
+
+
+//=============================================================================
+// WINDOW HELPERS
+//=============================================================================
+inStep2Window() =>
+    // Step 2 window = D(purge)+1 and D(purge)+2 (NY 18:00 session-days).
+    bool ok = (not na(s2_winStart)) and (not na(s2_winEnd)) and (time_close > s2_winStart) and (time_close <= s2_winEnd)
+    ok
+
+step3TimeConstraintOk(_t) =>
+    // "D C3 before 12:00" placeholder.
+    isBeforeNoonNY(_t)
+
+step3RangeConstraintOk(_price) =>
+    // Placeholder: enforce your "H4 C2 invalidation range window" rule here.
+    true
+
+
+//=============================================================================
+// RESET (manual)
+//=============================================================================
+// NOTE: In Pine v6, functions can't modify globals. Reset is performed inline in the FSM.
+
+
+//=============================================================================
+// MAIN STATE MACHINE (Steps 1–3 implemented; 4–6 scaffolded)
+//=============================================================================
+if enableSequencer
+    bool resetNow = edge_from_toggle(m_reset)
+    // Also reset if Step 2 window expires while waiting for Step 3
+    if (st == ST_S2) and (not inStep2Window())
+        resetNow := true
+
+    if resetNow
+        // Inline reset of all scenario state
+        st := ST_IDLE
+        scenarioActive := false
+
+        s1_levelId := ""
+        s1_levelPrice := na
+        s1_invalPrice := na
+        s1_purgeTime := na
+        s1_D := na
+
+        s2_winStart := na
+        s2_winEnd := na
+
+        s3_levelId := ""
+        s3_levelPrice := na
+        s3_invalPrice := na
+        s3_purgeTime := na
+
+        s4_closeTime := na
+        s4_invalPrice := na
+
+        s5_confirmTime := na
+        s5_confirmType := ""
+
+        entryPrice := na
+        stopPrice := na
+        targetPrice := na
+
+
+    // STEP 1 — Daily purge (Daily only for now)
+    if st == ST_IDLE
+        bool f1 = false
+        string id1 = ""
+        float lvl1 = na
+        float inv1 = na
+        int t1 = na
+        [f1, id1, lvl1, inv1, t1] := detectStep1DailyPurge()
+if f1
+            scenarioActive := true
+            s1_levelId := id1
+            s1_levelPrice := lvl1
+            s1_invalPrice := inv1
+            s1_purgeTime := t1
+            s1_D := D_index(t1)
+
+            // STEP 2 window: D+1..D+2 (full session-days)
+            int d1p1 = s1_D + 1
+            int d1p2 = s1_D + 2
+            s2_winStart := D_start(d1p1)
+            s2_winEnd   := D_end(d1p2)
+
+            st := ST_S1
+
+            if debugMode
+                label.new(time, close, "S1 ✔\nDaily purge captured", xloc=xloc.bar_time, style=label.style_label_up, textcolor=color.white)
+
+    // STEP 2 — time filter: "window active"
+    if st == ST_S1
+        if inStep2Window()
+            st := ST_S2
+            if debugMode
+                label.new(time, close, "S2 ✔\nWindow active (D+1..D+2)", xloc=xloc.bar_time, style=label.style_label_up, textcolor=color.white)
+
+    // STEP 3 — H4 purge (Swing H/L or FVG)
+    if st == ST_S2
+        if inStep2Window()
+            bool f3 = false
+            string id3 = ""
+            float lvl3 = na
+            float inv3 = na
+            int t3 = na
+            [f3, id3, lvl3, inv3, t3] := detectStep3H4Purge()
+            if f3
+                bool timeOk  = step3TimeConstraintOk(t3)
+                bool rangeOk = step3RangeConstraintOk(lvl3)
+
+                if timeOk and rangeOk
+                    s3_levelId := id3
+                    s3_levelPrice := lvl3
+                    s3_invalPrice := inv3
+                    s3_purgeTime := t3
+
+                    st := ST_S3
+
+                    if debugMode
+                        label.new(time, close, "S3 ✔\nH4 purge captured", xloc=xloc.bar_time, style=label.style_label_up, textcolor=color.white)
+                else
+                    if debugMode
+                        label.new(time, close, "S3 ✖\nH4 purge rejected", xloc=xloc.bar_time, style=label.style_label_down, textcolor=color.white)
+        else
+            // If window expires before Step 3, reset (strict model).
+            // reset handled by resetNow at top of FSM
+            if debugMode
+                label.new(time, close, "RESET\nStep 2 window expired", xloc=xloc.bar_time, style=label.style_label_down, textcolor=color.white)
+
+    // Steps 4–6 (placeholders)
+    // - st == ST_S3: wait for Step 4 (H1/m30 C2 close within H4 C3)
+    // - st == ST_S4: wait for Step 5 (m5/m3 confirmation within H1/m30 C3)
+    // - st == ST_S5: compute entry/stop/target (Step 6)
+
+
+//=============================================================================
+// DEBUG / STATUS
+//=============================================================================
+string stName =
+     st == ST_IDLE ? "IDLE" :
+     st == ST_S1   ? "S1_DONE_WAIT_S2" :
+     st == ST_S2   ? "S2_ACTIVE_WAIT_S3" :
+     st == ST_S3   ? "S3_DONE_WAIT_S4" :
+     st == ST_S4   ? "S4_DONE_WAIT_S5" :
+     st == ST_S5   ? "S5_DONE_WAIT_S6" :
+     st == ST_DONE ? "DONE" : "UNKNOWN"
+
+plotchar(debugMode ? (st != ST_IDLE) : false, title="Scenario Active", char="●", location=location.top)
+plotchar(debugMode ? inStep2Window() : false, title="In Step 2 Window", char="W", location=location.top)
+
+// One small state label that refreshes each bar (delete previous).
+var label stLbl = na
+if debugMode
+    if not na(stLbl)
+        label.delete(stLbl)
+    stLbl := label.new(time, close, "STATE: " + stName, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.white)
