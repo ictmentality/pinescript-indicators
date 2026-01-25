@@ -1,0 +1,320 @@
+//@version=6
+indicator("QTCore Test — Nano Only", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// paste the copied import line here:
+// import <you>/<QT Core>/<version> as qt
+import Jaw1312/QTCore/6 as qt
+
+// -----------------------------------------------------------------------------
+// Inputs
+// Nano Cycle — 4 quarters × 5 minutes 37.5 seconds each (22.5m total)
+// -----------------------------------------------------------------------------
+groupVis = "Drawings"
+showNano = input.bool(true, "Draw Nano quarter dividers (22m30s cycle; q=5m37.5s)", group=groupVis)
+keepCycles = input.int(50, "Cycles to display (Nano)", minval=1, maxval=200, group=groupVis)
+
+groupOp = "Open Lines"
+showOpens = input.bool(true, "Draw quarter open lines (Q1–Q4) to cycle end", group=groupOp)
+
+q1OpenCol = input.color(color.rgb(255, 152, 0), "Q1 Open color", group=groupOp)
+q2OpenCol = input.color(color.rgb(0, 0, 0), "Q2 Open / True Open color", group=groupOp)
+q3OpenCol = input.color(color.rgb(76, 175, 80), "Q3 Open color", group=groupOp)
+q4OpenCol = input.color(color.rgb(41, 98, 255), "Q4 Open color", group=groupOp)
+
+q1OpenStyleStr = input.string("Solid", "Q1 Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
+q2OpenStyleStr = input.string("Solid", "Q2 Open / True Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
+q3OpenStyleStr = input.string("Solid", "Q3 Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
+q4OpenStyleStr = input.string("Solid", "Q4 Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
+
+groupDW     = "Data Window"
+dwNanoStep1 = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
+dwNanoStep2 = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
+
+// -----------------------------------------------------------------------------
+// Color palette (Old QT Indicator) + divider opacity rule
+// -----------------------------------------------------------------------------
+var color COL_Q1 = color.rgb(99, 99, 99)      // #636363
+var color COL_Q2 = color.rgb(242, 54, 69)     // #f23645
+var color COL_Q3 = color.rgb(76, 175, 80)     // #4caf50
+var color COL_Q4 = color.rgb(41, 98, 255)     // #2962ff
+
+var int V_TRANSP = 70
+f_vcol(color c) =>
+    color.new(c, V_TRANSP)
+
+// -----------------------------------------------------------------------------
+// QTIndicator-style drawing management helpers
+// -----------------------------------------------------------------------------
+f_clamp_int(int x, int lo, int hi) =>
+    math.max(lo, math.min(hi, x))
+
+f_push_unique_int(int[] a, int v, int maxSize) =>
+    if array.size(a) == 0 or array.get(a, array.size(a) - 1) != v
+        array.push(a, v)
+        while array.size(a) > maxSize
+            array.shift(a)
+    0
+
+var int STORE_MAX = 2400
+var int[] nanoStarts = array.new_int()
+
+
+// -----------------------------------------------------------------------------
+// Helpers (display-only)
+// -----------------------------------------------------------------------------
+f_hhmmss(int ts, string tz) =>
+    int hh = hour(ts, tz)
+    int mm = minute(ts, tz)
+    int ss = second(ts, tz)
+    float(hh * 10000 + mm * 100 + ss)
+
+lineStyleFrom(string s) =>
+    sty = line.style_dotted
+    if s == "Solid"
+        sty := line.style_solid
+    else if s == "Dashed"
+        sty := line.style_dashed
+    else
+        sty := line.style_dotted
+    sty
+// -----------------------------------------------------------------------------
+// Old-QT line storage + projection helpers (vertical-only)
+// -----------------------------------------------------------------------------
+type vset
+    line[] ln
+    int[]  ts
+
+vset_new() =>
+    vset.new(array.new_line(), array.new_int())
+
+vset_clear(vset s) =>
+    int i = array.size(s.ln) - 1
+    while i >= 0
+        line.delete(array.get(s.ln, i))
+        i -= 1
+    array.clear(s.ln)
+    array.clear(s.ts)
+    0
+
+vset_trim_since(vset s, int cutoff) =>
+    int i = array.size(s.ts) - 1
+    while i >= 0
+        if array.get(s.ts, i) < cutoff
+            line.delete(array.get(s.ln, i))
+            array.remove(s.ln, i)
+            array.remove(s.ts, i)
+        i -= 1
+    0
+
+
+vset_has(vset s, int ts) =>
+    bool found = false
+    int i = array.size(s.ts) - 1
+    while i >= 0 and not found
+        found := array.get(s.ts, i) == ts
+        i -= 1
+    found
+
+vset_add(vset s, int ts, color c) =>
+    if not vset_has(s, ts)
+        array.push(s.ln, line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c)))
+        array.push(s.ts, ts)
+    0
+
+f_set_or_make_vline(line ln, int ts, color c) =>
+    line out = ln
+    if na(out)
+        out := line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c))
+    else
+        line.set_xy1(out, ts, low)
+        line.set_xy2(out, ts, high)
+        line.set_style(out, line.style_solid)
+        line.set_width(out, 1)
+        line.set_color(out, f_vcol(c))
+    out
+
+f_set_or_make_hline(line ln, int x1, int x2, float y, color c, sty) =>
+    line out = ln
+    if na(out)
+        out := line.new(x1, y, x2, y, xloc=xloc.bar_time, extend=extend.none, style=sty, width=1, color=c)
+    else
+        line.set_xy1(out, x1, y)
+        line.set_xy2(out, x2, y)
+        line.set_extend(out, extend.none)
+        line.set_style(out, sty)
+        line.set_width(out, 1)
+        line.set_color(out, c)
+    out
+
+f_kill(line ln) =>
+    line out = na
+    if not na(ln)
+        line.delete(ln)
+    out
+
+// -----------------------------------------------------------------------------
+// QT Core update (Nano only)
+// -----------------------------------------------------------------------------
+var qt.QTConfig   cfg = qt.qt_config_default()
+var qt.CycleState st  = qt.qt_state_new()
+
+int t  = time
+int tc = time_close
+
+[st2, n] = qt.qt_nano_update(st, cfg, t, tc)
+st := st2
+
+// -----------------------------------------------------------------------------
+// Data Window — Step 1: boundaryTs checks
+// -----------------------------------------------------------------------------
+plot(dwNanoStep1 ? n.q1Ts : na, "Nano q1Ts", display=display.data_window)
+plot(dwNanoStep1 ? n.q2Ts : na, "Nano q2Ts", display=display.data_window)
+plot(dwNanoStep1 ? n.q3Ts : na, "Nano q3Ts", display=display.data_window)
+plot(dwNanoStep1 ? n.q4Ts : na, "Nano q4Ts", display=display.data_window)
+plot(dwNanoStep1 ? (n.q2Realized ? 1.0 : 0.0) : na, "Nano q2Realized", display=display.data_window)
+plot(dwNanoStep1 ? (n.q3Realized ? 1.0 : 0.0) : na, "Nano q3Realized", display=display.data_window)
+plot(dwNanoStep1 ? (n.q4Realized ? 1.0 : 0.0) : na, "Nano q4Realized", display=display.data_window)
+
+// -----------------------------------------------------------------------------
+// Data Window — Step 2: QuarterRecord (minimal)
+// -----------------------------------------------------------------------------
+float n_q1_o_hhmmss = f_hhmmss(n.q1.oTs, cfg.tz)
+float n_q2_o_hhmmss = f_hhmmss(n.q2.oTs, cfg.tz)
+float n_q3_o_hhmmss = f_hhmmss(n.q3.oTs, cfg.tz)
+float n_q4_o_hhmmss = f_hhmmss(n.q4.oTs, cfg.tz)
+
+plot(dwNanoStep2 ? n.q1.o : na, "Nano QR q1.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q1.h : na, "Nano QR q1.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q1.l : na, "Nano QR q1.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q1.c : na, "Nano QR q1.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q1_o_hhmmss : na, "Nano QR q1.oTs (HHMMSS)", display=display.data_window)
+
+plot(dwNanoStep2 ? n.q2.o : na, "Nano QR q2.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q2.h : na, "Nano QR q2.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q2.l : na, "Nano QR q2.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q2.c : na, "Nano QR q2.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q2_o_hhmmss : na, "Nano QR q2.oTs (HHMMSS)", display=display.data_window)
+
+plot(dwNanoStep2 ? n.q3.o : na, "Nano QR q3.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q3.h : na, "Nano QR q3.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q3.l : na, "Nano QR q3.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q3.c : na, "Nano QR q3.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q3_o_hhmmss : na, "Nano QR q3.oTs (HHMMSS)", display=display.data_window)
+
+plot(dwNanoStep2 ? n.q4.o : na, "Nano QR q4.o", display=display.data_window)
+plot(dwNanoStep2 ? n.q4.h : na, "Nano QR q4.h", display=display.data_window)
+plot(dwNanoStep2 ? n.q4.l : na, "Nano QR q4.l", display=display.data_window)
+plot(dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.data_window)
+plot(dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
+
+// -----------------------------------------------------------------------------
+// Vertical quarter dividers (realized + projections) — Old QT draw model,
+// but boundary timestamps come from QTCore (n.q1Ts/q2Ts/q3Ts/q4Ts/endTs).
+// -----------------------------------------------------------------------------
+var vset nanoV = vset_new()
+
+var line projQ2  = na
+var line projQ3  = na
+var line projQ4  = na
+var line projEnd = na
+
+if not showNano
+    if array.size(nanoV.ln) > 0
+        vset_clear(nanoV)
+
+    projQ2  := f_kill(projQ2)
+    projQ3  := f_kill(projQ3)
+    projQ4  := f_kill(projQ4)
+    projEnd := f_kill(projEnd)
+else
+    // Projections (future boundaries only; killed once passed)
+    if not na(n.q2Ts)
+        projQ2 := tc > n.q2Ts ? f_kill(projQ2) : f_set_or_make_vline(projQ2, n.q2Ts, COL_Q2)
+    if not na(n.q3Ts)
+        projQ3 := tc > n.q3Ts ? f_kill(projQ3) : f_set_or_make_vline(projQ3, n.q3Ts, COL_Q3)
+    if not na(n.q4Ts)
+        projQ4 := tc > n.q4Ts ? f_kill(projQ4) : f_set_or_make_vline(projQ4, n.q4Ts, COL_Q4)
+
+    // End projection always visible for the active cycle
+    if not na(n.endTs)
+        projEnd := f_set_or_make_vline(projEnd, n.endTs, COL_Q1)
+
+    // Track printed cycle starts + compute cutoff window (QTIndicator model)
+    if n.inWindow and not na(n.q1Ts)
+        f_push_unique_int(nanoStarts, n.q1Ts, STORE_MAX)
+
+    int keepEff = showOpens ? f_clamp_int(keepCycles, 1, 98) : f_clamp_int(keepCycles, 1, 99)
+
+    int cutoff = na(n.q1Ts) ? 0 : n.q1Ts
+    int nAvail = array.size(nanoStarts)
+    int nUse   = math.min(keepEff, nAvail)
+    int first  = nAvail - nUse
+    if nUse > 0
+        cutoff := array.get(nanoStarts, first)
+
+    // Trim realized divider set to cutoff window
+    vset_trim_since(nanoV, cutoff)
+
+
+    // Realized dividers (persist via vset; windowed by keepCycles)
+    if n.inWindow
+        if not na(n.q1Ts) and tc > n.q1Ts
+            vset_add(nanoV, n.q1Ts, COL_Q1)
+        if not na(n.q2Ts) and tc > n.q2Ts
+            vset_add(nanoV, n.q2Ts, COL_Q2)
+        if not na(n.q3Ts) and tc > n.q3Ts
+            vset_add(nanoV, n.q3Ts, COL_Q3)
+        if not na(n.q4Ts) and tc > n.q4Ts
+            vset_add(nanoV, n.q4Ts, COL_Q4)
+
+        // Only persist cycle-end once it’s actually passed
+        if not na(n.endTs) and tc > n.endTs
+            vset_add(nanoV, n.endTs, COL_Q1)
+
+// -----------------------------------------------------------------------------
+// Quarter open lines (Q1–Q4), each extending to the end of the current cycle
+// -----------------------------------------------------------------------------
+var line oQ1 = na
+var line oQ2 = na
+var line oQ3 = na
+var line oQ4 = na
+
+if (not showNano) or (not showOpens)
+    oQ1 := f_kill(oQ1)
+    oQ2 := f_kill(oQ2)
+    oQ3 := f_kill(oQ3)
+    oQ4 := f_kill(oQ4)
+else
+    int endTs = n.endTs
+
+    // Q1 Open
+    float y1 = n.q1.o
+    int x1 = na(n.q1.oTs) ? n.q1Ts : n.q1.oTs
+    if not na(y1) and not na(x1) and not na(endTs)
+        oQ1 := f_set_or_make_hline(oQ1, x1, endTs, y1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+    else
+        oQ1 := f_kill(oQ1)
+
+    // Q2 Open / True Open
+    float y2 = n.q2.o
+    int x2 = na(n.q2.oTs) ? n.q2Ts : n.q2.oTs
+    if tc > n.q2Ts and not na(y2) and not na(x2) and not na(endTs)
+        oQ2 := f_set_or_make_hline(oQ2, x2, endTs, y2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+    else
+        oQ2 := f_kill(oQ2)
+
+    // Q3 Open
+    float y3 = n.q3.o
+    int x3 = na(n.q3.oTs) ? n.q3Ts : n.q3.oTs
+    if tc > n.q3Ts and not na(y3) and not na(x3) and not na(endTs)
+        oQ3 := f_set_or_make_hline(oQ3, x3, endTs, y3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+    else
+        oQ3 := f_kill(oQ3)
+
+    // Q4 Open
+    float y4 = n.q4.o
+    int x4 = na(n.q4.oTs) ? n.q4Ts : n.q4.oTs
+    if tc > n.q4Ts and not na(y4) and not na(x4) and not na(endTs)
+        oQ4 := f_set_or_make_hline(oQ4, x4, endTs, y4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+    else
+        oQ4 := f_kill(oQ4)

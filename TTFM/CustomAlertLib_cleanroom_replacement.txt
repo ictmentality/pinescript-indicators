@@ -1,0 +1,65 @@
+=== INLINE HELPER (paste into your indicator) ===
+
+// CustomAlertLib (clean-room replacement)
+//
+// Purpose: drop-in replacement for mindyourbuisness/CustomAlertLib/3 usage in scripts.
+// This does NOT contain the original author's source code; it reimplements the described behavior:
+// customAlert(format, message, freq) -> formats a string with placeholders and triggers alert().
+//
+// How to use (inline):
+// 1) Delete/comment out: import mindyourbuisness/CustomAlertLib/3 as CAL
+// 2) Paste this block anywhere ABOVE your first callsite
+// 3) Replace CAL.customAlert(...) with customAlert(...)
+
+customAlert(string format, string message, string freq = "once_per_bar_close") =>
+    // Placeholder substitution (extend as needed)
+    string out = format
+    out := str.replace_all(out, "{ticker}", syminfo.ticker)
+    out := str.replace_all(out, "{interval}", timeframe.period)
+    out := str.replace_all(out, "{default}", message)
+    out := str.replace_all(out, "{tickerid}", syminfo.tickerid)
+    out := str.replace_all(out, "{exchange}", syminfo.prefix)
+
+    // Map string -> Pine alert frequency enum
+    alert_freq = alert.freq_once_per_bar_close
+    if freq == "once_per_bar"
+        alert_freq := alert.freq_once_per_bar
+    else if freq == "all"
+        alert_freq := alert.freq_all
+    else
+        // default: once_per_bar_close
+        alert_freq := alert.freq_once_per_bar_close
+
+    alert(out, alert_freq)
+
+
+=== LIBRARY VERSION (publish to import) ===
+
+//@version=6
+// CustomAlertLib (clean-room replacement)
+//
+// Purpose: functional stand-in for mindyourbuisness/CustomAlertLib/3.
+// This does NOT contain the original author's source code; it reimplements the described behavior:
+// export customAlert(format, message, freq) -> formats a string with placeholders and triggers alert().
+//
+// Note: To import this as a library, you'd need to publish it as a Pine Library in TradingView.
+
+library("CustomAlertLib_cleanroom", overlay=false)
+
+export customAlert(string format, string message, string freq = "once_per_bar_close") =>
+    string out = format
+    out := str.replace_all(out, "{ticker}", syminfo.ticker)
+    out := str.replace_all(out, "{interval}", timeframe.period)
+    out := str.replace_all(out, "{default}", message)
+    out := str.replace_all(out, "{tickerid}", syminfo.tickerid)
+    out := str.replace_all(out, "{exchange}", syminfo.prefix)
+
+    alert_freq = alert.freq_once_per_bar_close
+    if freq == "once_per_bar"
+        alert_freq := alert.freq_once_per_bar
+    else if freq == "all"
+        alert_freq := alert.freq_all
+    else
+        alert_freq := alert.freq_once_per_bar_close
+
+    alert(out, alert_freq)
