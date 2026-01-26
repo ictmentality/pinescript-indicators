@@ -1,0 +1,3671 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ENIGMA_001
+
+//@version=6
+indicator("QT [✦]", shorttitle="QT [✦] Ultimate+", overlay=true, 
+          max_boxes_count=500, max_labels_count=500, max_lines_count=500, 
+          max_bars_back=5000, dynamic_requests=true)
+
+// ============================================
+//  QT(SSMT/TPD/PSP)
+// ============================================
+////Triad Assets
+tr1B = true, st4 = "OANDA:XAUUSD", st5 = "OANDA:XAGUSD", st6 = "OANDA:XPTUSD"
+tr1C = true, st7 = "BINANCE:BTCUSDT.P", st8 = "BINANCE:ETHUSDT.P", st9 = "BINANCE:ADAUSDT.P"
+tr1D = true, st10 = "CME_MINI:MNQ1!", st11 = "CME_MINI:MES1!", st12 = "CBOT_MINI:MYM1!"
+tr1E = true, st13 = "FOREXCOM:EURUSD", st14 = "FOREXCOM:GBPUSD", st15 = "FOREXCOM:AUDUSD"
+tr1F = true, st16 = "CAPITALCOM:NAS100", st17 = "CAPITALCOM:US500", st18 = "CAPITALCOM:US30"
+tr1G = true, st19 = "COMEX:GC1!", st20 = "COMEX:SI1!", st21 = "NYMEX:PL1!"
+// Hidden Hardcoded Pairs for Auto Mode (Not visible in Settings)
+s1 = "CAPITALCOM:US100", s2 = "CAPITALCOM:US500"
+s3 = "OANDA:XAUUSD",      s4 = "OANDA:XAGUSD"
+s5 = "FOREXCOM:EURUSD",   s6 = "FOREXCOM:GBPUSD"
+s7 = "BINANCE:BTCUSDT.P",s8 = "BINANCE:ETHUSDT.P"
+s9 = "CME_MINI:MNQ1!", s10 = "CME_MINI:MES1!"
+s11 = "COMEX:GC1!", s12 = "COMEX:SI1!"
+//------------------------------------------------------------------------------
+//Settings
+g0 = "Visibility settings "
+g2 = "TPD" 
+g3 = "Alerts"
+g6 = "SSMTs on chart"
+mdl1 = "Auto"
+mdl2 = "Custom"
+
+// --- STACKED VISIBILITY SETTINGS ---
+// Row 1: Calculation Mode
+modeltype   = input.string(mdl1, "Calculation Mode", options=[mdl1, mdl2], group=g0, inline="v1", tooltip="Controls visibility logic based on timeframe.\n\nMicro: 1-2m\n90m: 3m-10m\nDaily: 15-30m\nWeekly: 1h-12h\nEffect => Visibility")
+
+// Row 2: Display Type
+alerttype   = input.string("All", "Display Type  ", options=["All", "Normal", "Hidden"], group=g0, inline="v2", tooltip="Filter to show specific divergence types.\nEffect => Visibility and Alerts")
+
+// Row 3: Label Format
+lblfrmt     = input.string("Symbol Name", "Label Format  ", options=["Symbol Name"], group=g0, inline="v3")
+
+// Row 4: Font Styling (Stacked aesthetic)
+i_font      = input.string("tiny", "Text Size   ", options=["tiny", "small", "normal", "large", "huge"], group=g0, inline="font")
+monospaced  = input.bool(false, "Monospaced", group=g0, inline="font")
+
+// Reverted to hardcoded strings for logic (Time Gating Removed)
+botm        = "1"
+topm        = "2"
+botN        = "3"
+topN        = "10"
+botD        = "15"
+topD        = "30"
+botW        = "60"
+topW        = "720"
+botMo       = "240"
+topMo       = "10080"
+
+// FONT LOGIC
+target_font = monospaced ? font.family_monospace : font.family_default
+
+i_bgcolor   = color.rgb(178, 181, 190, 50)
+i_textcolor = color.black
+
+// ============================================
+// INFO TABLE SETTINGS
+// ============================================
+g_tbl = "INFO TABLE"
+
+// Row 1: Main Toggles
+show_info_table  = input.bool(true, "Show Table", group=g_tbl, inline="row1")
+table_border_on  = input.bool(false, "Border", group=g_tbl, inline="row1")
+show_ssmt_status = input.bool(true, "Show Status", group=g_tbl, inline="row1", tooltip="Shows Mode (Auto/Manual) and Type (Triad/Dyad)")
+
+// Row 2: Appearance
+table_pos_input  = input.string("Top Right", "Pos", options=["Top Right", "Top Left", "Bottom Right", "Bottom Left"], group=g_tbl, inline="row2")
+table_size_input = input.string("small", "Size", options=["tiny", "small", "normal", "large"], group=g_tbl, inline="row2")
+
+// Row 3: Data Rows
+show_tf_row      = input.bool(true, "Chart TF", group=g_tbl, inline="row3")
+show_timer_row   = input.bool(true, "Timer", group=g_tbl, inline="row3")
+
+// Row 4: Colors
+tbl_txt_color    = input.color(color.white, "Text", group=g_tbl, inline="row4")
+tbl_bg_color     = input.color(color.new(color.black, 50), "Background", group=g_tbl, inline="row4")
+
+///////////////////////////////////////////////////////////////////////////////////////////
+hidelines  = input.bool(defval=false,title=  "Hide lines",inline="00",group = g6)
+ssmt_history_limit = input.int(50, "SSMT History Limit", minval = 1, maxval = 100, group = g6, tooltip="Controls the maximum number of Normal and Hidden SSMT lines/labels to show.")
+hidelabels = input.bool(defval=false,title=  "Hide labels",inline="00",group = g6)
+show_smtMo = input.bool(defval=true ,title=  "Normal Monthly " ,inline="m0",group = g6)
+show_smtW  = input.bool(defval=true ,title=  "Normal Weekly " ,inline="0",group = g6)
+show_smtD  = input.bool(defval=true ,title=  "Normal Daily   ",inline="1",group = g6)
+show_smtN  = input.bool(defval=true ,title=  "Normal 90m    " ,inline="2",group = g6)
+show_smtm  = input.bool(defval=true ,title=  "Normal Micro  " ,inline="3",group = g6)
+smtMo_clr  = input.color(color.orange, title  = "N",inline="m0",group= g6)
+smtW_clr   = input.color(color.blue  , title  = "N",inline="0",group= g6)
+smtD_clr   = input.color(color.black , title  = "N",inline="1",group= g6)
+smtN_clr   = input.color(color.purple, title  = "N",inline="2",group= g6)
+smtm_clr   = input.color(color.navy  , title  = "N",inline="3",group= g6)
+show_hsmtMo = input.bool(defval=true ,title=  "Hidden Monthly " ,inline="m0",group = g6)
+show_hsmtW  = input.bool(defval=true ,title=  "Hidden Weekly " ,inline="0",group = g6)
+show_hsmtD  = input.bool(defval=true ,title=  "Hidden Daily   ",inline="1",group = g6)
+show_hsmtN  = input.bool(defval=true ,title=  "Hidden 90m    " ,inline="2",group = g6)
+show_hsmtm  = input.bool(defval=true ,title=  "Hidden Micro  " ,inline="3",group = g6)
+hsmtMo_clr = input.color(color.new(#f23645,0), title  = "H",inline="m0",group= g6)
+hsmtW_clr  = input.color(color.new(#00bcd4,0)  , title  = "H",inline="0",group= g6)
+hsmtD_clr  = input.color(color.new(#808080,0) , title  = "H",inline="1",group= g6)
+hsmtN_clr  = input.color(color.new(#f06292,0), title  = "H",inline="2",group= g6)
+hsmtm_clr  = input.color(color.new(#006064,0)  , title  = "H",inline="3",group= g6)
+smt_txt_all = input.color(color.black, title = "SSMT Text Color", group=g6)
+normstyle  = input.string(line.style_solid ,title="Normal SSMT line style",options=[line.style_solid,line.style_dotted,line.style_dashed],group = g6)
+hiddstyle  = input.string(line.style_dashed,title="Hidden SSMT line style",options=[line.style_solid,line.style_dotted,line.style_dashed],group = g6)
+////////////////////////////
+// ============================================
+// TPD SETTINGS
+// ============================================
+// Row 1: HTF 1
+tf1ok = input.bool(true, "HTF 1  ", inline="tpd_1", group=g2)
+tf1   = input.timeframe("240", "",   inline="tpd_1", group=g2)
+
+// Row 2: HTF 2
+tf2ok = input.bool(true, "HTF 2  ", inline="tpd_2", group=g2)
+tf2   = input.timeframe("60", "",    inline="tpd_2", group=g2)
+
+// Row 3: HTF 3
+tf3ok = input.bool(true, "HTF 3  ", inline="tpd_3", group=g2)
+tf3   = input.timeframe("15", "",    inline="tpd_3", group=g2)
+
+// Row 4: Current TF
+tf0ok = input.bool(false, "Use Current Timeframe", group=g2)
+
+//////////////////////////////////////////////////////////
+Mobu = "M Bull SSMT" , Mobe = "M Bear SSMT"
+Wbu = "W Bull SSMT" ,  Wbe = "W Bear SSMT" 
+Dbu = "D Bull SSMT"  , Dbe = "D Bear SSMT"
+Nbu = "90m Bull SSMT", Nbe = "90m Bear SSMT"
+mbu = "Mic Bull SSMT", mbe = "Mic Bear SSMT"
+//////////////////////////////////////////////////
+tf1bu = "Tf1 Bull TPD" , tf1be = "Tf1 Bear TPD"
+tf2bu = "Tf2 Bull TPD" , tf2be = "Tf2 Bear TPD"
+tf3bu = "Tf3 Bull TPD" , tf3be = "Tf3 Bear TPD"
+///////////////////////////////////////////////////
+
+//////////////////////////////////////////////////
+
+
+al1ok = input.bool(defval=true,title="",inline= "al1",group = g3)
+al2ok = input.bool(defval=true,title="",inline= "al2",group = g3)
+al3ok = input.bool(defval=true,title="",inline= "al3",group = g3)
+al4ok = input.bool(defval=true,title="",inline= "al4",group = g3)
+
+al_con1 = input.string(defval= "W Bull SSMT", title= "1",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al1",group = g3)
+al_con2 = input.string(defval= "Tf2 Bull TPD", title= "2",options=[tf1bu,tf1be,tf2bu,tf2be,tf3bu,tf3be,"none"],inline="al1",group = g3)
+al_con3 = input.string(defval= "90m Bull SSMT", title= "3",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al1",group = g3)
+
+bl_con1 = input.string(defval= "W Bear SSMT", title= "1",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al2",group = g3)
+bl_con2 = input.string(defval= "Tf2 Bear TPD", title= "2",options=[tf1bu,tf1be,tf2bu,tf2be,tf3bu,tf3be,"none"],inline="al2",group = g3)
+bl_con3 = input.string(defval= "90m Bear SSMT", title= "3",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al2",group = g3)
+
+cl_con1 = input.string(defval= "D Bull SSMT", title= "1",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al3",group = g3)
+cl_con2 = input.string(defval= "Tf3 Bull TPD", title= "2",options=[tf1bu,tf1be,tf2bu,tf2be,tf3bu,tf3be,"none"],inline="al3",group = g3)
+cl_con3 = input.string(defval= "Mic Bull SSMT", title= "3",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al3",group = g3)
+
+dl_con1 = input.string(defval= "D Bear SSMT", title= "1",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al4",group = g3)
+dl_con2 = input.string(defval= "Tf3 Bear TPD", title= "2",options=[tf1bu,tf1be,tf2bu,tf2be,tf3bu,tf3be,"none"],inline="al4",group = g3)
+dl_con3 = input.string(defval= "Mic Bear SSMT", title= "3",options=[Mobu,Mobe,Wbu,Wbe,Dbu,Dbe,Nbu,Nbe,mbu,mbe,"none"],inline="al4",group = g3)
+
+// HTF Candle Variables (Hardcoded constants for SMT offsets and PSP Labels)
+// These replace the deleted inputs to prevent logic errors.
+bull_clr    = color.new(color.teal,0)
+bear_clr    = color.new(color.red,0)
+dx          = 10
+
+
+//Correlated pairs
+g11 = "Triad"
+triad_selection_mode = input.string("Auto", "Triad Selection", options = ["Auto", "Manual", "Off"], group = g11, tooltip = "Auto: \n US100:US500:US30 \n XAUUSD:XAGUSD:XPTUSD \n EURUSD:GBPUSD:AUDUSD \n BTCUSDT.P:ETHUSDT.P:ADAUSDT.P \n NQ1:ES1:YM1")
+tr1A = triad_selection_mode == "Manual"
+
+// Manual Triad Inputs
+enable_m1 = input.bool(false, "Triad 1", group=g11, inline="m1")
+st1_m1 = input.symbol("","", group=g11, inline="m1")
+st2_m1 = input.symbol("", "&", group=g11, inline="m1")
+st3_m1 = input.symbol("", "&", group=g11, inline="m1")
+inv_m1 = input.bool(false, "Inverse", group=g11, inline="m1")
+
+enable_m2 = input.bool(false, "Triad 2", group=g11, inline="m2")
+st1_m2 = input.symbol("","", group=g11, inline="m2")
+st2_m2 = input.symbol("", "&", group=g11, inline="m2")
+st3_m2 = input.symbol("", "&", group=g11, inline="m2")
+inv_m2 = input.bool(false, "Inverse", group=g11, inline="m2")
+
+enable_m3 = input.bool(false, "Triad 3", group=g11, inline="m3")
+st1_m3 = input.symbol("","", group=g11, inline="m3")
+st2_m3 = input.symbol("", "&", group=g11, inline="m3")
+st3_m3 = input.symbol("", "&", group=g11, inline="m3")
+inv_m3 = input.bool(false, "Inverse", group=g11, inline="m3")
+
+enable_m4 = input.bool(false, "Triad 4", group=g11, inline="m4")
+st1_m4 = input.symbol("","", group=g11, inline="m4")
+st2_m4 = input.symbol("", "&", group=g11, inline="m4")
+st3_m4 = input.symbol("", "&", group=g11, inline="m4")
+inv_m4 = input.bool(false, "Inverse", group=g11, inline="m4")
+
+enable_m5 = input.bool(false, "Triad 5", group=g11, inline="m5")
+st1_m5 = input.symbol("","", group=g11, inline="m5")
+st2_m5 = input.symbol("", "&", group=g11, inline="m5")
+st3_m5 = input.symbol("", "&", group=g11, inline="m5")
+inv_m5 = input.bool(false, "Inverse", group=g11, inline="m5")
+
+
+showsmt1    = input.bool(defval = true , title = "Show SMT 1 ",group = g11,inline="s5") 
+showsmt2    = input.bool(defval = true , title = "Show SMT 2 ",group = g11,inline="s5")
+
+// -----------------------------------------------------------------------------
+g12 ="Dyad"
+dyad_selection_mode = input.string("Off", "Dyad Selection", options = ["Auto", "Manual", "Off"], group = g12, inline="dyad_mode", tooltip = "Auto: \n CAPITALCOM=US100:US500 \n OANDA=XAUUSD:XAGUSD \n FOREXCOM=URUSD:GBPUSD \n BINANCE=BTCUSDT.P:ETHUSDT.P: \n NQ1:ES1 \n GC,SI")
+
+enable_dyad_m1 = input.bool(false, "Dyad 1", group=g12, inline="dyad_m1")
+dyad_m1_sym1     = input.symbol("","", group = g12, inline="dyad_m1")
+dyad_m1_sym2     = input.symbol("", "&", group = g12, inline="dyad_m1")
+inv_dyad_m1 = input.bool(false, "Inverse", group=g12, inline="dyad_m1")
+
+enable_dyad_m2 = input.bool(false, "Dyad 2", group=g12, inline="dyad_m2")
+dyad_m2_sym1     = input.symbol("","", group = g12, inline="dyad_m2")
+dyad_m2_sym2     = input.symbol("", "&", group = g12, inline="dyad_m2")
+inv_dyad_m2 = input.bool(false, "Inverse", group=g12, inline="dyad_m2")
+
+enable_dyad_m3 = input.bool(false, "Dyad 3", group=g12, inline="dyad_m3")
+dyad_m3_sym1     = input.symbol("","", group = g12, inline="dyad_m3")
+dyad_m3_sym2     = input.symbol("", "&", group = g12, inline="dyad_m3")
+inv_dyad_m3 = input.bool(false, "Inverse", group=g12, inline="dyad_m3")
+
+enable_dyad_m4 = input.bool(false, "Dyad 4", group=g12, inline="dyad_m4")
+dyad_m4_sym1     = input.symbol("","", group = g12, inline="dyad_m4")
+dyad_m4_sym2     = input.symbol("", "&", group = g12, inline="dyad_m4")
+inv_dyad_m4 = input.bool(false, "Inverse", group=g12, inline="dyad_m4")
+
+enable_dyad_m5 = input.bool(false, "Dyad 5", group=g12, inline="dyad_m5")
+dyad_m5_sym1     = input.symbol("","", group = g12, inline="dyad_m5")
+dyad_m5_sym2     = input.symbol("", "&", group = g12, inline="dyad_m5")
+inv_dyad_m5 = input.bool(false, "Inverse", group=g12, inline="dyad_m5")
+//---------------------------------------------------------------------------------
+n = bar_index
+tf = timeframe.period
+sym = syminfo.tickerid
+tipo = syminfo.type
+arr_inv = array.from(false,false)
+//-----------------------------------------------------------------------------{
+day_week  = dayofweek(time,'America/New_York')
+num_candles  = 5
+
+tz_incr = input.int(-5, 'UTC (+/-)', group = 'Timezone',inline="s6")
+badj= input.bool(defval = true, title = "B-ADJ: (For only futures)",group='Timezone',inline="s6")
+
+
+//-----------------------------------------------------------------------------}
+//Functions
+//-----------------------------------------------------------------------------{
+tf_ok_mic = timeframe.in_seconds(tf) <= timeframe.in_seconds("5")
+tf_ok = timeframe.in_seconds(tf) <= timeframe.in_seconds("30")
+tf_okD = timeframe.in_seconds(tf) <= timeframe.in_seconds("180")
+tf_okW = timeframe.in_seconds(tf) < timeframe.in_seconds("240")
+tf_okMo = timeframe.in_seconds(tf) <= timeframe.in_seconds("10080") // Monthly Logic
+
+// --- Visibility Logic (Reverted to Auto/Manual logic) ---
+// Micro SSMT Visibility: Show on <= 2m charts in Manual mode.
+tf_ok_mic_V = modeltype == mdl1 ? (timeframe.in_seconds(tf) >= timeframe.in_seconds(botm) and timeframe.in_seconds(tf) <= timeframe.in_seconds(topm)) : (timeframe.in_seconds(tf) <= 120)
+
+// 90m SSMT Visibility: Show on <= 15m charts in Manual mode.
+tf_ok_V = modeltype == mdl1 ? (timeframe.in_seconds(tf) >= timeframe.in_seconds(botN) and timeframe.in_seconds(tf) <= timeframe.in_seconds(topN)) : (timeframe.in_seconds(tf) <= 900)
+
+// Daily SSMT Visibility: Show on <= 1h charts in Manual mode.
+tf_okD_V = modeltype == mdl1 ? (timeframe.in_seconds(tf) >= timeframe.in_seconds(botD) and timeframe.in_seconds(tf) <= timeframe.in_seconds(topD)) : (timeframe.in_seconds(tf) <= 3600)
+
+// Weekly SSMT Visibility: Show on <= 4h charts in Manual mode.
+tf_okW_V = modeltype == mdl1 ? (timeframe.in_seconds(tf) >= timeframe.in_seconds(botW) and timeframe.in_seconds(tf) <= timeframe.in_seconds(topW)) : (timeframe.in_seconds(tf) <= 14400)
+
+// Monthly SSMT Visibility: Always show in Manual mode, respect range in Auto mode.
+tf_okMo_V = modeltype == mdl1 ? (timeframe.in_seconds(tf) >= timeframe.in_seconds(botMo) and timeframe.in_seconds(tf) <= timeframe.in_seconds(topMo)) : true
+
+
+/////////////////////////////////////
+add_to_array(arr, value) =>
+    array.unshift(arr, value)
+    if array.size(arr) > num_candles -1
+        array.pop(arr)
+add_to_array_box(arr, value) =>
+    array.unshift(arr, value)
+    if array.size(arr) > ssmt_history_limit
+        popped_id = array.pop(arr)
+        line.delete(popped_id)
+
+add_to_line_array(arr, value) =>
+    array.unshift(arr, value)
+    if array.size(arr) > ssmt_history_limit
+        line.delete(array.pop(arr))
+
+add_to_label_array(arr, value) =>
+    array.unshift(arr, value)
+    if array.size(arr) > ssmt_history_limit
+        label.delete(array.pop(arr))
+f_live_sym(_xc0,_xo0,_xh0,_xl0,_xt0,_tf)=>
+
+    var _c1 = 0.0, var _o1 = 0.0 , var _h1 = 0.0, var _l1 = 0.0, var _t1 = 0
+    var _c2 = 0.0, var _o2 = 0.0 , var _h2 = 0.0, var _l2 = 0.0, var _t2 = 0 
+    var up0 = false , var up1 = false
+    var dw0 = false , var dw1 = false
+    var _l0t = time , var _h0t = time, var _h1t = time , var _l1t = time   
+    var _o0 = open
+    var _h0 = high
+    var _l0 = low
+    var _t0 = time
+    var _c0 = close
+    if timeframe.change(_tf)
+        _t0 := _xt0
+        _o0 := _xo0
+        _h0 := _xh0
+        _l0 := _xl0
+        
+    if _xh0 >= _h0
+        _h0 := _xh0
+        _h0t := time
+    if _xl0 <= _l0
+        _l0 := _xl0
+        _l0t := time
+    _c0 := _xc0
+    up0 := _c0 > _o0
+    dw0 := _c0 < _o0
+    if timeframe.change(_tf)
+        _c1  :=  _c0[1]
+        _o1  :=  _o0[1]
+        _h1  :=  _h0[1]
+        _l1  :=  _l0[1]
+        _t1  :=  _t0[1]
+        _c2  :=  _c1[1]
+        _o2  :=  _o1[1]
+        _h2  :=  _h1[1]
+        _l2  :=  _l1[1]
+        _t2  :=  _t1[1] 
+        up1  :=  up0[1]
+        dw1  :=  dw0[1]
+        _l1t :=  _l0t[1]
+        _h1t :=  _h0t[1]
+
+
+    [_h2,_l2,_c2,_o2,_t2,_h1,_l1,_c1,_o1,_t1,_h0,_l0,_c0,_o0,_t0,up1,dw1,_l1t,_h1t] 
+f_text(string _tf)=>
+    _text = str.tonumber(_tf) < 59 ? _tf + 'm'  :
+      str.tonumber(_tf) > 59  ? 'h'+ str.tostring(math.floor(str.tonumber(_tf)/60))    : _tf
+    _text := _tf == "1D" ? "D" : _tf == "1W" ? "W" : _tf == "1M" ? "M" : _text      
+
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// Candle array placeholders (kept to maintain structure but values irrelevant without plotting)
+arrtfok   = array.from(false, false, false, false, false)       
+arrstart  = array.from(0, 0, 0, 0, 0)
+
+//-----------------------------------------------------------------------------}
+//Sessions
+//-----------------------------------------------------------------------------{
+
+var tz = str.format('UTC{0}{1}', tz_incr >= 0 ? '+' : '-', math.abs(tz_incr))
+
+//Micro cycle
+sesa1_txt = 'Asian Aa' ,  txta1 = "A", is_sesa1 = not na(time(tf,'1800-1823' , tz))
+sesa2_txt = 'Asian Am' ,  txta2 = "M", is_sesa2 = not na(time(tf,'1823-1845' , tz))
+sesa3_txt = 'Asian Ad' ,  txta3 = "D", is_sesa3 = not na(time(tf,'1845-1908' , tz))
+sesa4_txt = 'Asian Ar' ,  txta4 = "X", is_sesa4 = not na(time(tf,'1908-1930' , tz))
+
+sesb1_txt = 'Asian Ma' ,  txtb1 = "A", is_sesb1 = not na(time(tf,'1930-1953' , tz))
+sesb2_txt = 'Asian Mm' ,  txtb2 = "M", is_sesb2 = not na(time(tf,'1953-2015' , tz))
+sesb3_txt = 'Asian Md' ,  txtb3 = "D", is_sesb3 = not na(time(tf,'2015-2038' , tz))
+sesb4_txt = 'Asian Mr' ,  txtb4 = "X", is_sesb4 = not na(time(tf,'2038-2100' , tz))
+
+sesc1_txt = 'Asian Da' ,  txtc1 = "A", is_sesc1 = not na(time(tf,'2100-2123' , tz))
+sesc2_txt = 'Asian Dm' ,  txtc2 = "M", is_sesc2 = not na(time(tf,'2123-2145' , tz))
+sesc3_txt = 'Asian Dd' ,  txtc3 = "D", is_sesc3 = not na(time(tf,'2145-2208' , tz))
+sesc4_txt = 'Asian Dr' ,  txtc4 = "X", is_sesc4 = not na(time(tf,'2208-2230' , tz))
+
+sesd1_txt = 'Asian Ra' ,  txtd1 = "A", is_sesd1 = not na(time(tf,'2230-2253' , tz))
+sesd2_txt = 'Asian Rm' ,  txtd2 = "M", is_sesd2 = not na(time(tf,'2253-2315' , tz))
+sesd3_txt = 'Asian Rd' ,  txtd3 = "D", is_sesd3 = not na(time(tf,'2315-2338' , tz))
+sesd4_txt = 'Asian Rr' ,  txtd4 = "X", is_sesd4 = not na(time(tf,'2338-0000' , tz))
+
+sese1_txt = 'London Aa' ,  txte1 = "A", is_sese1 = not na(time(tf,'0000-0023' , tz))
+sese2_txt = 'London Am' ,  txte2 = "M", is_sese2 = not na(time(tf,'0023-0045' , tz))
+sese3_txt = 'London Ad' ,  txte3 = "D", is_sese3 = not na(time(tf,'0045-0108' , tz))
+sese4_txt = 'London Rr' ,  txte4 = "X", is_sese4 = not na(time(tf,'0108-0130' , tz))
+
+sesf1_txt = 'London Ma' ,  txtf1 = "A", is_sesf1 = not na(time(tf,'0130-0153' , tz))
+sesf2_txt = 'London Mm' ,  txtf2 = "M", is_sesf2 = not na(time(tf,'0153-0215' , tz))
+sesf3_txt = 'London Md' ,  txtf3 = "D", is_sesf3 = not na(time(tf,'0215-0238' , tz))
+sesf4_txt = 'London Mr' ,  txtf4 = "X", is_sesf4 = not na(time(tf,'0238-0300' , tz))
+
+sesg1_txt = 'London Da' ,  txtg1 = "A", is_sesg1 = not na(time(tf,'0300-0323' , tz))
+sesg2_txt = 'London Dm' ,  txtg2 = "M", is_sesg2 = not na(time(tf,'0323-0345' , tz))
+sesg3_txt = 'London Dd' ,  txtg3 = "D", is_sesg3 = not na(time(tf,'0345-0408' , tz))
+sesg4_txt = 'London Dr' ,  txtg4 = "X", is_sesg4 = not na(time(tf,'0408-0430' , tz))
+
+sesh1_txt = 'London Ra' ,  txth1 = "A", is_sesh1 = not na(time(tf,'0430-0453' , tz))
+sesh2_txt = 'London Rm' ,  txth2 = "M", is_sesh2 = not na(time(tf,'0453-0515' , tz))
+sesh3_txt = 'London Rd' ,  txth3 = "D", is_sesh3 = not na(time(tf,'0515-0538' , tz))
+sesh4_txt = 'London Rr' ,  txth4 = "X", is_sesh4 = not na(time(tf,'0538-0600' , tz))
+
+sesi1_txt = 'NY Aa' ,  txti1 = "A", is_sesi1 = not na(time(tf,'0600-0623' , tz))
+sesi2_txt = 'NY Am' ,  txti2 = "M", is_sesi2 = not na(time(tf,'0623-0645' , tz))
+sesi3_txt = 'NY Ad' ,  txti3 = "D", is_sesi3 = not na(time(tf,'0645-0708' , tz))
+sesi4_txt = 'NY Ar' ,  txti4 = "X", is_sesi4 = not na(time(tf,'0708-0730' , tz))
+
+sesj1_txt = 'NY Ma' ,  txtj1 = "A", is_sesj1 = not na(time(tf,'0730-0753' , tz))
+sesj2_txt = 'NY Mm' ,  txtj2 = "M", is_sesj2 = not na(time(tf,'0753-0815' , tz))
+sesj3_txt = 'NY Md' ,  txtj3 = "D", is_sesj3 = not na(time(tf,'0815-0838' , tz))
+sesj4_txt = 'NY Mr' ,  txtj4 = "X", is_sesj4 = not na(time(tf,'0838-0900' , tz))
+
+sesk1_txt = 'NY Da' ,  txtk1 = "A", is_sesk1 = not na(time(tf,'0900-0923' , tz))
+sesk2_txt = 'NY Dm' ,  txtk2 = "M", is_sesk2 = not na(time(tf,'0923-0945' , tz))
+sesk3_txt = 'NY Dd' ,  txtk3 = "D", is_sesk3 = not na(time(tf,'0945-1008' , tz))
+sesk4_txt = 'NY Dr' ,  txtk4 = "X", is_sesk4 = not na(time(tf,'1008-1030' , tz))
+
+sesl1_txt = 'NY Ra' ,  txtl1 = "A", is_sesl1 = not na(time(tf,'1030-1053' , tz))
+sesl2_txt = 'NY Rm' ,  txtl2 = "M", is_sesl2 = not na(time(tf,'1053-1115' , tz))
+sesl3_txt = 'NY Rd' ,  txtl3 = "D", is_sesl3 = not na(time(tf,'1115-1138' , tz))
+sesl4_txt = 'NY Rr' ,  txtl4 = "X", is_sesl4 = not na(time(tf,'1138-1200' , tz))
+
+sesm1_txt = 'PM Aa' ,  txtm1 = "A", is_sesm1 = not na(time(tf,'1200-1223' , tz))
+sesm2_txt = 'PM Am' ,  txtm2 = "M", is_sesm2 = not na(time(tf,'1223-1245' , tz))
+sesm3_txt = 'PM Ad' ,  txtm3 = "D", is_sesm3 = not na(time(tf,'1245-1308' , tz))
+sesm4_txt = 'PM Ar' ,  txtm4 = "X", is_sesm4 = not na(time(tf,'1308-1330' , tz))
+sesn1_txt = 'PM Ma' ,  txtn1 = "A", is_sesn1 = not na(time(tf,'1330-1353' , tz))
+sesn2_txt = 'PM Mm' ,  txtn2 = "M", is_sesn2 = not na(time(tf,'1353-1415' , tz))
+sesn3_txt = 'PM Md' ,  txtn3 = "D", is_sesn3 = not na(time(tf,'1415-1438' , tz))
+sesn4_txt = 'PM Mr' ,  txtn4 = "X", is_sesn4 = not na(time(tf,'1438-1500' , tz))
+seso1_txt = 'PM Da' ,  txto1 = "A", is_seso1 = not na(time(tf,'1500-1523' , tz))
+seso2_txt = 'PM Dm' ,  txto2 = "M", is_seso2 = not na(time(tf,'1523-1545' , tz))
+seso3_txt = 'PM Dd' ,  txto3 = "D", is_seso3 = not na(time(tf,'1545-1608' , tz))
+seso4_txt = 'PM Dr' ,  txto4 = "X", is_seso4 = not na(time(tf,'1608-1630' , tz))
+sesp1_txt = 'PM Ra' ,  txtp1 = "A", is_sesp1 = not na(time(tf,'1630-1653' , tz))
+sesp2_txt = 'PM Rm' ,  txtp2 = "M", is_sesp2 = not na(time(tf,'1653-1715' , tz))
+sesp3_txt = 'PM Rd' ,  txtp3 = "D", is_sesp3 = not na(time(tf,'1715-1738' , tz))
+sesp4_txt = 'PM Rr' ,  txtp4 = "X", is_sesp4 = not na(time(tf,'1738-1800' , tz))
+
+//90m cycle
+sesa_txt = 'Asian A' ,  txta = "A", is_sesa = not na(time(tf, '1800-1930', tz))
+sesb_txt = 'Asian M' ,  txtb = "M", is_sesb = not na(time(tf, '1930-2100', tz))
+sesc_txt = 'Asian D' ,  txtc = "D", is_sesc = not na(time(tf, '2100-2230', tz))
+sesd_txt = 'Asian R' ,  txtd = "X", is_sesd = not na(time(tf, '2230-0000', tz))
+sese_txt = 'London A',  txte = "A", is_sese = not na(time(tf, '0000-0130', tz))
+sesf_txt = 'London M',  txtf = "M", is_sesf = not na(time(tf, '0130-0300', tz))
+sesg_txt = 'London D',  txtg = "D", is_sesg = not na(time(tf, '0300-0430', tz))
+sesh_txt = 'London R',  txth = "X", is_sesh = not na(time(tf, '0430-0600', tz))
+sesi_txt = 'NY A'    ,  txti = "A", is_sesi = not na(time(tf, '0600-0730', tz))
+sesj_txt = 'NY M'    ,  txtj = "M", is_sesj = not na(time(tf, '0730-0900', tz))
+sesk_txt = 'NY D'    ,  txtk = "D", is_sesk = not na(time(tf, '0900-1030', tz))
+sesl_txt = 'NY R'    ,  txtl = "X", is_sesl = not na(time(tf, '1030-1200', tz))
+sesm_txt = 'PM A'    ,  txtm = "A", is_sesm = not na(time(tf, '1200-1330', tz))
+sesn_txt = 'PM M'    ,  txtn = "M", is_sesn = not na(time(tf, '1330-1500', tz))
+seso_txt = 'PM D'    ,  txto = "D", is_seso = not na(time(tf, '1500-1630', tz))
+sesp_txt = 'PM R'    ,  txtp = "X", is_sesp = not na(time(tf, '1630-1800', tz))
+//Daily cycle
+sesq_txt = 'Daily A' ,  txtq = "A", is_sesq = not na(time(tf, '1800-0000', tz))
+sesr_txt = 'Daily M' ,  txtr = "M", is_sesr = not na(time(tf, '0000-0600', tz))
+sess_txt = 'Daily D' ,  txts = "D", is_sess = not na(time(tf, '0600-1200', tz))
+sest_txt = 'Daily R' ,  txtt = "X", is_sest = not na(time(tf, '1200-1800', tz))
+
+//Weekly cycle
+var trueday = 2
+var newday = false
+if is_sesq[1] == false and is_sesq == true and newday == false 
+    trueday :=  
+      day_week == 1 ? 2 :  
+      day_week == 2 ? 3 :
+      day_week == 3 ? 4 :
+      day_week == 4 ? 5 :
+      day_week == 5 ? 6 : 
+      day_week == 6 ? 7 : 1 //
+    newday := true // This line was causing the error. It's now fixed.
+if (is_sesq[1] == true and is_sesq == true)   
+    newday := false
+
+is_week1 = trueday  == 2 //monday
+is_week2 = trueday  == 3
+is_week3 = trueday  == 4
+is_week4 = trueday  == 5
+is_week5 = trueday  == 6
+is_week6 = trueday  == 7
+is_week7 = trueday  == 1 //sunday
+
+//Monthly Cycle
+dom = dayofmonth(time, tz)
+is_month1 = dom <= 7
+is_month2 = dom > 7 and dom <= 14
+is_month3 = dom > 14 and dom <= 21
+is_month4 = dom > 21
+
+//-----------------------------------------------------------------------------}
+//Overlays
+//-----------------------------------------------------------------------------
+
+
+arr_sesm   = array.from(
+ is_sesa1,is_sesa2,is_sesa3,is_sesa4,
+ is_sesb1,is_sesb2,is_sesb3,is_sesb4,
+ is_sesc1,is_sesc2,is_sesc3,is_sesc4,
+ is_sesd1,is_sesd2,is_sesd3,is_sesd4,
+ is_sese1,is_sese2,is_sese3,is_sese4,
+ is_sesf1,is_sesf2,is_sesf3,is_sesf4,
+ is_sesg1,is_sesg2,is_sesg3,is_sesg4,
+ is_sesh1,is_sesh2,is_sesh3,is_sesh4,
+ is_sesi1,is_sesi2,is_sesi3,is_sesi4,
+ is_sesj1,is_sesj2,is_sesj3,is_sesj4,
+ is_sesk1,is_sesk2,is_sesk3,is_sesk4,
+ is_sesl1,is_sesl2,is_sesl3,is_sesl4,
+ is_sesm1,is_sesm2,is_sesm3,is_sesm4,
+ is_sesn1,is_sesn2,is_sesn3,is_sesn4,
+ is_seso1,is_seso2,is_seso3,is_seso4,
+ is_sesp1,is_sesp2,is_sesp3,is_sesp4)
+arr_sesmy  = array.from(
+ txta1,txta2,txta3,txta4,
+ txtb1,txtb2,txtb3,txtb4,
+ txtc1,txtc2,txtc3,txtc4,
+ txtd1,txtd2,txtd3,txtd4,
+ txte1,txte2,txte3,txte4,
+ txtf1,txtf2,txtf3,txtf4,
+ txtg1,txtg2,txtg3,txtg4,
+ txth1,txth2,txth3,txth4,
+ txti1,txti2,txti3,txti4,
+ txtj1,txtj2,txtj3,txtj4,
+ txtk1,txtk2,txtk3,txtk4,
+ txtl1,txtl2,txtl3,txtl4,
+ txtm1,txtm2,txtm3,txtm4,
+ txtn1,txtn2,txtn3,txtn4,
+ txto1,txto2,txto3,txto4,
+ txtp1,txtp2,txtp3,txtp4)
+arr_sesmz  = array.from(
+ sesa1_txt,sesa2_txt,sesa3_txt,sesa4_txt,
+ sesb1_txt,sesb2_txt,sesb3_txt,sesb4_txt,
+ sesc1_txt,sesc2_txt,sesc3_txt,sesc4_txt,
+ sesd1_txt,sesd2_txt,sesd3_txt,sesd4_txt,
+ sese1_txt,sese2_txt,sese3_txt,sese4_txt,
+ sesf1_txt,sesf2_txt,sesf3_txt,sesf4_txt,
+ sesg1_txt,sesg2_txt,sesg3_txt,sesg4_txt,
+ sesh1_txt,sesh2_txt,sesh3_txt,sesh4_txt,
+ sesi1_txt,sesi2_txt,sesi3_txt,sesi4_txt,
+ sesj1_txt,sesj2_txt,sesj3_txt,sesj4_txt,
+ sesk1_txt,sesk2_txt,sesk3_txt,sesk4_txt,
+ sesl1_txt,sesl2_txt,sesl3_txt,sesl4_txt,
+ sesm1_txt,sesm2_txt,sesm3_txt,sesm4_txt,
+ sesn1_txt,sesn2_txt,sesn3_txt,sesn4_txt,
+ seso1_txt,seso2_txt,seso3_txt,seso4_txt,
+ sesp1_txt,sesp2_txt,sesp3_txt,sesp4_txt) 
+val_sesm   = array.indexof(arr_sesm , true)
+
+arr_ses    = array.from(is_sesa,is_sesb,is_sesc,is_sesd,is_sese,is_sesf,is_sesg,is_sesh,is_sesi,is_sesj,is_sesk,is_sesl,is_sesm,is_sesn,is_seso,is_sesp)
+arr_sesy  = array.from(txta,txtb,txtc,txtd,txte,txtf,txtg,txth,txti,txtj,txtk,txtl,txtm,txtn,txto,txtp)
+arr_sesz  = array.from(sesa_txt,sesb_txt,sesc_txt,sesd_txt,sese_txt,sesf_txt,sesg_txt,sesh_txt,sesi_txt,sesj_txt,sesk_txt,sesl_txt,sesm_txt,sesn_txt,seso_txt,sesp_txt) 
+val_ses    = array.indexof(arr_ses , true) 
+
+arr_sesD  = array.from(is_sesq,is_sesr,is_sess,is_sest)
+arr_sesDy = array.from(txtq,txtr,txts,txtt)
+arr_sesDz = array.from(sesq_txt,sesr_txt,sess_txt,sest_txt)
+val_sesD  = array.indexof(arr_sesD,true)
+
+arr_sesW  = array.from(is_week1, is_week2, is_week3, is_week4, is_week5, is_week6, is_week7)
+arr_sesWy = array.from("A","M","D","X","Fr","Sat","Sun")
+arr_sesWz = array.from("Weekly A","Weekly B","Weekly C","Weekly D","Weekly x","Weekly x","Weekly x")
+val_sesW  = array.indexof(arr_sesW, true)
+
+arr_sesMo = array.from(is_month1, is_month2, is_month3, is_month4)
+arr_sesMoy = array.from("W1", "W2", "W3", "W4")
+arr_sesMoz = array.from("Monthly W1", "Monthly W2", "Monthly W3", "Monthly W4")
+val_sesMo = array.indexof(arr_sesMo, true)
+
+newMo = val_sesMo != val_sesMo[1]
+newW = val_sesW != val_sesW[1]
+newD = val_sesD != val_sesD[1]
+newN = val_ses  !=  val_ses[1]
+newm = val_sesm != val_sesm[1]
+
+
+//////////////////////////////////////////// 
+//CORRELATION LOGIC
+////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+csym  = sym
+tsym2 = sym
+tsym3 = sym
+
+// -----------------------------------------------------------------------------
+// HELPER FUNCTIONS & LOGIC (current_ticker is now a var string)
+
+// --- 1. ROBUST MANUAL MATCHING ---
+// We check if current chart matches the manual inputs loosely (Ticker name or subset)
+var string current_ticker = syminfo.ticker
+
+f_check_match(input_sym) =>
+    // Check if the input symbol is empty or doesn't contain a colon.
+    if str.length(input_sym) == 0 or not str.contains(input_sym, ":")
+        false // Return false to prevent runtime errors on empty/invalid inputs.
+    else
+        // Safely split and get the ticker part.
+        t_sym = array.get(str.split(input_sym, ":"), 1)
+        (current_ticker == t_sym) or str.contains(sym, t_sym) or str.contains(input_sym, current_ticker)
+
+match_m1_1 = f_check_match(st1_m1), match_m1_2 = f_check_match(st2_m1), match_m1_3 = f_check_match(st3_m1)
+match_m2_1 = f_check_match(st1_m2), match_m2_2 = f_check_match(st2_m2), match_m2_3 = f_check_match(st3_m2)
+match_m3_1 = f_check_match(st1_m3), match_m3_2 = f_check_match(st2_m3), match_m3_3 = f_check_match(st3_m3)
+match_m4_1 = f_check_match(st1_m4), match_m4_2 = f_check_match(st2_m4), match_m4_3 = f_check_match(st3_m4)
+match_m5_1 = f_check_match(st1_m5), match_m5_2 = f_check_match(st2_m5), match_m5_3 = f_check_match(st3_m5)
+
+is_in_manual_m1 = tr1A and enable_m1 and (match_m1_1 or match_m1_2 or match_m1_3)
+is_in_manual_m2 = tr1A and enable_m2 and (match_m2_1 or match_m2_2 or match_m2_3)
+is_in_manual_m3 = tr1A and enable_m3 and (match_m3_1 or match_m3_2 or match_m3_3)
+is_in_manual_m4 = tr1A and enable_m4 and (match_m4_1 or match_m4_2 or match_m4_3)
+is_in_manual_m5 = tr1A and enable_m5 and (match_m5_1 or match_m5_2 or match_m5_3)
+is_in_manual = is_in_manual_m1 or is_in_manual_m2 or is_in_manual_m3 or is_in_manual_m4 or is_in_manual_m5 
+var st1 = ""
+var st2 = ""
+var st3 = ""
+if is_in_manual_m1 and enable_m1
+    st1 := st1_m1, st2 := st2_m1, st3 := st3_m1 
+else if is_in_manual_m2 and enable_m2
+    st1 := st1_m2, st2 := st2_m2, st3 := st3_m2 
+else if is_in_manual_m3 and enable_m3
+    st1 := st1_m3, st2 := st2_m3, st3 := st3_m3
+else if is_in_manual_m4 and enable_m4
+    st1 := st1_m4, st2 := st2_m4, st3 := st3_m4
+else if is_in_manual_m5 and enable_m5
+    st1 := st1_m5, st2 := st2_m5, st3 := st3_m5
+
+// --- 2. AUTO MATCHING GROUPS (Fixed for Futures) ---
+//Future Assets
+is_nq_asset = str.contains(sym, "NQ") or str.contains(sym, "MNQ")
+is_es_asset = str.contains(sym, "ES") or str.contains(sym, "MES")
+is_ym_asset = str.contains(sym, "YM") or str.contains(sym, "MYM")
+
+is_gc_asset = str.contains(sym, "GC") or str.contains(sym, "MGC")
+is_si_asset = str.contains(sym, "SI") or str.contains(sym, "MSI")
+is_sl_asset = str.contains(sym, "PL") or str.contains(sym, "MSL")
+
+is_in_g2 = tr1B and (str.contains(sym, "XAU") or str.contains(sym, "XAG") or str.contains(sym, "XPT"))
+is_in_g3 = tr1C and (str.contains(sym, "BTC") or str.contains(sym, "ETH") or str.contains(sym, "ADA"))
+is_in_g4 = tr1D and (is_nq_asset or is_es_asset or is_ym_asset)
+is_in_g5 = tr1E and (str.contains(sym, "EURUSD") or str.contains(sym, "GBPUSD") or str.contains(sym, "AUDUSD"))
+is_in_g6 = tr1F and (str.contains(sym, "US100") or str.contains(sym, "USTEC") or str.contains(sym, "NAS100") or str.contains(sym, "US500") or str.contains(sym, "SPX500") or str.contains(sym, "SP500") or str.contains(sym, "US30"))
+is_in_g7 = tr1G and (is_gc_asset or is_si_asset or is_sl_asset)
+// --- 3. TRIAD STATUS ---
+// Logic: If Auto, check auto groups. If Manual, check manual group.
+triad_ok = triad_selection_mode == "Off" ? false : triad_selection_mode == "Auto" ? (is_in_g2 or is_in_g3 or is_in_g4 or is_in_g5 or is_in_g6 or is_in_g7) : is_in_manual
+
+match_1 = f_check_match(st1)
+match_2 = f_check_match(st2)
+match_3 = f_check_match(st3)
+
+// --- 4. ASSIGNMENT LOGIC ---
+array.set(arr_inv, 0, false)
+array.set(arr_inv, 1, false)
+
+if triad_ok
+    // MANUAL TRIAD ASSIGNMENT
+    if is_in_manual
+        if match_1
+            tsym2 := st2
+            tsym3 := st3
+            if (is_in_manual_m1 and inv_m1) or (is_in_manual_m2 and inv_m2) or (is_in_manual_m3 and inv_m3) or (is_in_manual_m4 and inv_m4) or (is_in_manual_m5 and inv_m5)
+                array.set(arr_inv, 1, true) // Invert st3
+        else if match_2
+            tsym2 := st1
+            tsym3 := st3
+            if (is_in_manual_m1 and inv_m1) or (is_in_manual_m2 and inv_m2) or (is_in_manual_m3 and inv_m3) or (is_in_manual_m4 and inv_m4) or (is_in_manual_m5 and inv_m5)
+                array.set(arr_inv, 1, true) // Invert st3
+        else if match_3
+            tsym2 := st1
+            tsym3 := st2
+            if (is_in_manual_m1 and inv_m1) or (is_in_manual_m2 and inv_m2) or (is_in_manual_m3 and inv_m3) or (is_in_manual_m4 and inv_m4) or (is_in_manual_m5 and inv_m5)
+                // When on st3, both st1 and st2 are correlated pairs. Invert both.
+                array.set(arr_inv, 0, true)
+                array.set(arr_inv, 1, true)
+    // AUTO TRIAD ASSIGNMENT
+    else if is_in_g2
+        tsym2 := str.contains(sym, "XAU") ? st5 : st4
+        tsym3 := str.contains(sym, "XPT") ? st5 : st6
+    else if is_in_g3
+        tsym2 := str.contains(sym, "BTC") ? st8 : (str.contains(sym, "ETH") ? st7 : st7)
+        tsym3 := str.contains(sym, "BTC") ? st9 : (str.contains(sym, "ETH") ? st9 : st8)
+    else if is_in_g4
+        if is_nq_asset
+            tsym2 := st11, tsym3 := st12
+        else if is_es_asset
+            tsym2 := st10, tsym3 := st12
+        else if is_ym_asset
+            tsym2 := st10, tsym3 := st11
+    else if is_in_g5
+        tsym2 := str.contains(sym, "EURUSD") ? st14 : (str.contains(sym, "GBPUSD") ? st13 : st13)
+        tsym3 := str.contains(sym, "EURUSD") ? st15 : (str.contains(sym, "GBPUSD") ? st15 : st14)
+    else if is_in_g6
+        tsym2 := str.contains(sym, "US100") ? st17 : (str.contains(sym, "US500") ? st16 : st16)
+        tsym3 := str.contains(sym, "US100") ? st18 : (str.contains(sym, "US500") ? st18 : st17)
+    else if is_in_g7
+        if is_gc_asset
+            tsym2 := st20, tsym3 := st21
+        else if is_si_asset
+            tsym2 := st19, tsym3 := st21
+        else if is_sl_asset
+            tsym2 := st19, tsym3 := st20
+
+
+
+// Ensure tsym2 and tsym3 are not the same as the main symbol (Safety check)
+if tsym2 == sym or array.get(str.split(tsym2, ":"), 1) == current_ticker
+    // Fallback logic could go here, but the specific assignments above usually prevent this.
+    tsym2 := tsym2 
+
+if triad_ok
+    csym  := syminfo.type == "futures" ? (ticker.modify(tsym2,session = syminfo.session,backadjustment=badj ? backadjustment.off:backadjustment.on) ) :tsym2
+    tsym3 := syminfo.type == "futures" ? (ticker.modify(tsym3,session = syminfo.session,backadjustment=badj ? backadjustment.off:backadjustment.on) ) :tsym3
+if not triad_ok and dyad_selection_mode != "Off"
+    if dyad_selection_mode == "Manual"
+        is_on_dyad_m1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
+        is_on_dyad_m2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
+        is_on_dyad_m3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
+        is_on_dyad_m4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
+        is_on_dyad_m5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
+
+        if is_on_dyad_m1
+            csym := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
+            if inv_dyad_m1 and f_check_match(dyad_m1_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m2
+            csym := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
+            if inv_dyad_m2 and f_check_match(dyad_m2_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m3
+            csym := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
+            if inv_dyad_m3 and f_check_match(dyad_m3_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m4
+            csym := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
+            if inv_dyad_m4 and f_check_match(dyad_m4_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m5
+            csym := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
+            if inv_dyad_m5 and f_check_match(dyad_m5_sym1)
+                array.set(arr_inv, 0, true)
+
+    else if dyad_selection_mode == "Auto"
+        // Checks against the hidden s1-s8 variables
+        if str.contains(sym, s1) or sym == s1
+            csym := s2
+        else if str.contains(sym, s2) or sym == s2
+            csym := s1
+        else if str.contains(sym, s3) or sym == s3
+            csym := s4
+        else if str.contains(sym, s4) or sym == s4
+            csym := s3
+        else if str.contains(sym, s5) or sym == s5
+            csym := s6
+        else if str.contains(sym, s6) or sym == s6
+            csym := s5
+        else if str.contains(sym, s7) or sym == s7
+            csym := s8
+        else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
+            csym := s7
+        else if is_nq_asset // Uses the helper boolean from above
+            csym := s10 // Pair NQ with ES
+        else if is_es_asset
+            csym := s9  // Pair ES with NQ
+        else if is_gc_asset // Uses the helper boolean from above
+            csym := s12 // Pair GC with ES
+        else if is_si_asset
+            csym := s11  // Pair SI with NQ
+
+    // Apply futures modification if needed
+    csym  := syminfo.type == "futures" ? (ticker.modify(csym,session = syminfo.session,backadjustment=badj ? backadjustment.on:backadjustment.off) ) :csym
+
+dyad_ok = sym != csym
+//
+[xc0,xo0,xh0,xl0,xt0,xatr]=request.security(csym,tf,[close,open,high,low,time,ta.atr(20)],lookahead = barmerge.lookahead_on,ignore_invalid_symbol = true)
+ssmt_pair  = str.tostring(syminfo.ticker(csym)) 
+txt_lbl = triad_ok ? " " + ssmt_pair + " + " +" " + str.tostring(syminfo.ticker(tsym3)) : " " + ssmt_pair 
+pair_label = 'SSMT --> '+ txt_lbl 
+
+
+[yc0,yo0,yh0,yl0,yt0,yatr]=request.security( tsym3,tf,[close,open,high,low,time,ta.atr(20)],lookahead = barmerge.lookahead_on,ignore_invalid_symbol = true)
+ssmt_pair2 = str.tostring(syminfo.ticker(tsym3))
+
+////////////////////////////////////////////////
+f_main_process(_tf_ok,_tf_ok_V, _val_ses, op,cls,hi,lo,ti,show_cand,cyc_txt,arr_sesy,arr_sesz,arrst)=>
+    var o0     = op , var o1 = op , var o2 = op, var c1 = cls, var c2 = cls
+    var hmax   = hi , var hmax1 = hi , var hmax2 = hi
+    var lmin   = lo , var lmin1 = lo , var lmin2 = lo
+    var t0     = ti
+    var t1     = ti
+    var txt0   = ""
+    var hmaxt  = ti,  var lmint   = ti
+    var hmaxt1 = ti,  var lmint1  = ti
+    var clsmax  = math.max(cls,op), var clsmaxt = ti  , var clsmin  = math.min(cls,op) , var clsmint =  ti
+    var clsmax1 = math.max(cls,op), var clsmaxt1 = ti , var clsmin1 = math.min(cls,op) , var clsmint1 = ti
+    var arr_h = array.new_float(),var arr_l = array.new_float()
+    var arr_o = array.new_float(),var arr_c = array.new_float()
+    var arr_t = array.new_string()
+
+    if _tf_ok
+        if _val_ses  !=  _val_ses[1]
+            o0     := op
+            hmax   := hi
+            lmin   := lo
+            t0     := ti
+            hmaxt := ti
+            lmint := ti
+            clsmax  := math.max(cls,op)
+            clsmaxt := ti
+            clsmin  := math.min(cls,op)
+            clsmint := ti 
+
+    if _val_ses == _val_ses[1]
+        if hi >= hmax
+            hmax   := hi
+            hmaxt := ti
+        if lo <= lmin
+            lmin   := lo
+            lmint := ti
+
+        if math.max(cls,op) >= clsmax 
+            clsmax := math.max(cls,op)
+            clsmaxt:= ti
+        if math.min(cls,op) <= clsmin 
+            clsmin := math.min(cls,op)
+            clsmint:= ti 
+
+    c0 = cls
+    txt0 := array.get(arr_sesy,_val_ses)
+    txtz  = array.get(arr_sesz,_val_ses)
+    if _val_ses  !=  _val_ses[1]
+        add_to_array(arr_h,hmax[1])
+        add_to_array(arr_l,lmin[1])        
+        add_to_array(arr_o,o0[1])
+        add_to_array(arr_c,cls[1])
+        add_to_array(arr_t,txt0[1])
+        hmax1 := hmax[1]
+        lmin1 := lmin[1]
+        hmax2 := hmax1[1]
+        lmin2 := lmin1[1]                
+  
+        hmaxt1 := hmaxt[1]
+        lmint1 := lmint[1]        
+        t1 := t0[1]
+        clsmax1  := clsmax[1]
+        clsmaxt1 := clsmaxt[1]
+        clsmin1  := clsmin[1]
+        clsmint1 := clsmint[1]
+        o1 := o0[1]
+        o2 := o1[1]
+        c1 := c0[1]
+        c2 := c1[1]
+
+    labels_high = array.max(arr_h)
+    
+    st90 = array.get(arrstart,arrst)
+    
+    // Candle plotting logic removed per instructions
+
+    var bias = 0
+    if _val_ses  !=  _val_ses[1]
+        bias:= 0
+        if c1 > hmax2 
+            bias := 1
+
+        if c1 < lmin2
+            bias := -1
+        if c1 < hmax2 and c1 > lmin2 and hmax1 > hmax2 and lmin1 > lmin2
+            bias := -1
+        if c1 > lmin2 and c1 < hmax2 and hmax1 < hmax2 and lmin1 < lmin2
+            bias := 1
+        if hmax1 <= hmax2 and lmin1 >= lmin2  
+            if  c2 > o2
+                bias := 1
+            else
+                bias := -1 
+    biastxt = bias == 1 ? "Bullish" : bias == -1 ? "Bearish" : "No Bias"
+    
+    [hmaxt,lmint,hmax2, lmin2,hmax1,lmin1,hmax,lmin,hmaxt1,lmint1,clsmax,clsmax1,clsmaxt1,clsmin,clsmin1,clsmint1,clsmaxt,clsmint,o0,txt0,biastxt] 
+// /////////////////////////////////////////////////////////////////////// 
+
+
+/////////////////////////////////////////////////////////////////////////////SMT 
+f_ssmt(ah2,ah1,ah0,al2,al1,al0,bh2,bh1,bh0,bl2,bl1,bl0,start,show,_hmaxt,_lmint,_hmaxt1,_lmint1,_tfok,_val_ses,showon,_smt_clr,_smt_txt_clr,tri,xx,zh0,zl0,_tf_ok_V,lbl,name,pair,_inv )=>
+    _bear1 = ((ah2 >= ah1 and bh2 <= bh1) or (ah2 <= ah1 and bh2 >= bh1) ) and not(ah2 == ah1 and bh2 == bh1) and not _inv
+    _bear0 = ((ah1 >= ah0 and bh1 <= bh0) or (ah1 <= ah0 and bh1 >= bh0) ) and not(ah1 == ah0 and bh1 == bh0) and not _inv 
+    _bull1 = ((al2 <= al1 and bl2 >= bl1) or (al2 >= al1 and bl2 <= bl1) ) and not(al2 == al1 and bl2 == bl1) and not _inv  
+    _bull0 = ((al1 <= al0 and bl1 >= bl0) or (al1 >= al0 and bl1 <= bl0) ) and not(al1 == al0 and bl1 == bl0) and not _inv 
+    if _inv 
+        _bear1 := ((ah2 >= ah1 and bl2 >= bl1) or (ah2 <= ah1 and bl2 <= bl1) ) and not(ah2 == ah1 and bl2 == bl1) 
+        _bear0 := ((ah1 >= ah0 and bl1 >= bl0) or (ah1 <= ah0 and bl1 <= bl0) ) and not(ah1 == ah0 and bl1 == bl0) 
+        _bull1 := ((al2 <= al1 and bh2 <= bh1) or (al2 >= al1 and bh2 >= bh1) ) and not(al2 == al1 and bh2 == bh1) 
+        _bull0 := ((al1 <= al0 and bh1 <= bh0) or (al1 >= al0 and bh1 >= bh0) ) and not(al1 == al0 and bh1 == bh0)
+ 
+    tooltiplbl = pair == 2 ? name +" " + ssmt_pair  :name +" " + ssmt_pair2 
+    lblstyleh = label.style_label_down
+    lblstylel = label.style_label_up
+    var smth1 = line.new(na,na,na,na)
+    var smth0 = line.new(na,na,na,na)
+    var smtl1 = line.new(na,na,na,na)
+    var smtl0 = line.new(na,na,na,na)
+    line.delete(smth1)
+    line.delete(smth0)
+    line.delete(smtl1)
+    line.delete(smtl0)
+
+    if _bear1 and show and _tf_ok_V
+        smth1 := line.new(bar_index+start+dx+10,ah2,bar_index+start+dx+13,ah1,color=_smt_clr,width = 2)
+    if _bear0 and show and _tf_ok_V
+        smth0 := line.new(bar_index+start+dx+13,ah1,bar_index+start+dx+16,ah0,color=_smt_clr,width = 2)
+    if _bull1 and show and _tf_ok_V
+        smtl1 := line.new(bar_index+start+dx+10,al2,bar_index+start+dx+13,al1,color=_smt_clr,width = 2)
+    if _bull0 and show and _tf_ok_V
+        smtl0 := line.new(bar_index+start+dx+13,al1,bar_index+start+dx+16,al0,color=_smt_clr,width = 2)
+
+    var smtbeh = line.new(na,na,na,na)
+    var smtbul = line.new(na,na,na,na) 
+    var smtbe  = label.new(na,na)
+    var smtbu  = label.new(na,na)  
+
+    label ret_smtbe = na
+    label ret_smtbu = na
+
+    var arr_beh = array.new_line()
+    var arr_ch1 = array.new_float()
+    var arr_lbh = array.new_label()
+
+    var arr_bul = array.new_line()
+    var arr_cl1 = array.new_float()
+    var arr_lbl = array.new_label()     
+
+
+
+    if (_bull0 or _bear0 )and showon and _tfok and _tf_ok_V
+        if (_val_ses[1] != _val_ses or not _bear0[1] or _hmaxt != _hmaxt[1] ) and  _bear0            
+            smtbeh   := line.new(x1 = _hmaxt1 , y1 = ah1 , x2 = _hmaxt , y2 = ah0 , xloc=xloc.bar_time,color= hidelines ?color.new(_smt_clr,100):_smt_clr,width = 1,style=normstyle) 
+            if not hidelabels
+                smtbe    := label.new(x=math.round(_hmaxt+_hmaxt1)/2, y = math.round_to_mintick(ah1+ah0)/2,text = lbl ,xloc = xloc.bar_time,yloc = yloc.price,color = color.new(color.white, 100),
+                 style=lblstyleh,textcolor = _smt_txt_clr, size = i_font,tooltip = tooltiplbl, text_font_family = target_font)
+                ret_smtbe := smtbe
+                add_to_label_array(arr_lbh,smtbe)
+            add_to_line_array(arr_beh,smtbeh) 
+
+
+        if (_val_ses[1] != _val_ses or not _bull0[1] or _lmint != _lmint[1] ) and  _bull0  
+            smtbul := line.new(x1 = _lmint1 , y1 = al1 , x2 = _lmint , y2 = al0 , xloc=xloc.bar_time,color= hidelines ?color.new(_smt_clr,100):_smt_clr,width = 1,style = normstyle)
+            if not hidelabels
+                smtbu  := label.new(x=math.round(_lmint+_lmint1)/2, y = math.round_to_mintick(al1+al0)/2,text = lbl ,xloc = xloc.bar_time,yloc = yloc.price,color = color.new(color.white, 100),
+                 style=lblstylel,textcolor = _smt_txt_clr, size = i_font,tooltip = tooltiplbl, text_font_family = target_font)
+                ret_smtbu := smtbu
+                add_to_label_array(arr_lbl,smtbu)
+            add_to_line_array(arr_bul,smtbul)
+
+
+    if array.size(arr_beh) > 0 and showon and _tfok and _tf_ok_V
+        if _val_ses == _val_ses[1] and _bear0[1] and not _bear0 
+            line.delete(smtbeh)
+            array.remove(arr_beh,0)
+            if not hidelabels and array.size(arr_lbh) > 0            
+                label.delete(smtbe)
+                array.remove(arr_lbh,0)
+
+    if array.size(arr_beh) > 0 and showon //and _tfok and _tf_ok_V
+        for i = array.size(arr_beh) -1 to 0
+            dline = array.get(arr_beh,i)
+
+            top    = line.get_y2(dline)
+            tme    = line.get_x2(dline)
+            if time > tme and high >= top
+                line.delete(dline)
+                array.remove(arr_beh,i)
+                if not hidelabels and array.size(arr_lbh) > 0  
+                    dlbl   = array.get(arr_lbh,i)
+                    label.delete(dlbl)
+                    array.remove(arr_lbh,i)
+
+
+
+    if array.size(arr_bul) > 0 and showon and _tfok and _tf_ok_V//
+        if _val_ses == _val_ses[1] and _bull0[1] and not _bull0 
+            line.delete(smtbul)
+            array.remove(arr_bul,0) 
+            if not hidelabels and array.size(arr_lbl) > 0             
+                label.delete(smtbu)
+                array.remove(arr_lbl,0)    
+
+    if array.size(arr_bul) > 0 and showon and _tfok and _tf_ok_V
+        for i = array.size(arr_bul) -1 to 0
+            dline = array.get(arr_bul,i)
+            
+            bot    = line.get_y2(dline)
+            tme    = line.get_x2(dline)
+            if time > tme and low <= bot
+                line.delete(dline)
+                array.remove(arr_bul,i) 
+                if not hidelabels and array.size(arr_lbl) > 0 
+                    dlbl   = array.get(arr_lbl,i)                                     
+                    label.delete(dlbl)
+                    array.remove(arr_lbl,i)
+
+
+    [_bear1,_bear0,_bull1,_bull0, ret_smtbe, ret_smtbu]
+
+////////////////////////////////////////////////////////////////
+f_hidden_ssmt(_clsmax,_clsmax1,_clsmin,_clsmin1,_clsmaxt,_clsmaxt1,_clsmint,_clsmint1,_cclsmax,_cclsmax1,_cclsmin,_cclsmin1,
+ _tfok,showon,_smt_clr,_smt_txt_clr,tri,xx,_val_ses, ah1 ,ah0, al1,al0,bh1,bh0,bl1,bl0,zh0,zl0 , _tf_ok_V,lbl,name,pair,_inv)=>
+
+    bool _hbear0 = false
+    bool _lbull0 = false
+
+    if not _inv
+        _hbear0 := ( (_clsmax >= _clsmax1 and _cclsmax <= _cclsmax1) or (_clsmax <= _clsmax1 and _cclsmax >= _cclsmax1) ) and not (_clsmax == _clsmax1 and _cclsmax == _cclsmax1)
+        _lbull0 := ( (_clsmin >= _clsmin1 and _cclsmin <= _cclsmin1) or (_clsmin <= _clsmin1 and _cclsmin >= _cclsmin1) ) and not (_clsmin == _clsmin1 and _cclsmin == _cclsmin1)
+    else
+        _hbear0 := ( (_clsmax >= _clsmax1 and _cclsmin >= _cclsmin1) or (_clsmax <= _clsmax1 and _cclsmin <= _cclsmin1) ) and not (_clsmax == _clsmax1 and _cclsmin == _cclsmin1)
+        _lbull0 := ( (_clsmin >= _clsmin1 and _cclsmax >= _cclsmax1) or (_clsmin <= _clsmin1 and _cclsmax <= _cclsmax1) ) and not (_clsmin == _clsmin1 and _cclsmax == _cclsmax1)
+
+    tooltiplbl = pair == 2 ? name +" hd " + ssmt_pair  :name +" hd " + ssmt_pair2    
+    lblstyleh = label.style_label_down
+    lblstylel = label.style_label_up
+
+    var hsmtbeh = line.new(na,na,na,na)
+    var hsmtbul = line.new(na,na,na,na) 
+    var hsmtbe  = label.new(na,na)
+    var hsmtbu  = label.new(na,na)
+
+    label ret_hsmtbe = na
+    label ret_hsmtbu = na
+
+    var harr_beh = array.new_line()
+    var harr_lbh = array.new_label()
+
+    var harr_bul = array.new_line()
+    var harr_lbl = array.new_label() 
+
+    if showon and _tfok and _tf_ok_V
+        if (_val_ses[1] != _val_ses or not _hbear0[1] or _clsmaxt != _clsmaxt[1] ) and  _hbear0  // and             
+            hsmtbeh := line.new(x1 = _clsmaxt1 , y1 = _clsmax1 , x2 = _clsmaxt , y2 = _clsmax , xloc=xloc.bar_time,color= hidelines ?color.new(_smt_clr,100):_smt_clr,width = 1,style=hiddstyle) 
+            add_to_line_array(harr_beh,hsmtbeh)
+            if not hidelabels
+                hsmtbe    := label.new(x=math.round(_clsmaxt+_clsmaxt1)/2, y = math.round_to_mintick(_clsmax1+_clsmax)/2,text = lbl ,xloc = xloc.bar_time,yloc = yloc.price,color = color.new(color.white, 100),
+                 style=lblstyleh,textcolor = _smt_txt_clr, size = i_font,tooltip = tooltiplbl, text_font_family = target_font)
+                ret_hsmtbe := hsmtbe
+                add_to_label_array(harr_lbh,hsmtbe)
+
+        if (_val_ses[1] != _val_ses or not _lbull0[1] or _clsmint != _clsmint[1] ) and  _lbull0 
+            hsmtbul := line.new(x1 = _clsmint1 , y1 = _clsmin1 , x2 = _clsmint , y2 = _clsmin , xloc=xloc.bar_time,color= hidelines ?color.new(_smt_clr,100):_smt_clr,width = 1,style = hiddstyle)
+            add_to_line_array(harr_bul,hsmtbul)
+            if not hidelabels
+                hsmtbu  := label.new(x=math.round(_clsmint+_clsmint1)/2, y = math.round_to_mintick(_clsmin1+_clsmin)/2,text = lbl ,xloc = xloc.bar_time,yloc = yloc.price,color = color.new(color.white, 100),
+                 style=lblstylel,textcolor = _smt_txt_clr, size = i_font,tooltip = tooltiplbl, text_font_family = target_font)
+                ret_hsmtbu := hsmtbu
+                add_to_label_array(harr_lbl,hsmtbu)
+
+
+    if array.size(harr_beh) > 0 and showon and _tfok and _tf_ok_V
+        if _val_ses == _val_ses[1] and _hbear0[1] and not _hbear0 
+            line.delete(hsmtbeh)
+            array.remove(harr_beh,0)
+            if not hidelabels and array.size(harr_lbh) > 0            
+                label.delete(hsmtbe)
+                array.remove(harr_lbh,0)               
+
+    if array.size(harr_beh) > 0 and showon and _tfok and _tf_ok_V
+        for i = array.size(harr_beh) -1 to 0
+            dline = array.get(harr_beh,i)
+            top    = line.get_y2(dline)
+            tme    = line.get_x2(dline)
+            if time > tme and math.max(open,close) >= top //and barstate.isconfirmed
+                line.delete(dline)
+                array.remove(harr_beh,i)
+                if not hidelabels and array.size(harr_lbh) > 0  
+                    dlbl   = array.get(harr_lbh,i)
+                    label.delete(dlbl)
+                    array.remove(harr_lbh,i)                  
+
+    if array.size(harr_bul) > 0 and showon and _tfok and _tf_ok_V//
+        if _val_ses == _val_ses[1] and _lbull0[1] and not _lbull0 
+            line.delete(hsmtbul)
+            array.remove(harr_bul,0) 
+            if not hidelabels and array.size(harr_lbl) > 0              
+                label.delete(hsmtbu)
+                array.remove(harr_lbl,0)
+
+    if array.size(harr_bul) > 0 and showon and _tfok and _tf_ok_V
+        for i = array.size(harr_bul) -1 to 0
+            dline = array.get(harr_bul,i)
+            bot    = line.get_y2(dline)
+            tme    = line.get_x2(dline)
+            if time > tme and math.min(open,close) <= bot //and barstate.isconfirmed
+                line.delete(dline)
+                array.remove(harr_bul,i)
+                if not hidelabels and array.size(harr_lbl) > 0 
+                    dlbl   = array.get(harr_lbl,i)                                     
+                    label.delete(dlbl)
+                    array.remove(harr_lbl,i)
+    [_hbear0,_lbull0, ret_hsmtbe, ret_hsmtbu]
+////////////////////////////////////////////////////////////////
+
+M_SSMT  = array.from(false,false,false,false,false,false,false,false,false,false)//0-5 smt1// 6-9 smt2
+W_SSMT  = array.from(false,false,false,false,false,false,false,false,false,false)//0-5 smt1// 6-9 smt2
+D_SSMT  = array.from(false,false,false,false,false,false,false,false,false,false)
+N_SSMT  = array.from(false,false,false,false,false,false,false,false,false,false)
+m_SSMT  = array.from(false,false,false,false,false,false,false,false,false,false)
+
+N_label = array.from("")
+D_label = array.from("")
+W_label = array.from("")
+M_label = array.from("")
+m_label = array.from("")
+
+N_ext   = array.from(0.0,0.0,0.0,0.0)//hmax,lmin,cmax,cmin
+D_ext   = array.from(0.0,0.0,0.0,0.0)
+W_ext   = array.from(0.0,0.0,0.0,0.0)
+M_ext   = array.from(0.0,0.0,0.0,0.0)
+m_ext   = array.from(0.0,0.0,0.0,0.0)
+//xy_ext   = array.from(0.0,0.0,0.0,0.0)
+N_bias = array.from("","","")
+D_bias = array.from("","","")
+W_bias = array.from("","","")
+M_bias = array.from("","","")
+m_bias = array.from("","","")
+//////////////////////////////////////////////////////////////////////////////////////////////////////////
+f_allrun(_tf_ok,_tf_ok_V,_val_ses,name,_arr_sesy,_arr_sesz,_show_smt, _smt_clr,_hsmt_clr,_smt_txt_clr,_show_hsmt,X_SSMT, X_label,X_ext,X_bias,arrst,shortname)=>
+    [hmaxt,lmint,hmax2,lmin2,hmax1,lmin1,hmax,lmin,hmaxt1,lmint1,clsmax,clsmax1,clsmaxt1,clsmin,clsmin1,clsmint1,clsmaxt,clsmint,o0,txt0,mbias] 
+     = f_main_process(_tf_ok,_tf_ok_V, _val_ses,open,close,high,low,time,false,name,_arr_sesy,_arr_sesz,arrst)
+    [chmaxt,clmint,chmax2,clmin2,chmax1,clmin1,chmax,clmin,chmaxt1,clmint1,cclsmax,cclsmax1,cclsmaxt1,cclsmin,cclsmin1,cclsmint1,cclsmaxt,cclsmint,co0,ctxt0,xbias]              
+     = f_main_process(_tf_ok,_tf_ok_V, _val_ses,xo0,xc0,xh0,xl0,xt0,false,"",_arr_sesy,_arr_sesz,arrst)
+    _ssmt_label = ""
+    //array.set(xy_ext,0, chmax)
+    //array.set(xy_ext,1, clmin)  
+    nm1 = ssmt_pair
+    nm2 = ssmt_pair2
+    label l_be1 = na, label l_bu1 = na
+    label l_hbe1 = na, label l_hbu1 = na
+    if alerttype != "Hidden"
+        [bear1,bear0,bull1,bull0, l_be1_t, l_bu1_t] = f_ssmt(hmax2,hmax1,hmax,lmin2,lmin1,lmin,
+          chmax2,chmax1,chmax,clmin2,clmin1,clmin,array.get(arrstart,arrst),false,
+          hmaxt,lmint,hmaxt1,lmint1,_tf_ok,_val_ses,_show_smt, _smt_clr,_smt_txt_clr,false,2,xh0,xl0 
+          , _tf_ok_V,shortname +" "+ nm1 ,name,2,array.get(arr_inv,0))//
+        l_be1 := l_be1_t
+        l_bu1 := l_bu1_t
+        array.set(X_SSMT,0,bear1)
+        array.set(X_SSMT,1,bear0)     
+        array.set(X_SSMT,2,bull1)
+        array.set(X_SSMT,3,bull0)
+        if tf_ok //and tf_ok_V
+            _ssmt_label := bear0 ? _ssmt_label +" " + name +  " Normal Bearish SSMT "+ ssmt_pair + '\n' : _ssmt_label
+            _ssmt_label := bull0 ? _ssmt_label +" " + name +  " Normal Bullish SSMT "+ ssmt_pair + '\n' : _ssmt_label
+
+    if alerttype != "Normal"
+        [hidbear2,hidbull2, l_hbe1_t, l_hbu1_t] = f_hidden_ssmt(clsmax,clsmax1,clsmin,clsmin1,clsmaxt,clsmaxt1,
+          clsmint,clsmint1,cclsmax,cclsmax1,cclsmin,cclsmin1,_tf_ok,_show_hsmt,_hsmt_clr,_smt_txt_clr,false,2,
+          _val_ses, hmax1 ,hmax, lmin1,lmin,chmax1,chmax,clmin1,clmin,xh0,xl0 ,
+           _tf_ok_V,shortname +" (hd) "+ nm1,name,2,array.get(arr_inv,0))
+        l_hbe1 := l_hbe1_t
+        l_hbu1 := l_hbu1_t
+        array.set(X_SSMT,4,hidbear2)
+        array.set(X_SSMT,5,hidbull2)
+        if tf_ok  //and tf_ok_V     
+            _ssmt_label := hidbear2 ? _ssmt_label +" " + name +  " Hidden Bearish SSMT "+ ssmt_pair + '\n' : _ssmt_label
+            _ssmt_label := hidbull2 ? _ssmt_label +" " + name +  " Hidden Bullish SSMT "+ ssmt_pair + '\n' : _ssmt_label
+
+    if triad_ok and showsmt2 
+        [dhmaxt,dlmint,dhmax2,dlmin2,dhmax1,dlmin1,dhmax,dlmin,dhmaxt1,dlmint1,dclsmax,dclsmax1,dclsmaxt1,dclsmin,dclsmin1,dclsmint1,dclsmaxt,dclsmint,do0,dtxt0,ybias]              
+          = f_main_process(_tf_ok,_tf_ok_V, _val_ses,yo0,yc0,yh0,yl0,yt0,false,"",_arr_sesy,_arr_sesz,1)
+
+        label l_be2 = na, label l_bu2 = na
+        label l_hbe2 = na, label l_hbu2 = na
+        if alerttype != "Hidden"
+            [bear13,bear03,bull13,bull03, l_be2_t, l_bu2_t] = f_ssmt(hmax2,hmax1,hmax,lmin2,lmin1,lmin,
+              dhmax2,dhmax1,dhmax,dlmin2,dlmin1,dlmin,array.get(arrstart,arrst),false,
+              hmaxt,lmint,hmaxt1,lmint1,_tf_ok,_val_ses,_show_smt, _smt_clr,_smt_txt_clr,true,2,yh0,yl0 ,
+               _tf_ok_V,shortname +" "+ nm2,name,3,array.get(arr_inv,1))//
+            l_be2 := l_be2_t
+            l_bu2 := l_bu2_t
+            if bear03
+                array.set(X_SSMT,6,bear03)               
+            if bull03
+                array.set(X_SSMT,7,bull03)
+            if tf_ok  //and tf_ok_V             
+                _ssmt_label := bear03 ? _ssmt_label +" " + name + " Normal Bearish SSMT "+ ssmt_pair2 + '\n' : _ssmt_label
+                _ssmt_label := bull03 ? _ssmt_label +" " + name + " Normal Bullish SSMT "+ ssmt_pair2 + '\n' : _ssmt_label
+
+        if alerttype != "Normal"                 
+            [hidbear3,hidbull3, l_hbe2_t, l_hbu2_t] = f_hidden_ssmt(clsmax,clsmax1,clsmin,clsmin1,clsmaxt,clsmaxt1,
+              clsmint,clsmint1,dclsmax,dclsmax1,dclsmin,dclsmin1,_tf_ok,_show_hsmt,_hsmt_clr,_smt_txt_clr,true,2,
+              _val_ses, hmax1 ,hmax, lmin1,lmin,dhmax1,dhmax,dlmin1,dlmin,yh0,yl0 ,
+               _tf_ok_V,shortname +" (hd) "+ nm2,name,3,array.get(arr_inv,1))  
+            l_hbe2 := l_hbe2_t
+            l_hbu2 := l_hbu2_t
+            if hidbear3
+                array.set(X_SSMT,8,true)               
+            if hidbull3
+                array.set(X_SSMT,9,true)
+            if tf_ok //and tf_ok_V
+                _ssmt_label := hidbear3 ? _ssmt_label +" " + name + " Hidden Bearish SSMT "+ ssmt_pair2+ '\n' : _ssmt_label
+                _ssmt_label := hidbull3 ? _ssmt_label +" " + name + " Hidden Bullish SSMT "+ ssmt_pair2+ '\n' : _ssmt_label
+          
+        if not na(l_be1) and not na(l_be2)
+            label.set_text(l_be1, shortname + " " + nm1 + " + " + nm2)
+            label.delete(l_be2)
+        if not na(l_bu1) and not na(l_bu2)
+            label.set_text(l_bu1, shortname + " " + nm1 + " + " + nm2)
+            label.delete(l_bu2)
+        if not na(l_hbe1) and not na(l_hbe2)
+            label.set_text(l_hbe1, shortname + " (hd) " + nm1 + " + " + nm2)
+            label.delete(l_hbe2)
+        if not na(l_hbu1) and not na(l_hbu2)
+            label.set_text(l_hbu1, shortname + " (hd) " + nm1 + " + " + nm2)
+            label.delete(l_hbu2)
+
+        array.set(X_bias,2, ybias)
+
+    // array.set(X_label,0,_ssmt_label)////table
+
+    //──────────────────────────────
+    // Combine Pair1 + Pair2 Signals
+    //──────────────────────────────
+    _bear_pair1 = array.get(X_SSMT,1) or array.get(X_SSMT,4)   // Normal or Hidden Bearish from pair1
+    _bull_pair1 = array.get(X_SSMT,3) or array.get(X_SSMT,5)   // Normal or Hidden Bullish from pair1
+    _bear_pair2 = array.get(X_SSMT,6) or array.get(X_SSMT,8)   // Normal or Hidden Bearish from pair2
+    _bull_pair2 = array.get(X_SSMT,7) or array.get(X_SSMT,9)   // Normal or Hidden Bullish from pair2
+
+    _combined_label = _ssmt_label  // start with original text
+
+    if tf_ok
+        if (_bear_pair1 and _bear_pair2)
+            _combined_label := name + "  Combined Bearish SSMT (" + ssmt_pair + " + " + ssmt_pair2 + ")" + '\n'
+        if (_bull_pair1 and _bull_pair2)
+            _combined_label := name + "  Combined Bullish SSMT (" + ssmt_pair + " + " + ssmt_pair2 + ")" + '\n'
+
+    // Store final label
+    array.set(X_label,0,_combined_label)
+
+
+    array.set(X_ext,0, hmax)
+    array.set(X_ext,1, lmin)
+    array.set(X_ext,2, clsmax)
+    array.set(X_ext,3, clsmin)    
+
+    array.set(X_bias,0, mbias)
+    array.set(X_bias,1, xbias)
+
+
+              
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+f_allrun(tf_ok    ,tf_ok_V,    val_ses ,"90m",    arr_sesy, arr_sesz, show_smtN, smtN_clr,hsmtN_clr,smt_txt_all,show_hsmtN,N_SSMT,N_label,N_ext,N_bias,1,"90m")
+f_allrun(tf_ok_mic,tf_ok_mic_V,val_sesm,"Micro",arr_sesmy,arr_sesmz,show_smtm, smtm_clr,hsmtm_clr,smt_txt_all,show_hsmtm,m_SSMT,m_label,m_ext,m_bias,0,"Mic.")
+f_allrun(tf_okD   ,tf_okD_V  , val_sesD,"Daily",      arr_sesDy,arr_sesDz,show_smtD, smtD_clr,hsmtD_clr,smt_txt_all,show_hsmtD,D_SSMT,D_label,D_ext,D_bias,2,"D")
+f_allrun(tf_okW   ,tf_okW_V  , val_sesW,"Weekly",      arr_sesWy,arr_sesWz,show_smtW, smtW_clr,hsmtW_clr,smt_txt_all,show_hsmtW,W_SSMT,W_label,W_ext,W_bias,3,"W")
+f_allrun(tf_okMo  ,tf_okMo_V , val_sesMo,"Monthly",   arr_sesMoy,arr_sesMoz,show_smtMo,smtMo_clr,hsmtMo_clr,smt_txt_all,show_hsmtMo,M_SSMT,M_label,M_ext,M_bias,4,"M")
+ 
+//////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////
+// 1. INPUTS & LOGIC FUNCTIONS (TPD ONLY)
+///////////////////////////////////////////////////////////////////////////////
+
+// --- MAIN SETTINGS ---
+show_tpd_labels = input.bool(true, "Show TPD", group = g2, tooltip="Checks for Open vs Previous Close divergence")
+tpd_size_input  = input.string("Small", "Label Size", options=["Tiny", "Small", "Normal", "Large", "Huge"], group = g2)
+
+// --- STYLING (Stacked) ---
+tpd_bull_shape = input.string("✦", "Bull Shape", options=["●", "✦", "♦", "♟", "⚡︎"], inline="tpd_bull", group = g2)
+tpd_bull_color = input.color(color.blue, "Color", inline="tpd_bull", group = g2)
+
+tpd_bear_shape = input.string("✦", "Bear Shape", options=["●", "✦", "♦", "♟", "⚡︎"], inline="tpd_bear", group = g2)
+tpd_bear_color = input.color(color.rgb(17, 14, 14), "Color", inline="tpd_bear", group = g2)
+
+// Map the input string to actual Pine Script size constants
+tpd_lbl_size = switch tpd_size_input
+    "Tiny"   => size.tiny
+    "Small"  => size.small
+    "Normal" => size.normal
+    "Large"  => size.large
+    "Huge"   => size.huge
+    => size.small
+
+// ---------------------------------------------------------------
+// FUNCTION: DYAD TPD (2 Pairs)
+// Updated signature: Added _size argument
+f_psp_tpd(_htf, _show_tpd, _size) => 
+    // Initialize return variables
+    var bool bull_tpd_out = false
+    var bool bear_tpd_out = false
+
+    if timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(_htf)
+        // Fetch Live Data (Requires f_live_sym to be defined elsewhere)
+        [mh2,ml2,mc2,mo2,mt2,mh1,ml1,mc1,mo1,mt1,mh0,ml0,mc0,mo0,mt0,mup1,mdw1,ml1t,mh1t] = f_live_sym(close,open,high,low,time,_htf)
+        [oh2,ol2,oc2,oo2,ot2,oh1,ol1,oc1,oo1,ot1,oh0,ol0,oc0,oo0,ot0,oup1,odw1,ol1t,oh1t] = f_live_sym(xc0,xo0,xh0,xl0,xt0,_htf)                  
+        
+        // TPD CALCULATION
+        arr_tpd = array.from(mc2 > mo0 , oc2 > oo0)
+        tpd     = not array.every(arr_tpd) and array.some(arr_tpd)
+
+        // FRACTALS
+        lws0 = array.from(ml2,ml1,ml0), lws1 = array.from(ol2,ol1,ol0)
+        con_lws0 = array.min(lws0) == ml1, con_lws1 = array.min(lws1) == ol1
+        con_lowx = array.from(con_lws0, con_lws1)
+        con_low  = array.some(con_lowx)
+
+        hgh0 = array.from(mh2,mh1,mh0), hgh1 = array.from(oh2,oh1,oh0)
+        con_hgh0 = array.max(hgh0) == mh1, con_hgh1 = array.max(hgh1) == oh1
+        con_hghx = array.from(con_hgh0, con_hgh1)
+        con_hgh  = array.some(con_hghx)
+
+        // --- SIGNALS ---
+        bear_tpd = con_hgh and tpd
+        bull_tpd = con_low and tpd
+        
+        // --- PLOTTING ---
+        // Updated: Uses _size variable now
+        if bear_tpd and _show_tpd
+            lblbear = label.new(mh1t, mh1, text=f_text(_htf)+ '\n' + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family = target_font)
+            label.delete(lblbear[1])
+        if bull_tpd and _show_tpd
+            lblbull = label.new(ml1t, ml1, text=tpd_bull_shape+ '\n'+ f_text(_htf), xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family = target_font)
+            label.delete(lblbull[1])
+
+        // Assign output
+        bear_tpd_out := bear_tpd
+        bull_tpd_out := bull_tpd
+    
+    // Return only TPD values
+    [bull_tpd_out, bear_tpd_out]
+
+// ---------------------------------------------------------------
+// FUNCTION: TRIAD TPD (3 Pairs)
+// Updated signature: Added _size argument
+f_psp_tpd_triad(_htf, _show_tpd, _size)=>
+    var bool bull_tpd_out = false
+    var bool bear_tpd_out = false
+
+    if timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(_htf)
+        // Live data fetching
+        [mh2,ml2,mc2,mo2,mt2,mh1,ml1,mc1,mo1,mt1,mh0,ml0,mc0,mo0,mt0,mup1,mdw1,ml1t,mh1t] = f_live_sym(close,open,high,low,time,_htf)
+        [oh2,ol2,oc2,oo2,ot2,oh1,ol1,oc1,oo1,ot1,oh0,ol0,oc0,oo0,ot0,oup1,odw1,ol1t,oh1t] = f_live_sym(xc0,xo0,xh0,xl0,xt0,_htf)
+        [ph2,pl2,pc2,po2,pt2,ph1,pl1,pc1,po1,pt1,ph0,pl0,pc0,po0,pt0,pup1,pdw1,pl1t,ph1t] = f_live_sym(yc0,yo0,yh0,yl0,yt0,_htf)                                
+        
+        // TPD CALCULATION
+        arr_tpd = array.from(mc2 > mo0 , oc2 > oo0, pc2 > po0)
+        tpd     = not array.every(arr_tpd) and array.some(arr_tpd)
+
+        // FRACTALS
+        lws0 = array.from(ml2,ml1,ml0), lws1 = array.from(ol2,ol1,ol0), lws2 = array.from(pl2,pl1,pl0)  
+        con_lws0 = array.min(lws0) == ml1, con_lws1 = array.min(lws1) == ol1, con_lws2 = array.min(lws2) == pl1
+        con_lowx = array.from(con_lws0, con_lws1,con_lws2)
+        con_low  = array.some(con_lowx)
+
+        hgh0 = array.from(mh2,mh1,mh0), hgh1 = array.from(oh2,oh1,oh0), hgh2 = array.from(ph2,ph1,ph0)
+        con_hgh0 = array.max(hgh0) == mh1, con_hgh1 = array.max(hgh1) == oh1, con_hgh2 = array.max(hgh2) == ph1
+        con_hghx = array.from(con_hgh0, con_hgh1, con_hgh2)
+        con_hgh  = array.some(con_hghx)
+
+        // --- SIGNALS ---
+        bear_tpd = con_hgh and tpd
+        bull_tpd = con_low and tpd
+        
+        // --- PLOTTING ---
+        // Updated: Uses _size variable now
+        if bear_tpd and _show_tpd
+            lblbear = label.new(mh1t, mh1, text=f_text(_htf)+ '\n' + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family = target_font)
+            label.delete(lblbear[1])
+        if bull_tpd and _show_tpd
+            lblbull = label.new(ml1t, ml1, text=tpd_bull_shape + '\n'+ f_text(_htf) , xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family = target_font)
+            label.delete(lblbull[1])
+
+        bear_tpd_out := bear_tpd, bull_tpd_out := bull_tpd
+    
+    [bull_tpd_out, bear_tpd_out]
+
+
+///////////////////////////////////////////////////////////////////////////////
+// 2. UPDATED EXECUTION
+///////////////////////////////////////////////////////////////////////////////
+
+// Initialize Labels and Arrays
+ssmt_label = ""
+TF1_TPD = array.from(false, false)
+TF2_TPD = array.from(false, false)
+TF3_TPD = array.from(false, false)
+
+// --- TRIAD EXECUTION (3 Pairs) ---
+// Updated: Passed 'tpd_lbl_size' to all functions
+if tf1ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tf1) and triad_ok
+    [tf1_bull_tpd, tf1_bear_tpd] = f_psp_tpd_triad(tf1, show_tpd_labels, tpd_lbl_size)  
+    ssmt_label := tf1_bear_tpd ? ssmt_label + f_text(tf1)+ " Bearish TPD ●" + '\n' : ssmt_label
+    ssmt_label := tf1_bull_tpd ? ssmt_label + f_text(tf1)+ " Bullish TPD ●" + '\n' : ssmt_label      
+    array.set(TF1_TPD, 0, tf1_bull_tpd)
+    array.set(TF1_TPD, 1, tf1_bear_tpd)
+
+if tf2ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tf2) and triad_ok
+    [tf2_bull_tpd, tf2_bear_tpd] = f_psp_tpd_triad(tf2, show_tpd_labels, tpd_lbl_size)
+    ssmt_label := tf2_bear_tpd ? ssmt_label + f_text(tf2)+  " Bearish TPD ● " + '\n' : ssmt_label
+    ssmt_label := tf2_bull_tpd ? ssmt_label + f_text(tf2)+  " Bullish TPD ●" + '\n' : ssmt_label
+    array.set(TF2_TPD, 0, tf2_bull_tpd)
+    array.set(TF2_TPD, 1, tf2_bear_tpd)        
+
+if tf3ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tf3) and triad_ok
+    [tf3_bull_tpd, tf3_bear_tpd] = f_psp_tpd_triad(tf3, show_tpd_labels, tpd_lbl_size)
+    ssmt_label := tf3_bear_tpd ? ssmt_label + f_text(tf3)+ " Bearish TPD ●" + '\n' : ssmt_label
+    ssmt_label := tf3_bull_tpd ? ssmt_label + f_text(tf3)+ " Bullish TPD ●" + '\n' : ssmt_label
+    array.set(TF3_TPD, 0, tf3_bull_tpd)
+    array.set(TF3_TPD, 1, tf3_bear_tpd)
+
+if tf0ok and triad_ok
+    [tf0_bull_tpd, tf0_bear_tpd] = f_psp_tpd_triad(timeframe.period, show_tpd_labels, tpd_lbl_size)
+
+
+// --- DYAD EXECUTION (2 Pairs) ---
+// Updated: Passed 'tpd_lbl_size' to all functions
+if tf1ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tf1) and not triad_ok
+    [tf1_bull_tpd, tf1_bear_tpd] = f_psp_tpd(tf1, show_tpd_labels, tpd_lbl_size)
+    ssmt_label := tf1_bear_tpd ? ssmt_label + f_text(tf1)+ " Bearish TPD  ●" + '\n' : ssmt_label
+    ssmt_label := tf1_bull_tpd ? ssmt_label + f_text(tf1)+ " Bullish TPD  ●" + '\n' : ssmt_label      
+    array.set(TF1_TPD, 0, tf1_bull_tpd)
+    array.set(TF1_TPD, 1, tf1_bear_tpd)
+
+if tf2ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tf2) and not triad_ok
+    [tf2_bull_tpd, tf2_bear_tpd] = f_psp_tpd(tf2, show_tpd_labels, tpd_lbl_size)
+    ssmt_label := tf2_bear_tpd ? ssmt_label + f_text(tf2)+  " Bearish TPD ●" + '\n' : ssmt_label
+    ssmt_label := tf2_bull_tpd ? ssmt_label + f_text(tf2)+  " Bullish TPD ●" + '\n' : ssmt_label
+    array.set(TF2_TPD, 0, tf2_bull_tpd)
+    array.set(TF2_TPD, 1, tf2_bear_tpd)        
+
+if tf3ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tf3) and not triad_ok
+    [tf3_bull_tpd, tf3_bear_tpd] = f_psp_tpd(tf3, show_tpd_labels, tpd_lbl_size)
+    ssmt_label := tf3_bear_tpd ? ssmt_label + f_text(tf3)+ " Bearish TPD ●" + '\n' : ssmt_label
+    ssmt_label := tf3_bull_tpd ? ssmt_label + f_text(tf3)+ " Bullish TPD ●" + '\n' : ssmt_label
+    array.set(TF3_TPD, 0, tf3_bull_tpd)
+    array.set(TF3_TPD, 1, tf3_bear_tpd)
+
+if tf0ok and not triad_ok
+    [tf0_bull_tpd, tf0_bear_tpd] = f_psp_tpd(timeframe.period, show_tpd_labels, tpd_lbl_size)
+
+// ============================================
+// ADVANCED PSP
+// ============================================
+
+// --- 1. DECLARE INPUTS ---
+group_psp_adv = "Advanced PSP Settings"
+
+// --- MAIN SETTINGS ---
+use_psp_adv   = input.bool(true, "Enable Advanced PSP", group=group_psp_adv)
+max_psp_bars  = input.int(500, "Max PSP Markers", minval=10, group=group_psp_adv)
+
+// --- VISIBILITY FILTER ---
+psp_vis_limit = input.timeframe("60", "Show on Timeframes >=", group=group_psp_adv, tooltip="The PSP will only be visible if the Chart Timeframe is Greater Than or Equal to this setting.")
+
+// --- DISPLAY MODE ---
+psp_mode      = input.string("Both", "Display Mode", options=["Icons Only", "Body Only", "Both"], group=group_psp_adv)
+
+// Logic helpers
+bool show_icons = (psp_mode == "Icons Only" or psp_mode == "Both")
+bool show_body  = (psp_mode == "Body Only"  or psp_mode == "Both")
+
+// --- STYLING ---
+psp_bull_clr   = input.color(color.blue, "Bullish Icon", inline="psp_style", group=group_psp_adv)
+psp_bear_clr   = input.color(color.black, "Bearish Icon", inline="psp_style", group=group_psp_adv)
+
+psp_bull_shape = input.string("●", "Shape", options=["●", "✦", "▲", "♦", "♟"], inline="psp_icon", group=group_psp_adv)
+psp_bear_shape = input.string("●", "Shape", options=["●", "✦", "▼", "♦", "♟"], inline="psp_icon", group=group_psp_adv)
+
+psp_size_str   = input.string("Small", "Size", options=["Tiny", "Small", "Normal", "Large", "Huge", "Auto"], inline="psp_icon", group=group_psp_adv)
+string psp_size  = switch psp_size_str
+    "Tiny"   => size.tiny
+    "Small"  => size.small
+    "Normal" => size.normal
+    "Large"  => size.large
+    "Huge"   => size.huge
+    "Auto"   => size.auto
+    => size.small
+
+psp_bull_body  = input.color(color.new(color.blue, 50), "Bull Body", inline="psp_body", group=group_psp_adv)
+psp_bear_body  = input.color(color.new(color.black, 50), "Bear Body", inline="psp_body", group=group_psp_adv)
+
+// Persistent Label Management
+var label[] psp_labels = array.new<label>()
+
+// --- 2. VISIBILITY LOGIC (Greater Than or Equal To) ---
+// Checks if current chart timeframe (in seconds) is >= the Limit set in options
+bool psp_is_visible = timeframe.in_seconds(timeframe.period) >= timeframe.in_seconds(psp_vis_limit)
+
+// --- 3. ADAPTIVE LOGIC FUNCTION ---
+f_calc_psp_adaptive(_tf, _show) =>
+    bool _bull_signal = false
+    bool _bear_signal = false
+    
+    // Only calculate if Show (Visibility) is true
+    if _show
+        float m_c = na
+        float m_o = na
+        float c1_c = na
+        float c1_o = na
+        float c2_c = na
+        float c2_o = na
+
+        // 1. Fetch Data (Optimized for Current Timeframe)
+        if timeframe.period == _tf
+            m_c := close
+            m_o := open
+            [t1c, t1o] = request.security(csym, _tf, [close, open], lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            [t2c, t2o] = request.security(tsym3, _tf, [close, open], lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            c1_c := t1c, c1_o := t1o
+            c2_c := t2c, c2_o := t2o
+        else
+            // Fallback if function is ever used for HTF in future
+            [mc, mo] = request.security(syminfo.tickerid, _tf, [close, open], lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            [t1c, t1o] = request.security(csym, _tf, [close, open], lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            [t2c, t2o] = request.security(tsym3, _tf, [close, open], lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            m_c := mc, m_o := mo
+            c1_c := t1c, c1_o := t1o
+            c2_c := t2c, c2_o := t2o
+        
+        // 2. Determine Direction
+        m_bull  = m_c > m_o
+        c1_bull = c1_c > c1_o
+        c2_bull = c2_c > c2_o
+        
+        // 3. Robust Inverse Logic
+        string main_name = str.lower(syminfo.tickerid)
+        string c1_name   = str.lower(csym)
+        string c2_name   = str.lower(tsym3)
+        
+        bool is_chart_dxy = str.contains(main_name, "dxy") or str.contains(main_name, "usdx") or str.contains(main_name, "dx1!")
+        bool is_c1_dxy    = str.contains(c1_name, "dxy") or str.contains(c1_name, "usdx") or str.contains(c1_name, "dx1!")
+        bool is_c2_dxy    = str.contains(c2_name, "dxy") or str.contains(c2_name, "usdx") or str.contains(c2_name, "dx1!")
+        
+        bool manual_inv_1 = array.get(arr_inv, 0)
+        bool manual_inv_2 = array.get(arr_inv, 1)
+        
+        bool inv_1 = manual_inv_1 or is_chart_dxy or is_c1_dxy
+        bool inv_2 = manual_inv_2 or is_chart_dxy or is_c2_dxy
+
+        // 4. Harmony Check
+        bool c1_is_harmonious = false
+        bool c2_is_harmonious = false
+        
+        if inv_1
+            c1_is_harmonious := (c1_bull != m_bull)
+        else
+            c1_is_harmonious := (c1_bull == m_bull)
+            
+        if inv_2
+            c2_is_harmonious := (c2_bull != m_bull)
+        else
+            c2_is_harmonious := (c2_bull == m_bull)
+        
+        // 5. Crack Detection (Signal)
+        bool crack_1 = not c1_is_harmonious
+        bool crack_2 = triad_ok ? (not c2_is_harmonious) : false
+        
+        if crack_1 or crack_2
+            _bull_signal := m_bull
+            _bear_signal := not m_bull
+            
+    [_bull_signal, _bear_signal]
+
+// --- 4. EXECUTION ---
+// We pass "use_psp_adv and psp_is_visible" as the trigger.
+// If either is false, the function returns false immediately.
+[any_bull, any_bear] = f_calc_psp_adaptive(timeframe.period, use_psp_adv and psp_is_visible)
+
+// --- 5. VISUALS ---
+// Logic: Check Master Switch + Visibility + Icon helper
+if use_psp_adv and show_icons and psp_is_visible
+    if any_bull
+        array.push(psp_labels, label.new(bar_index, low, text=psp_bull_shape, yloc=yloc.belowbar, color=#00000000, textcolor=psp_bull_clr, size=psp_size, style=label.style_none))
+    if any_bear
+        array.push(psp_labels, label.new(bar_index, high, text=psp_bear_shape, yloc=yloc.abovebar, color=#00000000, textcolor=psp_bear_clr, size=psp_size, style=label.style_none))
+
+if array.size(psp_labels) > max_psp_bars
+    label.delete(array.shift(psp_labels))
+
+// Logic: Check Master Switch + Visibility + Body helper
+barcolor(use_psp_adv and show_body and psp_is_visible ? (any_bull ? psp_bull_body : any_bear ? psp_bear_body : na) : na)
+
+
+///////////////////////////////////////////////////////////////////////////////
+// 3. ALERTS (Place at the bottom of the script)
+///////////////////////////////////////////////////////////////////////////////
+
+f_alert(a_con1, a_con2, a_con3, number) =>
+    var bull_alert_trigger = false
+    var bear_alert_trigger = false
+    
+    // --- NORMAL SSMT LOGIC ---
+    nbull_control_con1 = 
+      a_con1 == Mobu ? array.get(M_SSMT,3) or array.get(M_SSMT,7) : 
+      a_con1 == Wbu  ? array.get(W_SSMT,3) or array.get(W_SSMT,7) :
+      a_con1 == Dbu  ? array.get(D_SSMT,3) or array.get(D_SSMT,7) :
+      a_con1 == Nbu  ? array.get(N_SSMT,3) or array.get(N_SSMT,7) :
+      a_con1 == mbu  ? array.get(m_SSMT,3) or array.get(m_SSMT,7) :
+      a_con1 == "none" ? true : false  
+
+    nbear_control_con1 = 
+      a_con1 == Mobe ? array.get(M_SSMT,1) or array.get(M_SSMT,6) : 
+      a_con1 == Wbe  ? array.get(W_SSMT,1) or array.get(W_SSMT,6) :
+      a_con1 == Dbe  ? array.get(D_SSMT,1) or array.get(D_SSMT,6) :
+      a_con1 == Nbe  ? array.get(N_SSMT,1) or array.get(N_SSMT,6) :
+      a_con1 == mbe  ? array.get(m_SSMT,1) or array.get(m_SSMT,6) :
+      a_con1 == "none" ? true : false
+
+    bull_control_con2 = 
+      a_con2 == tf1bu ? array.get(TF1_TPD,0) :
+      a_con2 == tf2bu ? array.get(TF2_TPD,0) :
+      a_con2 == tf3bu ? array.get(TF3_TPD,0) :
+      a_con2 == "none"  ? true : false  
+ 
+    bear_control_con2 = 
+      a_con2 == tf1be ? array.get(TF1_TPD,1) :
+      a_con2 == tf2be ? array.get(TF2_TPD,1) :
+      a_con2 == tf3be ? array.get(TF3_TPD,1) :
+      a_con2 == "none"  ? true : false  
+
+    nbull_control_con3 = 
+      a_con3 == Mobu ? array.get(M_SSMT,3) or array.get(M_SSMT,7) : 
+      a_con3 == Dbu  ? array.get(D_SSMT,3) or array.get(D_SSMT,7) :
+      a_con3 == Nbu  ? array.get(N_SSMT,3) or array.get(N_SSMT,7) :
+      a_con3 == mbu  ? array.get(m_SSMT,3) or array.get(m_SSMT,7) :
+      a_con3 == "none" ? true : false  
+
+    nbear_control_con3 = 
+      a_con3 == Mobe ? array.get(M_SSMT,1) or array.get(M_SSMT,6) : 
+      a_con3 == Dbe  ? array.get(D_SSMT,1) or array.get(D_SSMT,6) :
+      a_con3 == Nbe  ? array.get(N_SSMT,1) or array.get(N_SSMT,6) :
+      a_con3 == mbe  ? array.get(m_SSMT,1) or array.get(m_SSMT,6) :
+      a_con3 == "none" ? true : false  
+
+    // --- HIDDEN SSMT LOGIC ---
+    hbull_control_con1 = 
+      a_con1 == Mobu ? array.get(M_SSMT,5) or array.get(M_SSMT,9) : 
+      a_con1 == Wbu  ? array.get(W_SSMT,5) or array.get(W_SSMT,9) :
+      a_con1 == Dbu  ? array.get(D_SSMT,5) or array.get(D_SSMT,9) :
+      a_con1 == Nbu  ? array.get(N_SSMT,5) or array.get(N_SSMT,9) :
+      a_con1 == mbu  ? array.get(m_SSMT,5) or array.get(m_SSMT,9) :
+      a_con1 == "none" ? true : false  
+
+    hbear_control_con1 = 
+      a_con1 == Mobe ? array.get(M_SSMT,4) or array.get(M_SSMT,8) : 
+      a_con1 == Wbe  ? array.get(W_SSMT,4) or array.get(W_SSMT,8) :
+      a_con1 == Dbe  ? array.get(D_SSMT,4) or array.get(D_SSMT,8) :
+      a_con1 == Nbe  ? array.get(N_SSMT,4) or array.get(N_SSMT,8) :
+      a_con1 == mbe  ? array.get(m_SSMT,4) or array.get(m_SSMT,8) :
+      a_con1 == "none" ? true : false
+
+    hbull_control_con3 = 
+      a_con3 == Mobu ? array.get(M_SSMT,5) or array.get(M_SSMT,9) : 
+      a_con3 == Dbu  ? array.get(D_SSMT,5) or array.get(D_SSMT,9) :
+      a_con3 == Nbu  ? array.get(N_SSMT,5) or array.get(N_SSMT,9) :
+      a_con3 == mbu  ? array.get(m_SSMT,5) or array.get(m_SSMT,9) :
+      a_con3 == "none" ? true : false  
+
+    hbear_control_con3 = 
+      a_con3 == Mobe ? array.get(M_SSMT,4) or array.get(M_SSMT,8) : 
+      a_con3 == Dbe  ? array.get(D_SSMT,4) or array.get(D_SSMT,8) :
+      a_con3 == Nbe  ? array.get(N_SSMT,4) or array.get(N_SSMT,8) :
+      a_con3 == mbe  ? array.get(m_SSMT,4) or array.get(m_SSMT,8) :
+      a_con3 == "none" ? true : false  
+
+    // --- RESET TRIGGERS ON NEW CYCLE ---
+    newcyc1 = str.contains(a_con1,"M") ? newMo : str.contains(a_con1,"W") ? newW : str.contains(a_con1,"D") ? newD : str.contains(a_con1,"N") ? newN : str.contains(a_con1,"m") ? newm : false
+    newcyc3 = str.contains(a_con3,"D") ? newD : str.contains(a_con3,"N") ? newN : str.contains(a_con3,"m") ? newm : false
+    newcyc  = newcyc1 or newcyc3
+    
+    if newcyc
+        bull_alert_trigger := false
+        bear_alert_trigger := false  
+ 
+    // --- COMBINE CONTROLS ---
+    bull_control_con1 = alerttype == "All" ? nbull_control_con1 or hbull_control_con1 : alerttype == "Normal" ? nbull_control_con1 : hbull_control_con1
+    bear_control_con1 = alerttype == "All" ? nbear_control_con1 or hbear_control_con1 : alerttype == "Normal" ? nbear_control_con1 : hbear_control_con1
+ 
+    bull_control_con3 = alerttype == "All" ? nbull_control_con1 or hbull_control_con1 : alerttype == "Normal" ? nbull_control_con1 : hbull_control_con1
+    bear_control_con3 = alerttype == "All" ? nbear_control_con3 or hbear_control_con3 : alerttype == "Normal" ? nbear_control_con3 : hbear_control_con3
+
+    // --- FIRE ALERTS ---
+    bull_alert = bull_control_con1 and bull_control_con2 and bull_control_con3  and not (a_con1 == "none" and a_con2 == "none" and a_con3 == "none" )
+    if bull_alert and bull_alert_trigger == false
+        alert(number+" ✦ Bullish Selection Active " + '\n' + a_con1 +" " + a_con2+ " " + a_con3  + '\n'+ " " ,alert.freq_once_per_bar)
+        bull_alert_trigger := true
+
+    bear_alert = bear_control_con1 and bear_control_con2 and bear_control_con3   and not (a_con1 == "none" and a_con2 == "none" and a_con3 == "none" )
+    if bear_alert and bear_alert_trigger == false
+        alert(number+" ✦ Bearish Selection Active "+ '\n' + a_con1 +" " + a_con2+ " " + a_con3 + " " + '\n'+ " ",alert.freq_once_per_bar)
+        bear_alert_trigger := true
+
+    // --- RESET TRIGGERS ---
+    if bull_alert[1] and bull_alert == false
+        bull_alert_trigger := false
+    if bear_alert[1] and bear_alert == false
+        bear_alert_trigger := false
+
+// --- ALERT EXECUTION ---
+if al1ok
+    f_alert(al_con1, al_con2, al_con3, "1")
+if al2ok
+    f_alert(bl_con1, bl_con2, bl_con3, "2")
+if al3ok
+    f_alert(cl_con1, cl_con2, cl_con3, "3")
+if al4ok
+    f_alert(dl_con1, dl_con2, dl_con3, "4")
+
+// -----------------------------------------------------------------------------
+// True CHANGE IN STATE OF DELIVERY (tCISD)
+// -----------------------------------------------------------------------------
+// 1. tCISD Inputs
+g_csd = "True Change in State of Delivery (tCISD)"
+
+// --- MAIN SETTINGS ---
+show_csd         = input.bool(true, "Show tCISD Lines", group=g_csd)
+tCISD_alert_type = input.string("All", "Alert Trigger", options=["All", "Creation", "Invalidation", "Retest", "Off"], group=g_csd)
+
+// --- VISIBILITY ---
+show_mic_cisd = input.bool(true, "Micro", inline="vis_1", group=g_csd)
+show_90m_cisd = input.bool(true, "90m",   inline="vis_1", group=g_csd)
+show_d_cisd   = input.bool(true, "Daily", inline="vis_1", group=g_csd)
+show_w_cisd   = input.bool(true, "Weekly", inline="vis_1", group=g_csd)
+show_m_cisd   = input.bool(true, "Monthly", inline="vis_1", group=g_csd)
+
+// --- STYLING ---
+csd_bull_clr      = input.color(color.new(color.green, 20), "Bullish Color", inline="style_1", group=g_csd)
+csd_bear_clr      = input.color(color.new(color.red, 20), "Bearish Color", inline="style_2", group=g_csd)
+csd_pending_color = input.color(color.new(color.orange, 0), "Pending Color", inline="style_3", group=g_csd)
+
+csd_line_style = input.string(line.style_dashed, "Line Style", options=[line.style_solid, line.style_dashed, line.style_dotted], inline="style_prop", group=g_csd)
+csd_line_width = input.int(1, "Width", minval=1, maxval=5, inline="style_prop", group=g_csd)
+
+// --- LABELS ---
+csd_lbl_size   = input.string(size.small, "Label Size", options=[size.tiny, size.small, size.normal], inline="lbl", group=g_csd)
+qcisd_txt_clr  = input.color(color.new(color.white, 10), "Text Color", inline="lbl", group=g_csd)
+csd_monospaced = input.bool(false, "Monospace", inline="lbl", group=g_csd)
+
+// --- HIGH PROBABILITY (HP) ---
+show_hp_csd     = input.bool(true, "High Probability (HP) Mode", inline="hp", group=g_csd)
+hp_csd_bull_clr = input.color(color.new(color.aqua, 20), "HP Bull", inline="hp", group=g_csd)
+hp_csd_bear_clr = input.color(color.new(color.fuchsia, 20), "HP Bear", inline="hp", group=g_csd)
+
+// --- TECHNICAL ---
+max_csd_show = input.int(50, "Max Lines", minval=1, maxval=100, inline="tech", group=g_csd)
+qcisd_buffer = input.int(15, 'Line Length', minval = 1, maxval = 100, inline="tech", group=g_csd)
+
+// FONT LOGIC
+csd_target_font = csd_monospaced ? font.family_monospace : font.family_default
+
+// Cycle Visibility Logic (Linked to Toggles)
+show_cyclesmic = true 
+show_cycles90  = true
+show_cyclesD   = true
+show_cyclesW   = true
+show_cyclesMo  = true
+
+// Helper functions
+f_check_bear_ssmt(_arr) => array.size(_arr) > 9 ? (array.get(_arr, 1) or array.get(_arr, 4) or array.get(_arr, 6) or array.get(_arr, 8)) : false
+f_check_bull_ssmt(_arr) => array.size(_arr) > 9 ? (array.get(_arr, 3) or array.get(_arr, 5) or array.get(_arr, 7) or array.get(_arr, 9)) : false
+
+bool alert_on_creation = tCISD_alert_type == "All" or tCISD_alert_type == "Creation"
+bool alert_on_invalidation = tCISD_alert_type == "All" or tCISD_alert_type == "Invalidation"
+bool alert_on_retest = tCISD_alert_type == "All" or tCISD_alert_type == "Retest"
+
+// GLOBAL PERSISTENT VARIABLES
+var csd_lines = array.new_line()
+var csd_lbls = array.new_label()
+var csd_dir = array.new_bool() // Tracks Direction: true=Bull, false=Bear
+
+var hp_csd_lines = array.new_line()
+var hp_csd_lbls = array.new_label()
+var hp_csd_dir = array.new_bool() // Tracks Direction: true=Bull, false=Bear
+
+// 2. CSD Function
+f_run_csd(_buffer, _max_show) =>
+    // Extension length
+    int ext_len = (time - time[1]) * _buffer
+    
+    // Visibility Logic
+    bool valid_mic = show_mic_cisd and show_cyclesmic and tf_ok_mic_V
+    bool is_bull_m = valid_mic and f_check_bull_ssmt(m_SSMT), is_bear_m = valid_mic and f_check_bear_ssmt(m_SSMT)
+    
+    bool valid_90 = show_90m_cisd and show_cycles90 and tf_ok_V
+    bool is_bull_n = valid_90 and f_check_bull_ssmt(N_SSMT), is_bear_n = valid_90 and f_check_bear_ssmt(N_SSMT)
+    
+    bool valid_D = show_d_cisd and show_cyclesD and tf_okD_V
+    bool is_bull_d = valid_D and f_check_bull_ssmt(D_SSMT), is_bear_d = valid_D and f_check_bear_ssmt(D_SSMT)
+    
+    bool valid_W = show_w_cisd and show_cyclesW and tf_okW_V
+    bool is_bull_w = valid_W and f_check_bull_ssmt(W_SSMT), is_bear_w = valid_W and f_check_bear_ssmt(W_SSMT)
+    
+    bool valid_Mo = show_m_cisd and show_cyclesMo and tf_okMo_V
+    bool is_bull_mo = valid_Mo and f_check_bull_ssmt(M_SSMT), is_bear_mo = valid_Mo and f_check_bear_ssmt(M_SSMT)
+
+    bool is_bull_any = is_bull_m or is_bull_n or is_bull_d or is_bull_w or is_bull_mo
+    bool is_bear_any = is_bear_m or is_bear_n or is_bear_d or is_bear_w or is_bear_mo
+    
+    bool new_bull_ssmt = is_bull_any and not is_bull_any[1]
+    bool new_bear_ssmt = is_bear_any and not is_bear_any[1]
+
+    // 3. EXECUTION (IMMEDIATE DRAW)
+    if show_csd and barstate.isconfirmed
+        
+        // --- BULLISH CREATION ---
+        if new_bull_ssmt
+            float csd_level = na
+            string src = ""
+            int csd_idx = time[1]
+
+            // Determine Source
+            if is_bull_m
+                src := "Mic"
+            else if is_bull_n
+                src := "90M"
+            else if is_bull_d
+                src := "D"
+            else if is_bull_w
+                src := "W"
+            else if is_bull_mo
+                src := "M"
+            
+            // Determine Level
+            if close[1] < open[1]
+                csd_level := open[1]
+            else
+                csd_level := close[1]
+
+            // HP Bias Check
+            string required_bias = ""
+            if src == "Mic" 
+                required_bias := array.get(D_bias, 0)
+            else if src == "90M" 
+                required_bias := array.get(W_bias, 0)
+            else if src == "D" 
+                required_bias := array.get(W_bias, 0)
+            else if src == "W" 
+                required_bias := array.get(M_bias, 0)
+
+            string clean_txt = "+" + src + "_tCISD" 
+            string hp_txt = "+⚡" + src + "_tCISD"
+
+            if show_hp_csd and required_bias == "Bullish"
+                line l_hp = line.new(csd_idx, csd_level, time + ext_len, csd_level, xloc=xloc.bar_time, color=csd_pending_color, width=csd_line_width, style=csd_line_style)
+                label lb_hp = label.new(time + ext_len, csd_level, hp_txt, xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white, 100), textcolor=qcisd_txt_clr, size=csd_lbl_size, text_font_family=csd_target_font)
+                
+                array.unshift(hp_csd_lines, l_hp)
+                array.unshift(hp_csd_lbls, lb_hp)
+                array.unshift(hp_csd_dir, true) // True = Bullish
+                if alert_on_creation
+                    alert("HP Bullish tCISD Created: " + hp_txt + " at " + str.tostring(csd_level), alert.freq_once_per_bar_close)
+            else
+                line l_csd = line.new(csd_idx, csd_level, time + ext_len, csd_level, xloc=xloc.bar_time, color=csd_pending_color, width=csd_line_width, style=csd_line_style)
+                label lb_csd = label.new(time + ext_len, csd_level, clean_txt, xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white, 100), textcolor=qcisd_txt_clr, size=csd_lbl_size, text_font_family=csd_target_font)
+                
+                array.unshift(csd_lines, l_csd)
+                array.unshift(csd_lbls, lb_csd)
+                array.unshift(csd_dir, true) // True = Bullish
+                if alert_on_creation
+                    alert("Bullish tCISD Created: " + clean_txt + " at " + str.tostring(csd_level), alert.freq_once_per_bar_close)
+
+        // --- BEARISH CREATION ---
+        if new_bear_ssmt
+            float csd_level = na
+            string src = ""
+            int csd_idx = time[1]
+
+            // Determine Source
+            if is_bear_m
+                src := "Mic"
+            else if is_bear_n
+                src := "90M"
+            else if is_bear_d
+                src := "D"
+            else if is_bear_w
+                src := "W"
+            else if is_bear_mo
+                src := "M"
+            
+            // Determine Level
+            if close[1] > open[1]
+                csd_level := open[1]
+            else
+                csd_level := close[1]
+
+            // HP Bias Check
+            string required_bias = ""
+            if src == "Mic" 
+                required_bias := array.get(D_bias, 0)
+            else if src == "90M" 
+                required_bias := array.get(W_bias, 0)
+            else if src == "D" 
+                required_bias := array.get(W_bias, 0)
+            else if src == "W" 
+                required_bias := array.get(M_bias, 0)
+
+            string clean_txt = "-" + src + "_tCISD"
+            string hp_txt = "-⚡" + src + "_tCISD"
+
+            if show_hp_csd and required_bias == "Bearish"
+                line l_hp = line.new(csd_idx, csd_level, time + ext_len, csd_level, xloc=xloc.bar_time, color=csd_pending_color, width=csd_line_width, style=csd_line_style)
+                label lb_hp = label.new(time + ext_len, csd_level, hp_txt, xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white, 100), textcolor=qcisd_txt_clr, size=csd_lbl_size, text_font_family=csd_target_font)
+                
+                array.unshift(hp_csd_lines, l_hp)
+                array.unshift(hp_csd_lbls, lb_hp)
+                array.unshift(hp_csd_dir, false) // False = Bearish
+                if alert_on_creation
+                    alert("HP Bearish tCISD Created: " + hp_txt + " at " + str.tostring(csd_level), alert.freq_once_per_bar_close)
+            else
+                line l_csd = line.new(csd_idx, csd_level, time + ext_len, csd_level, xloc=xloc.bar_time, color=csd_pending_color, width=csd_line_width, style=csd_line_style)
+                label lb_csd = label.new(time + ext_len, csd_level, clean_txt, xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white, 100), textcolor=qcisd_txt_clr, size=csd_lbl_size, text_font_family=csd_target_font)
+                
+                array.unshift(csd_lines, l_csd)
+                array.unshift(csd_lbls, lb_csd)
+                array.unshift(csd_dir, false) // False = Bearish
+                if alert_on_creation
+                    alert("Bearish tCISD Created: " + clean_txt + " at " + str.tostring(csd_level), alert.freq_once_per_bar_close)
+
+    // 5. Management (Handles Coloring and Invalidation)
+    // Standard CISD
+    if array.size(csd_lines) > 0
+        for i = array.size(csd_lines) - 1 to 0
+            line l_curr = array.get(csd_lines, i)
+            label lbl_curr = array.get(csd_lbls, i)
+            float lvl = line.get_y1(l_curr)
+            
+            // Check Direction from parallel array
+            bool is_bull_dir = array.get(csd_dir, i)
+            
+            bool delete_it = false
+            
+            if is_bull_dir
+                bool bb0 = close < lvl and open < lvl
+                bool bb1 = close[1] < lvl and open[1] < lvl
+                bool bb2 = close[2] < lvl and open[2] < lvl
+                
+                // Untouched/Pending
+                if bb0 
+                    line.set_color(l_curr, csd_pending_color)
+                
+                // Invalidated
+                if bb0 and bb1 and bb2 
+                    delete_it := true
+                // Validated (Break)
+                else if close > lvl or open > lvl 
+                    line.set_color(l_curr, csd_bull_clr)
+                
+                if alert_on_retest and low[1] <= lvl and (close[1] < lvl or open[1] < lvl) and close > lvl and open > lvl
+                    alert("Retest Bullish tCISD", alert.freq_once_per_bar_close)
+
+            else // Bearish
+                bool bb0 = close > lvl and open > lvl
+                bool bb1 = close[1] > lvl and open[1] > lvl
+                bool bb2 = close[2] > lvl and open[2] > lvl
+                
+                // Untouched/Pending
+                if bb0 
+                    line.set_color(l_curr, csd_pending_color)
+                
+                // Invalidated
+                if bb0 and bb1 and bb2 
+                    delete_it := true
+                // Validated (Break)
+                else if close < lvl or open < lvl 
+                    line.set_color(l_curr, csd_bear_clr)
+                
+                if alert_on_retest and high[1] >= lvl and (close[1] > lvl or open[1] > lvl) and close < lvl and open < lvl
+                    alert("Retest Bearish tCISD", alert.freq_once_per_bar_close)
+            
+            if delete_it
+                line.delete(l_curr)
+                label.delete(lbl_curr)
+                array.remove(csd_lines, i)
+                array.remove(csd_lbls, i)
+                array.remove(csd_dir, i) // Remove bias entry
+                if alert_on_invalidation 
+                    alert("tCISD Invalidated", alert.freq_once_per_bar_close)
+
+    // HP-CISD
+    if array.size(hp_csd_lines) > 0
+        for i = array.size(hp_csd_lines) - 1 to 0
+            line l_curr = array.get(hp_csd_lines, i)
+            label lbl_curr = array.get(hp_csd_lbls, i)
+            float lvl = line.get_y1(l_curr)
+            
+            // Check Direction from parallel array
+            bool is_bull_dir = array.get(hp_csd_dir, i)
+            bool delete_it = false
+            
+            if is_bull_dir
+                bool bb0 = close < lvl and open < lvl
+                bool bb1 = close[1] < lvl and open[1] < lvl
+                
+                if bb0 
+                    line.set_color(l_curr, csd_pending_color)
+                
+                if bb0 and bb1 
+                    delete_it := true
+                else if close > lvl or open > lvl 
+                    line.set_color(l_curr, hp_csd_bull_clr)
+
+            else // Bearish
+                bool bb0 = close > lvl and open > lvl
+                bool bb1 = close[1] > lvl and open[1] > lvl
+                
+                if bb0 
+                    line.set_color(l_curr, csd_pending_color)
+                
+                if bb0 and bb1 
+                    delete_it := true
+                else if close < lvl or open < lvl 
+                    line.set_color(l_curr, hp_csd_bear_clr)
+            
+            if delete_it
+                line.delete(l_curr)
+                label.delete(lbl_curr)
+                array.remove(hp_csd_lines, i)
+                array.remove(hp_csd_lbls, i)
+                array.remove(hp_csd_dir, i) // Remove bias entry
+                if alert_on_invalidation 
+                    alert("HP tCISD Invalidated", alert.freq_once_per_bar_close)
+
+    while array.size(csd_lines) > _max_show
+        line.delete(array.pop(csd_lines))
+        label.delete(array.pop(csd_lbls))
+        array.pop(csd_dir)
+        
+    while array.size(hp_csd_lines) > _max_show
+        line.delete(array.pop(hp_csd_lines))
+        label.delete(array.pop(hp_csd_lbls))
+        array.pop(hp_csd_dir)
+
+f_run_csd(qcisd_buffer, max_csd_show)
+
+// ============================================
+// HTF CANDLES (OPTIMIZED)
+// ============================================
+
+// Types for MTF Candles
+type Sweep
+    line htf_marker
+    line price_marker  
+    label chart_label  
+    bool is_high
+    int end_idx
+    int start_bar_idx  
+    float sweep_price  
+    bool is_fulfilled  
+    int sweep_bar_idx  
+
+type Midpoint
+    line htf_marker
+    line chart_marker  
+    float price
+    int end_idx
+
+type Candle
+    float o
+    float c
+    float h
+    float l
+    int o_time
+    int o_idx
+    int c_idx
+    int h_idx
+    int l_idx
+    string dow
+    box body
+    line wick_up
+    line wick_down
+    label dow_label
+    array<Sweep> sweeps
+    array<Midpoint> midpoints
+
+type Trace
+    line o
+    line c
+    line h
+    line l
+    label o_l
+    label c_l
+    label h_l
+    label l_l
+
+type Imbalance
+    box b
+    int idx
+
+type HTFChartFVG
+    box fvg_box
+    label fvg_label
+    float top
+    float bottom
+    int start_bar
+    int end_bar
+    bool is_bullish
+    string timeframe
+    int htf_number
+
+type CandleSettings
+    bool show
+    string htf
+    int max_display
+
+// Types for Chart FVGs
+type ChartFVG
+    box fvg_box
+    float top
+    float bottom
+    int start_bar
+    bool is_bullish
+    bool is_mitigated
+    float mitigation_price
+    int mitigation_bar
+
+type FVGSettings
+    bool show_chart_fvg
+    color bullish_fvg_color
+    color bearish_fvg_color
+    color mitigated_fvg_color
+    int max_fvg_display
+    bool show_mitigated
+    bool delete_mitigated
+    bool extend_fvg
+    bool show_fvg_labels
+    float threshold
+
+// Settings Types
+type Settings
+    int max_sets
+    color bull_body
+    color bull_border
+    color bull_wick
+    color bear_body
+    color bear_border
+    color bear_wick
+    int offset
+    int buffer
+    int htf_buffer
+    int width
+    string bias
+    bool daily_name
+    bool trace_show
+    color trace_o_color
+    string trace_o_style
+    int trace_o_size
+    color trace_c_color
+    string trace_c_style
+    int trace_c_size
+    color trace_h_color
+    string trace_h_style
+    int trace_h_size
+    color trace_l_color
+    string trace_l_style
+    int trace_l_size
+    string trace_anchor
+    bool label_show
+    color label_color
+    string label_size
+    string label_position
+    string label_alignment
+    bool fvg_show
+    bool show_latest
+    color fvg_color
+    float fvg_threshold
+    bool vi_show
+    color vi_color
+    bool htf_label_show
+    color htf_label_color
+    string htf_label_size
+    bool htf_timer_show
+    color htf_timer_color
+    string htf_timer_size
+    color dow_color
+    string dow_size
+    bool sweep_show
+    color sweep_color
+    int sweep_width
+    string sweep_style
+    bool midpoint_show
+    color midpoint_color
+    int midpoint_width
+    string midpoint_style
+    bool midpoint_show_on_chart  
+    color midpoint_chart_color   
+    bool show_sep
+    color sep_color
+    string sep_style
+    int sep_width
+    int sep_tf
+    bool sweep_show_on_chart  
+    color sweep_chart_color
+    bool sweep_show_chart_labels  
+    bool fvg_show_on_chart
+    bool fvg_chart_show_labels
+    color fvg_chart_label_color
+    string fvg_chart_label_size
+    string fvg_chart_label_position
+    bool htf1_bull_fvg_show
+    color htf1_bull_fvg_color
+    bool htf1_bear_fvg_show
+    color htf1_bear_fvg_color
+    bool htf2_bull_fvg_show
+    color htf2_bull_fvg_color
+    bool htf2_bear_fvg_show
+    color htf2_bear_fvg_color
+    bool htf3_bull_fvg_show
+    color htf3_bull_fvg_color
+    bool htf3_bear_fvg_show
+    color htf3_bear_fvg_color
+    bool htf4_bull_fvg_show
+    color htf4_bull_fvg_color
+    bool htf4_bear_fvg_show
+    color htf4_bear_fvg_color
+    bool htf5_bull_fvg_show
+    color htf5_bull_fvg_color
+    bool htf5_bear_fvg_show
+    color htf5_bear_fvg_color
+    bool htf6_bull_fvg_show
+    color htf6_bull_fvg_color
+    bool htf6_bear_fvg_show
+    color htf6_bear_fvg_color
+    bool chart_tf_bump
+    bool monospaced 
+
+type CandleSet
+    array<Candle> candles
+    array<Imbalance> imbalances
+    array<Sweep> active_sweeps
+    array<Midpoint> active_midpoints
+    CandleSettings settings
+    int tfNumber
+    label tfNameTop
+    label tfNameBottom
+    label tfTimerTop
+    label tfTimerBottom
+
+type Helper
+    string name = 'Helper'
+
+// Performance Cache Variables
+var int current_tf_seconds = timeframe.in_seconds()
+var string timezone = 'America/New_York'
+var float cached_atr = na
+
+// Variables
+Settings settings = Settings.new()
+FVGSettings fvg_settings = FVGSettings.new()
+
+var array<line> separators = array.new_line(0)
+var array<ChartFVG> chart_fvgs = array.new<ChartFVG>()
+var array<HTFChartFVG> htf_chart_fvgs = array.new<HTFChartFVG>()
+var array<line> chart_midpoint_lines = array.new<line>()  
+
+var CandleSettings SettingsHTF1 = CandleSettings.new()
+var CandleSettings SettingsHTF2 = CandleSettings.new()
+var CandleSettings SettingsHTF3 = CandleSettings.new()
+var CandleSettings SettingsHTF4 = CandleSettings.new()
+var CandleSettings SettingsHTF5 = CandleSettings.new()
+var CandleSettings SettingsHTF6 = CandleSettings.new()
+
+var array<Candle> candles_1 = array.new<Candle>(0)
+var array<Candle> candles_2 = array.new<Candle>(0)
+var array<Candle> candles_3 = array.new<Candle>(0)
+var array<Candle> candles_4 = array.new<Candle>(0)
+var array<Candle> candles_5 = array.new<Candle>(0)
+var array<Candle> candles_6 = array.new<Candle>(0)
+
+var array<Imbalance> imbalances_1 = array.new<Imbalance>()
+var array<Imbalance> imbalances_2 = array.new<Imbalance>()
+var array<Imbalance> imbalances_3 = array.new<Imbalance>()
+var array<Imbalance> imbalances_4 = array.new<Imbalance>()
+var array<Imbalance> imbalances_5 = array.new<Imbalance>()
+var array<Imbalance> imbalances_6 = array.new<Imbalance>()
+
+var array<Sweep> active_sweeps_1 = array.new<Sweep>(0)
+var array<Sweep> active_sweeps_2 = array.new<Sweep>(0)
+var array<Sweep> active_sweeps_3 = array.new<Sweep>(0)
+var array<Sweep> active_sweeps_4 = array.new<Sweep>(0)
+var array<Sweep> active_sweeps_5 = array.new<Sweep>(0)
+var array<Sweep> active_sweeps_6 = array.new<Sweep>(0)
+
+var array<Midpoint> active_midpoints_1 = array.new<Midpoint>(0)
+var array<Midpoint> active_midpoints_2 = array.new<Midpoint>(0)
+var array<Midpoint> active_midpoints_3 = array.new<Midpoint>(0)
+var array<Midpoint> active_midpoints_4 = array.new<Midpoint>(0)
+var array<Midpoint> active_midpoints_5 = array.new<Midpoint>(0)
+var array<Midpoint> active_midpoints_6 = array.new<Midpoint>(0)
+
+var CandleSet htf1 = CandleSet.new()
+htf1.settings := SettingsHTF1
+htf1.candles := candles_1
+htf1.imbalances := imbalances_1
+htf1.active_sweeps := active_sweeps_1
+htf1.active_midpoints := active_midpoints_1
+htf1.tfNumber := 1
+
+var CandleSet htf2 = CandleSet.new()
+htf2.settings := SettingsHTF2
+htf2.candles := candles_2
+htf2.imbalances := imbalances_2
+htf2.active_sweeps := active_sweeps_2
+htf2.active_midpoints := active_midpoints_2
+htf2.tfNumber := 2
+
+var CandleSet htf3 = CandleSet.new()
+htf3.settings := SettingsHTF3
+htf3.candles := candles_3
+htf3.imbalances := imbalances_3
+htf3.active_sweeps := active_sweeps_3
+htf3.active_midpoints := active_midpoints_3
+htf3.tfNumber := 3
+
+var CandleSet htf4 = CandleSet.new()
+htf4.settings := SettingsHTF4
+htf4.candles := candles_4
+htf4.imbalances := imbalances_4
+htf4.active_sweeps := active_sweeps_4
+htf4.active_midpoints := active_midpoints_4
+htf4.tfNumber := 4
+
+var CandleSet htf5 = CandleSet.new()
+htf5.settings := SettingsHTF5
+htf5.candles := candles_5
+htf5.imbalances := imbalances_5
+htf5.active_sweeps := active_sweeps_5
+htf5.active_midpoints := active_midpoints_5
+htf5.tfNumber := 5
+
+var CandleSet htf6 = CandleSet.new()
+htf6.settings := SettingsHTF6
+htf6.candles := candles_6
+htf6.imbalances := imbalances_6
+htf6.active_sweeps := active_sweeps_6
+htf6.active_midpoints := active_midpoints_6
+htf6.tfNumber := 6
+
+// OPTIMIZATION: Global Arrays to prevent memory churning
+var bool[] htf_show_array = array.new_bool(6, false)
+var bool[] htf_valid_array = array.new_bool(6, false)
+
+// Helper function to get next higher timeframe
+getNextTimeframe(currentTF) =>
+    currentSeconds = timeframe.in_seconds(currentTF)
+    if currentSeconds < 60
+        "1"
+    else if currentSeconds < 300
+        "5"
+    else if currentSeconds < 900
+        "15"
+    else if currentSeconds < 1800
+        "30"
+    else if currentSeconds < 3600
+        "60"
+    else if currentSeconds < 14400
+        "240"
+    else if currentSeconds < 86400
+        "1D"
+    else if currentSeconds < 604800
+        "1W"
+    else
+        "1M"
+
+// Settings Groups
+string group_mtf_candles = "═══ HTF CANDLE SETTINGS ═══"
+string group_mtf_styling = " CANDLE STYLING"
+string group_mtf_label = " CANDLE LABEL SETTINGS"
+string group_mtf_trace = "═══ TRACE ═══"
+string group_mtf_separator = "═══ SEPARATOR ═══"
+string group_mtf_sweep = "═══  SWEEP ═══"
+string group_mtf_midpoint = "═══ MIDPOINT ═══"
+string group_mtf_imbalance = "═══ Imbalance ═══"
+string group_chart_fvg = "═══ CHART FVG / LIQUIDITY VOIDS ═══"
+
+//  CANDLE SETTINGS
+settings.chart_tf_bump := input.bool(false, 'Chart TF Bump (when set to "Chart")', group = group_mtf_candles, tooltip="When enabled, lanes set to 'Chart' will use the next higher timeframe instead of current chart timeframe")
+
+htf1.settings.show := input.bool(false, 'HTF 1      ', inline = 'htf1', group = group_mtf_candles)
+htf_1 = input.timeframe('5', '', inline = 'htf1', group = group_mtf_candles)
+htf1.settings.htf := htf_1
+htf1.settings.max_display := input.int(10, '', inline = 'htf1', minval=1, group = group_mtf_candles)
+
+htf2.settings.show := input.bool(true, 'HTF 2      ', inline = 'htf2', group = group_mtf_candles)
+htf_2 = input.timeframe('15', '', inline = 'htf2', group = group_mtf_candles)
+htf2.settings.htf := htf_2
+htf2.settings.max_display := input.int(10, '', inline = 'htf2', minval=1, group = group_mtf_candles)
+
+htf3.settings.show := input.bool(true, 'HTF 3      ', inline = 'htf3', group = group_mtf_candles)
+htf_3 = input.timeframe('30', '', inline = 'htf3', group = group_mtf_candles)
+htf3.settings.htf := htf_3
+htf3.settings.max_display := input.int(10, '', inline = 'htf3', minval=1, group = group_mtf_candles)
+
+htf4.settings.show := input.bool(true, 'HTF 4      ', inline = 'htf4', group = group_mtf_candles)
+htf_4 = input.timeframe('240', '', inline = 'htf4', group = group_mtf_candles)
+htf4.settings.htf := htf_4
+htf4.settings.max_display := input.int(10, '', inline = 'htf4', minval=1, group = group_mtf_candles)
+
+htf5.settings.show := input.bool(true, 'HTF 5      ', inline = 'htf5', group = group_mtf_candles)
+htf_5 = input.timeframe('1D', '', inline = 'htf5', group = group_mtf_candles)
+htf5.settings.htf := htf_5
+htf5.settings.max_display := input.int(10, '', inline = 'htf5', minval=1, group = group_mtf_candles)
+
+htf6.settings.show := input.bool(false, 'HTF 6      ', inline = 'htf6', group = group_mtf_candles)
+htf_6 = input.timeframe('1W', '', inline = 'htf6', group = group_mtf_candles)
+htf6.settings.htf := htf_6
+htf6.settings.max_display := input.int(10, '', inline = 'htf6', minval=1, group = group_mtf_candles)
+
+settings.max_sets := input.int(6, 'Limit to next HTFs only', minval = 1, maxval = 6, group = group_mtf_candles)
+settings.bias := "Neutral"
+
+// STYLING
+settings.monospaced := input.bool(false, "Monospaced Font", group = group_mtf_styling)
+settings.bull_body := input.color(#dbdbdb, 'Body  ', inline = 'body', group=group_mtf_styling)
+settings.bear_body := input.color(#808080, '', inline = 'body', group=group_mtf_styling)
+settings.bull_border := input.color(#dbdbdb, 'Borders', inline = 'borders', group=group_mtf_styling)
+settings.bear_border := input.color(#808080, '', inline = 'borders', group=group_mtf_styling)
+settings.bull_wick := input.color(#dbdbdb, 'Wick  ', inline = 'wick', group=group_mtf_styling)
+settings.bear_wick := input.color(#808080, '', inline = 'wick', group=group_mtf_styling)
+
+settings.offset := input.int(35, 'Padding from current candles', minval = 1, group=group_mtf_styling)
+settings.buffer := input.int(1, 'Space between candles', minval = 1, maxval = 4, group=group_mtf_styling)
+settings.htf_buffer := input.int(10, 'Space between Higher Timeframes', minval = 1, maxval = 10, group=group_mtf_styling)
+settings.width := input.int(1, 'Candle Width', minval = 1, maxval = 4, group=group_mtf_styling) * 2
+
+// LABEL SETTINGS
+settings.htf_label_show := input.bool(true, 'HTF Label', group=group_mtf_label, inline = 'HTFlabel')
+settings.htf_label_color := input.color(color.new(color.white, 10), '', group=group_mtf_label, inline = 'HTFlabel')
+settings.htf_label_size := input.string(size.large, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_mtf_label, inline = 'HTFlabel')
+
+settings.label_position := input.string("Bottom", 'Label Positions', options=['Both', 'Top', 'Bottom'], group=group_mtf_label)
+settings.label_alignment := input.string("Follow Candles", "Label Alignment", options=['Align', 'Follow Candles'], group=group_mtf_label)
+
+settings.htf_timer_show := input.bool(true, 'Remaining time      ', inline = 'timer', group=group_mtf_label)
+settings.htf_timer_color := input.color(color.new(color.white, 10), '', inline = 'timer', group=group_mtf_label)
+settings.htf_timer_size := input.string(size.normal, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_mtf_label, inline = 'timer')
+
+settings.daily_name := input.bool(true, 'Interval Value        ', group=group_mtf_label, inline = 'dow')
+settings.dow_color := input.color(color.new(color.white, 10), '', group=group_mtf_label, inline = 'dow')
+settings.dow_size := input.string(size.small, '', [size.tiny, size.small, size.normal, size.large, size.huge], group=group_mtf_label, inline = 'dow.0')
+
+// TRACE
+settings.trace_show := input.bool(false, 'Trace lines', group = group_mtf_trace)
+settings.trace_o_color := input.color(color.new(color.white, 10), 'Open    ', inline = '1', group = group_mtf_trace)
+settings.trace_o_style := input.string('····', '', options = ['⎯⎯⎯', '----', '····'], inline = '1', group = group_mtf_trace)
+settings.trace_o_size := input.int(1, '', options = [1, 2, 3, 4], inline = '1', group = group_mtf_trace)
+settings.trace_c_color := input.color(color.new(color.white, 10), 'Close    ', inline = '2', group = group_mtf_trace)
+settings.trace_c_style := input.string('····', '', options = ['⎯⎯⎯', '----', '····'], inline = '2', group = group_mtf_trace)
+settings.trace_c_size := input.int(1, '', options = [1, 2, 3, 4], inline = '2', group = group_mtf_trace)
+settings.trace_h_color := input.color(color.new(color.white, 10), 'High     ', inline = '3', group = group_mtf_trace)
+settings.trace_h_style := input.string('····', '', options = ['⎯⎯⎯', '----', '····'], inline = '3', group = group_mtf_trace)
+settings.trace_h_size := input.int(1, '', options = [1, 2, 3, 4], inline = '3', group = group_mtf_trace)
+settings.trace_l_color := input.color(color.new(color.white, 10), 'Low     ', inline = '4', group = group_mtf_trace)
+settings.trace_l_style := input.string('····', '', options = ['⎯⎯⎯', '----', '····'], inline = '4', group = group_mtf_trace)
+settings.trace_l_size := input.int(1, '', options = [1, 2, 3, 4], inline = '4', group = group_mtf_trace)
+settings.trace_anchor := input.string('First Timeframe', 'Anchor to', options = ['First Timeframe', 'Last Timeframe'], group = group_mtf_trace)
+
+settings.label_show := input.bool(false, 'Price Label             ', inline = 'label')
+settings.label_color := input.color(color.new(color.white, 10), '', inline = 'label')
+settings.label_size := input.string(size.small, '', [size.tiny, size.small, size.normal, size.large, size.huge], inline = 'label')
+
+//  SEPARATOR
+settings.show_sep := input.bool(false, "Show Separator", group=group_mtf_separator)
+settings.sep_color := input.color(color.gray, 'Separator Color', group=group_mtf_separator)
+settings.sep_style := input.string("Dotted", "Separator Style", options=["Solid", "Dashed", "Dotted"], group=group_mtf_separator)
+settings.sep_width := input.int(1, "Separator Width", minval=1, group=group_mtf_separator)
+settings.sep_tf := input.int(2, "Timeframe To Use", [1, 2, 3, 4, 5, 6], group = group_mtf_separator)
+
+//  MIDPOINT
+settings.midpoint_show := input.bool(true, 'Show Midpoint', group = group_mtf_midpoint, inline = 'midpoint')
+settings.midpoint_color := input.color(color.new(#fa9933, 0), '', inline = 'midpoint', group = group_mtf_midpoint)
+settings.midpoint_width := input.int(2, 'Midpoint Line Width', minval=1, maxval=5, group=group_mtf_midpoint)
+settings.midpoint_style := input.string("Dotted", "Midpoint Line Style", options=["Solid", "Dashed", "Dotted"], group=group_mtf_midpoint)
+
+settings.midpoint_show_on_chart := input.bool(true, 'Show Midpoints on Chart', group = group_mtf_midpoint, inline = 'midpointChart')
+settings.midpoint_chart_color := input.color(color.new(#ffaa00, 0), '', inline = 'midpointChart', group = group_mtf_midpoint)
+
+//  SWEEP
+settings.sweep_show := input.bool(true, 'Show Sweeps', group = group_mtf_sweep, inline = 'sweep')
+settings.sweep_color := input.color(color.new(#f06292, 50), '', inline = 'sweep', group = group_mtf_sweep)
+settings.sweep_width := input.int(1, 'Sweep Line Width', minval=1, maxval=5, group=group_mtf_sweep)
+settings.sweep_style := input.string("Solid", "Sweep Line Style", options=["Solid", "Dashed", "Dotted"], group=group_mtf_sweep)
+settings.show_latest := input.bool(false, "Show Latest Sweep Only", group = group_mtf_sweep)
+
+settings.sweep_show_on_chart := input.bool(true, 'Show Sweeps on Chart', group = group_mtf_sweep, inline = 'sweepChart')
+settings.sweep_chart_color := input.color(color.new(#ff9800, 0), '', inline = 'sweepChart', group = group_mtf_sweep)
+settings.sweep_show_chart_labels := input.bool(true, 'Labels', inline = 'sweepChart', group = group_mtf_sweep, tooltip="Show/Hide timeframe labels on chart sweeps")
+
+// CHART FVG / LIQUIDITY VOIDS
+settings.fvg_show := input.bool(true, 'Fair Value Gap   ', group = group_chart_fvg, inline = 'fvg')
+settings.fvg_color := input.color(color.new(color.gray, 80), '', inline = 'fvg', group = group_chart_fvg)
+
+settings.fvg_show_on_chart := input.bool(true, 'Show HTF FVGs on Chart', group = group_chart_fvg)
+
+settings.htf1_bull_fvg_show := input.bool(true, '☐', inline = 'htf1fvg', group = group_chart_fvg, tooltip="Show HTF1 Bullish FVGs")
+settings.htf1_bull_fvg_color := input.color(color.new(#00ff88, 85), 'HTF1 Bull', inline = 'htf1fvg', group = group_chart_fvg)
+settings.htf1_bear_fvg_show := input.bool(true, '☐', inline = 'htf1fvg', group = group_chart_fvg, tooltip="Show HTF1 Bearish FVGs")
+settings.htf1_bear_fvg_color := input.color(color.new(#ff4444, 85), 'Bear', inline = 'htf1fvg', group = group_chart_fvg)
+
+settings.htf2_bull_fvg_show := input.bool(false, '☐', inline = 'htf2fvg', group = group_chart_fvg, tooltip="Show HTF2 Bullish FVGs")
+settings.htf2_bull_fvg_color := input.color(color.new(#00aaff, 85), 'HTF2 Bull', inline = 'htf2fvg', group = group_chart_fvg)
+settings.htf2_bear_fvg_show := input.bool(false, '☐', inline = 'htf2fvg', group = group_chart_fvg, tooltip="Show HTF2 Bearish FVGs")
+settings.htf2_bear_fvg_color := input.color(color.new(#ff6644, 85), 'Bear', inline = 'htf2fvg', group = group_chart_fvg)
+
+settings.htf3_bull_fvg_show := input.bool(false, '☐', inline = 'htf3fvg', group = group_chart_fvg, tooltip="Show HTF3 Bullish FVGs")
+settings.htf3_bull_fvg_color := input.color(color.new(#88ff00, 85), 'HTF3 Bull', inline = 'htf3fvg', group = group_chart_fvg)
+settings.htf3_bear_fvg_show := input.bool(false, '☐', inline = 'htf3fvg', group = group_chart_fvg, tooltip="Show HTF3 Bearish FVGs")
+settings.htf3_bear_fvg_color := input.color(color.new(#ff8844, 85), 'Bear', inline = 'htf3fvg', group = group_chart_fvg)
+
+settings.htf4_bull_fvg_show := input.bool(false, '☐', inline = 'htf4fvg', group = group_chart_fvg, tooltip="Show HTF4 Bullish FVGs")
+settings.htf4_bull_fvg_color := input.color(color.new(#ffaa00, 85), 'HTF4 Bull', inline = 'htf4fvg', group = group_chart_fvg)
+settings.htf4_bear_fvg_show := input.bool(false, '☐', inline = 'htf4fvg', group = group_chart_fvg, tooltip="Show HTF4 Bearish FVGs")
+settings.htf4_bear_fvg_color := input.color(color.new(#ff0088, 85), 'Bear', inline = 'htf4fvg', group = group_chart_fvg)
+
+settings.htf5_bull_fvg_show := input.bool(false, '☐', inline = 'htf5fvg', group = group_chart_fvg, tooltip="Show HTF5 Bullish FVGs")
+settings.htf5_bull_fvg_color := input.color(color.new(#aa00ff, 85), 'HTF5 Bull', inline = 'htf5fvg', group = group_chart_fvg)
+settings.htf5_bear_fvg_show := input.bool(false, '☐', inline = 'htf5fvg', group = group_chart_fvg, tooltip="Show HTF5 Bearish FVGs")
+settings.htf5_bear_fvg_color := input.color(color.new(#ff0044, 85), 'Bear', inline = 'htf5fvg', group = group_chart_fvg)
+
+settings.htf6_bull_fvg_show := input.bool(false, '☐', inline = 'htf6fvg', group = group_chart_fvg, tooltip="Show HTF6 Bullish FVGs")
+settings.htf6_bull_fvg_color := input.color(color.new(#0088ff, 85), 'HTF6 Bull', inline = 'htf6fvg', group = group_chart_fvg)
+settings.htf6_bear_fvg_show := input.bool(false, '☐', inline = 'htf6fvg', group = group_chart_fvg, tooltip="Show HTF6 Bearish FVGs")
+settings.htf6_bear_fvg_color := input.color(color.new(#ff4400, 85), 'Bear', inline = 'htf6fvg', group = group_chart_fvg)
+settings.fvg_threshold := input.float(0.0, 'FVG Threshold (ATR multiplier)', minval=0.0, maxval=5.0, step=0.1, group = group_chart_fvg, tooltip="Acts as a filter. When set to 0, no filtering is applied. Increasing the value causes the script to check the width of the void compared to a fixed-length ATR value")
+
+settings.fvg_chart_show_labels := input.bool(true, 'HTF FVG Labels', group = group_chart_fvg, inline = 'htffvgLabels')
+settings.fvg_chart_label_color := input.color(color.new(color.white, 0), '', inline = 'htffvgLabels', group = group_chart_fvg)
+settings.fvg_chart_label_size := input.string(size.small, '', [size.tiny, size.small, size.normal, size.large, size.huge], group = group_chart_fvg, inline = 'htffvgLabels')
+settings.fvg_chart_label_position := input.string("Center", 'Label Position', options=['Top', 'Center', 'Bottom'], group = group_chart_fvg)
+
+fvg_settings.show_chart_fvg := input.bool(true, 'Show Chart FVGs / Liquidity Voids', group = group_chart_fvg)
+fvg_settings.bullish_fvg_color := input.color(color.new(#00ff00, 85), 'Bullish FVG Color', inline = 'fvg_colors', group = group_chart_fvg)
+fvg_settings.bearish_fvg_color := input.color(color.new(#ff0000, 85), 'Bearish FVG Color', inline = 'fvg_colors', group = group_chart_fvg)
+fvg_settings.mitigated_fvg_color := input.color(color.new(#808080, 90), 'Mitigated FVG Color', group = group_chart_fvg)
+fvg_settings.max_fvg_display := input.int(50, 'Max FVGs to Display', minval=1, maxval=100, group = group_chart_fvg)
+fvg_settings.show_mitigated := input.bool(true, 'Show Mitigated FVGs', inline = 'mit_settings', group = group_chart_fvg)
+fvg_settings.delete_mitigated := input.bool(false, 'Delete When Mitigated', inline = 'mit_settings', group = group_chart_fvg)
+fvg_settings.extend_fvg := input.bool(true, 'Extend FVGs to Current Bar', group = group_chart_fvg)
+fvg_settings.show_fvg_labels := input.bool(false, 'Show FVG Labels', group = group_chart_fvg)
+fvg_settings.threshold := input.float(0.0, 'FVG Threshold (ATR multiplier)', minval=0.0, maxval=5.0, step=0.1, group = group_chart_fvg, tooltip="Acts as a filter. When set to 0, no filtering is applied. Increasing the value causes the script to check the width of the void compared to a fixed-length ATR value")
+
+//  Imbalance
+settings.vi_show := input.bool(true, 'Volume Imbalance', group = group_mtf_imbalance, inline = 'vi')
+settings.vi_color := input.color(color.new(color.red, 50), '', inline = 'vi', group = group_mtf_imbalance)
+
+// Performance Variables
+Helper helper = Helper.new()
+var Trace trace = Trace.new()
+color color_transparent = #ffffff00
+
+var int enabled_htfs = 0
+var bool htf1_valid = false
+var bool htf2_valid = false
+var bool htf3_valid = false
+var bool htf4_valid = false
+var bool htf5_valid = false
+var bool htf6_valid = false
+
+// Function to resolve effective timeframe
+getEffectiveTimeframe(inputTF) =>
+    if inputTF == ""
+        if settings.chart_tf_bump
+            getNextTimeframe(timeframe.period)
+        else
+            timeframe.period
+    else
+        inputTF
+
+// Internal Functions
+method LineStyle(Helper helper, string style) =>
+    helper.name := style
+    switch style
+        '----' => line.style_dashed
+        '····' => line.style_dotted
+        'Solid' => line.style_solid
+        'Dashed' => line.style_dashed
+        'Dotted' => line.style_dotted
+        => line.style_solid
+
+method DayofWeek(Helper helper, int index) =>
+    helper.name := 'DOW'
+    switch index
+        1 => 'M'
+        2 => 'T'
+        3 => 'W'
+        4 => 'T'
+        5 => 'F'
+        6 => 'S'
+        7 => 'S'
+        => ''
+
+method ValidTimeframe(Helper helper, string HTF) =>
+    helper.name := HTF
+    effectiveHTF = getEffectiveTimeframe(HTF)
+    // OPTIMIZATION: Use cached current_tf_seconds instead of re-calling timeframe.in_seconds()
+    if timeframe.in_seconds(effectiveHTF) >= 86400 and timeframe.in_seconds(effectiveHTF) > current_tf_seconds
+        true
+    else
+        n1 = current_tf_seconds
+        n2 = timeframe.in_seconds(effectiveHTF)
+        n3 = n1 % n2
+        n1 < n2 and math.round(n2 / n1) == n2 / n1
+
+method RemainingTime(Helper helper, string HTF) =>
+    helper.name := HTF
+    effectiveHTF = getEffectiveTimeframe(HTF)
+    if barstate.isrealtime
+        timeRemaining = (time_close(effectiveHTF) - timenow) / 1000
+        days = math.floor(timeRemaining / 86400)
+        hours = math.floor((timeRemaining - days * 86400) / 3600)
+        minutes = math.floor((timeRemaining - days * 86400 - hours * 3600) / 60)
+        seconds = math.floor(timeRemaining - days * 86400 - hours * 3600 - minutes * 60)
+        r = str.tostring(seconds, '00')
+        if minutes > 0 or hours > 0 or days > 0
+            r := str.tostring(minutes, '00') + ':' + r
+        if hours > 0 or days > 0
+            r := str.tostring(hours, '00') + ':' + r
+        if days > 0
+            r := str.tostring(days) + 'D ' + r
+        r
+    else
+        'n/a'
+
+method HTFName(Helper helper, string HTF) =>
+    helper.name := 'HTFName'
+    effectiveHTF = getEffectiveTimeframe(HTF)
+    formatted = effectiveHTF
+    seconds = timeframe.in_seconds(effectiveHTF)
+    if seconds < 60
+        formatted := str.tostring(seconds) + 's'
+    else if seconds / 60 < 60
+        formatted := str.tostring(seconds / 60) + 'm'
+    else if seconds / 60 / 60 < 24
+        formatted := str.tostring(seconds / 60 / 60) + 'H'
+    formatted
+
+method HTFEnabled(Helper helper) =>
+    helper.name := 'HTFEnabled'
+    int enabled = 0
+    enabled := enabled + (htf1.settings.show ? 1 : 0)
+    enabled := enabled + (htf2.settings.show ? 1 : 0)
+    enabled := enabled + (htf3.settings.show ? 1 : 0)
+    enabled := enabled + (htf4.settings.show ? 1 : 0)
+    enabled := enabled + (htf5.settings.show ? 1 : 0)
+    enabled := enabled + (htf6.settings.show ? 1 : 0)
+    int last = math.min(enabled, settings.max_sets)
+    last
+
+method CandleSetHigh(Helper helper, array<Candle> candles, float h) =>
+    helper.name := 'CandlesSetHigh'
+    float _h = h
+    if array.size(candles) > 0
+        for i = 0 to array.size(candles) - 1 by 1
+            Candle c = array.get(candles, i)
+            if c.h > _h
+                _h := c.h
+    _h
+
+method CandleSetLow(Helper helper, array<Candle> candles, float l) =>
+    helper.name := 'CandlesSetLow'
+    float _l = l
+    if array.size(candles) > 0
+        for i = 0 to array.size(candles) - 1 by 1
+            Candle c = array.get(candles, i)
+            if c.l < _l
+                _l := c.l
+    _l
+
+_processHTFCandles(helper, isHigh, initialValue) =>
+    result = initialValue
+    cnt = 0
+    last = enabled_htfs
+    
+    // OPTIMIZATION: Used global var array instead of creating new array on every tick
+    for i = 0 to 5
+        if cnt >= last
+            break
+            
+        show = array.get(htf_show_array, i)
+        valid = array.get(htf_valid_array, i)
+        
+        if show and valid
+            htf_candles = switch i
+                0 => htf1.candles
+                1 => htf2.candles
+                2 => htf3.candles
+                3 => htf4.candles
+                4 => htf5.candles
+                5 => htf6.candles
+            
+            result := isHigh ? helper.CandleSetHigh(htf_candles, result) : helper.CandleSetLow(htf_candles, result)
+            cnt += 1
+    
+    result
+
+_processIndividualCandles(candles, initialValue, isHigh) =>
+    result = initialValue
+    if array.size(candles) > 0
+        for i = 0 to array.size(candles) - 1
+            candle = array.get(candles, i)
+            if isHigh
+                if candle.h > result
+                    result := candle.h
+            else
+                if candle.l < result
+                    result := candle.l
+    result
+
+method CandlesHigh(Helper helper, array<Candle> candles) =>
+    helper.name := 'CandlesHigh'
+    h = _processHTFCandles(helper, true, 0.0)
+    h := _processIndividualCandles(candles, h, true)
+    h
+
+method CandlesLow(Helper helper, array<Candle> candles, float h) =>
+    helper.name := 'CandlesLow'
+    l = _processHTFCandles(helper, false, h)
+    l := _processIndividualCandles(candles, l, false)
+    l
+
+// HTF Chart FVG Functions
+getTimeframeName(string tf) =>
+    helper.HTFName(tf)
+
+getLabelPosition(float top, float bottom, string position) =>
+    switch position
+        "Top" => top
+        "Bottom" => bottom
+        "Center" => (top + bottom) / 2
+        => (top + bottom) / 2
+
+getHTFFVGSettings(int htf_num, bool is_bullish) =>
+    should_show = false
+    fvg_color = color_transparent
+    
+    if is_bullish
+        switch htf_num
+            1 =>
+                should_show := settings.htf1_bull_fvg_show
+                fvg_color := settings.htf1_bull_fvg_color
+            2 =>
+                should_show := settings.htf2_bull_fvg_show
+                fvg_color := settings.htf2_bull_fvg_color
+            3 =>
+                should_show := settings.htf3_bull_fvg_show
+                fvg_color := settings.htf3_bull_fvg_color
+            4 =>
+                should_show := settings.htf4_bull_fvg_show
+                fvg_color := settings.htf4_bull_fvg_color
+            5 =>
+                should_show := settings.htf5_bull_fvg_show
+                fvg_color := settings.htf5_bull_fvg_color
+            6 =>
+                should_show := settings.htf6_bull_fvg_show
+                fvg_color := settings.htf6_bull_fvg_color
+    else
+        switch htf_num
+            1 =>
+                should_show := settings.htf1_bear_fvg_show
+                fvg_color := settings.htf1_bear_fvg_color
+            2 =>
+                should_show := settings.htf2_bear_fvg_show
+                fvg_color := settings.htf2_bear_fvg_color
+            3 =>
+                should_show := settings.htf3_bear_fvg_show
+                fvg_color := settings.htf3_bear_fvg_color
+            4 =>
+                should_show := settings.htf4_bear_fvg_show
+                fvg_color := settings.htf4_bear_fvg_color
+            5 =>
+                should_show := settings.htf5_bear_fvg_show
+                fvg_color := settings.htf5_bear_fvg_color
+            6 =>
+                should_show := settings.htf6_bear_fvg_show
+                fvg_color := settings.htf6_bear_fvg_color
+    
+    [should_show, fvg_color]
+
+createHTFChartFVG(float fvg_top, float fvg_bottom, int start_bar, int end_bar, bool is_bullish, string tf, int htf_num) =>
+    if not settings.fvg_show_on_chart
+        na
+    else
+        [should_show, fvg_color] = getHTFFVGSettings(htf_num, is_bullish)
+        
+        if not should_show
+            na
+        else
+            htf_fvg = HTFChartFVG.new()
+            htf_fvg.top := fvg_top
+            htf_fvg.bottom := fvg_bottom
+            htf_fvg.start_bar := start_bar
+            htf_fvg.end_bar := end_bar
+            htf_fvg.is_bullish := is_bullish
+            htf_fvg.timeframe := tf
+            htf_fvg.htf_number := htf_num
+            
+            htf_fvg.fvg_box := box.new(start_bar, fvg_top, end_bar, fvg_bottom,
+                                     bgcolor=fvg_color,
+                                     border_color=color_transparent,
+                                     border_width=0)
+            
+            if settings.fvg_chart_show_labels
+                tf_name = getTimeframeName(tf)
+                label_text = tf_name + " FVG"
+                label_y = getLabelPosition(fvg_top, fvg_bottom, settings.fvg_chart_label_position)
+                label_x = math.round((start_bar + end_bar) / 2)
+                
+                htf_fvg.fvg_label := label.new(label_x, label_y, label_text,
+                                             color=color_transparent,
+                                             textcolor=settings.fvg_chart_label_color,
+                                             style=label.style_label_center,
+                                             size=settings.fvg_chart_label_size,
+                                             text_font_family=target_font)
+            
+            htf_fvg
+
+updateHTFChartFVGExtension(HTFChartFVG htf_fvg) =>
+    if not na(htf_fvg.fvg_box)
+        box.set_right(htf_fvg.fvg_box, bar_index)
+        htf_fvg.end_bar := bar_index
+        
+        if not na(htf_fvg.fvg_label)
+            new_x = math.round((htf_fvg.start_bar + bar_index) / 2)
+            label.set_x(htf_fvg.fvg_label, new_x)
+
+cleanupOldHTFChartFVGs() =>
+    max_htf_fvgs = 100
+    if htf_chart_fvgs.size() > max_htf_fvgs
+        max_cleanup = math.min(htf_chart_fvgs.size() - max_htf_fvgs, 20)
+        for i = 0 to max_cleanup - 1
+            if htf_chart_fvgs.size() > 0
+                old_htf_fvg = htf_chart_fvgs.shift()
+                if not na(old_htf_fvg.fvg_box)
+                    box.delete(old_htf_fvg.fvg_box)
+                if not na(old_htf_fvg.fvg_label)
+                    label.delete(old_htf_fvg.fvg_label)
+
+cleanupOldChartMidpointLines() =>
+    max_midpoint_lines = 50
+    if chart_midpoint_lines.size() > max_midpoint_lines
+        max_cleanup = math.min(chart_midpoint_lines.size() - max_midpoint_lines, 10)
+        for i = 0 to max_cleanup - 1
+            if chart_midpoint_lines.size() > 0
+                old_line = chart_midpoint_lines.shift()
+                line.delete(old_line)
+
+method FindImbalance(CandleSet candleSet) =>
+    if (barstate.isrealtime or barstate.islast) and candleSet.candles.size() > 3
+        if candleSet.imbalances.size() > 0
+            for i = candleSet.imbalances.size() - 1 to 0
+                Imbalance del = candleSet.imbalances.get(i)
+                box.delete(del.b)
+            candleSet.imbalances.clear()
+        if settings.fvg_show
+            for i = 0 to candleSet.candles.size() - 3
+                Candle candle1 = candleSet.candles.get(i)
+                Candle candle2 = candleSet.candles.get(i + 2)
+                Candle candle3 = candleSet.candles.get(i + 1)
+                
+                if candle1.l > candle2.h and math.min(candle1.o, candle1.c) > math.max(candle2.o, candle2.c)
+                    gap_size = candle1.l - candle2.h
+                    if settings.fvg_threshold <= 0.0 or gap_size >= (settings.fvg_threshold * cached_atr)
+                        Imbalance imb = Imbalance.new()
+                        imb.b := box.new(box.get_left(candle2.body), candle2.h, box.get_right(candle1.body), candle1.l, bgcolor=settings.fvg_color, border_color=color_transparent, xloc=xloc.bar_index)
+                        candleSet.imbalances.push(imb)
+                        
+                        if settings.fvg_show_on_chart
+                            chart_fvg = createHTFChartFVG(candle1.l, candle2.h, candle2.o_idx, candle1.c_idx, true, candleSet.settings.htf, candleSet.tfNumber)
+                            if not na(chart_fvg)
+                                htf_chart_fvgs.push(chart_fvg)
+                
+                if candle1.h < candle2.l and math.max(candle1.o, candle1.c) < math.min(candle2.o, candle2.c)
+                    gap_size = candle2.l - candle1.h
+                    if settings.fvg_threshold <= 0.0 or gap_size >= (settings.fvg_threshold * cached_atr)
+                        Imbalance imb = Imbalance.new()
+                        imb.b := box.new(box.get_right(candle1.body), candle1.h, box.get_left(candle2.body), candle2.l, bgcolor=settings.fvg_color, border_color=color_transparent)
+                        candleSet.imbalances.push(imb)
+                        
+                        if settings.fvg_show_on_chart
+                            chart_fvg = createHTFChartFVG(candle2.l, candle1.h, candle2.o_idx, candle1.c_idx, false, candleSet.settings.htf, candleSet.tfNumber)
+                            if not na(chart_fvg)
+                                htf_chart_fvgs.push(chart_fvg)
+                
+                box.set_lefttop(candle3.body, box.get_left(candle3.body), math.max(candle3.o, candle3.c))
+                box.set_rightbottom(candle3.body, box.get_right(candle3.body), math.min(candle3.o, candle3.c))
+        
+        if settings.vi_show and candleSet.candles.size() > 2
+            for i = 0 to candleSet.candles.size() - 2
+                Candle candle1 = candleSet.candles.get(i)
+                Candle candle2 = candleSet.candles.get(i + 1)
+                if candle1.l < candle2.h and math.min(candle1.o, candle1.c) > math.max(candle2.o, candle2.c)
+                    Imbalance imb = Imbalance.new()
+                    imb.b := box.new(box.get_left(candle2.body), math.min(candle1.o, candle1.c), box.get_right(candle1.body), math.max(candle2.o, candle2.c), bgcolor=settings.vi_color, border_color=color_transparent)
+                    candleSet.imbalances.push(imb)
+                if candle1.h > candle2.l and math.max(candle1.o, candle1.c) < math.min(candle2.o, candle2.c)
+                    Imbalance imb = Imbalance.new()
+                    imb.b := box.new(box.get_right(candle1.body), math.min(candle2.o, candle2.c), box.get_left(candle2.body), math.max(candle1.o, candle1.c), bgcolor=settings.vi_color, border_color=color_transparent)
+                    candleSet.imbalances.push(imb)
+    candleSet
+
+method CheckSweeps(CandleSet candleSet, int totalOffset) =>
+    if not settings.sweep_show or candleSet.candles.size() < 2
+        candleSet
+    else
+        curr_candle = candleSet.candles.get(0)
+        prev_candle = candleSet.candles.get(1)
+        
+        if na(curr_candle.sweeps)
+            curr_candle.sweeps := array.new<Sweep>(0)
+        
+        isNewHTFCandle = ta.change(time(getEffectiveTimeframe(candleSet.settings.htf))) > 0
+        
+        if isNewHTFCandle and candleSet.candles.size() >= 3
+            candle_before_prev = candleSet.candles.get(2)
+            
+            if prev_candle.sweeps.size() > 0
+                for i = prev_candle.sweeps.size() - 1 to 0
+                    sweep = prev_candle.sweeps.get(i)
+                    should_remove = false
+                    
+                    if sweep.is_high and prev_candle.c >= candle_before_prev.h
+                        should_remove := true
+                    else if not sweep.is_high and prev_candle.c <= candle_before_prev.l
+                        should_remove := true
+                    
+                    if should_remove
+                        if not na(sweep.htf_marker)
+                            line.delete(sweep.htf_marker)
+                        if not na(sweep.price_marker)
+                            line.delete(sweep.price_marker)
+                        if not na(sweep.chart_label)
+                            label.delete(sweep.chart_label)
+                        prev_candle.sweeps.remove(i)
+        
+        next_period_end = curr_candle.o_time + timeframe.in_seconds(getEffectiveTimeframe(candleSet.settings.htf)) * 1000
+        t_buffer = totalOffset + (settings.width + settings.buffer) * (candleSet.candles.size() - 1)
+        
+        if (settings.bias != "Bullish") and high > prev_candle.h and close < prev_candle.h
+            Sweep existing_bearish_sweep = na
+            if curr_candle.sweeps.size() > 0
+                for i = 0 to curr_candle.sweeps.size() - 1
+                    sweep_check = curr_candle.sweeps.get(i)
+                    if sweep_check.is_high
+                        existing_bearish_sweep := sweep_check
+                        break
+            
+            if na(existing_bearish_sweep)
+                sweep = Sweep.new()
+                sweep.htf_marker := line.new(bar_index - settings.width + t_buffer, prev_candle.h, bar_index + settings.width + t_buffer, prev_candle.h, color=settings.sweep_color, style=helper.LineStyle(settings.sweep_style), width=settings.sweep_width)
+                sweep.is_high := true
+                sweep.end_idx := next_period_end
+                sweep.start_bar_idx := prev_candle.h_idx
+                sweep.sweep_price := prev_candle.h
+                sweep.is_fulfilled := false
+                sweep.sweep_bar_idx := bar_index
+                
+                if settings.sweep_show_on_chart
+                    end_bar = bar_index + 2
+                    sweep.price_marker := line.new(prev_candle.h_idx, prev_candle.h, end_bar, prev_candle.h, color=settings.sweep_chart_color, style=helper.LineStyle(settings.sweep_style), width=settings.sweep_width)
+                        
+                    if settings.sweep_show_chart_labels
+                        tf_name = helper.HTFName(candleSet.settings.htf)
+                        sweep.chart_label := label.new(prev_candle.h_idx, prev_candle.h, tf_name, 
+                                                     color=color_transparent, 
+                                                     textcolor=settings.sweep_chart_color, 
+                                                     style=label.style_label_down, 
+                                                     size=size.tiny,
+                                                     text_font_family=target_font)
+                
+                curr_candle.sweeps.push(sweep)
+                candleSet.active_sweeps.push(sweep)
+                  
+            else
+                line.set_xy1(existing_bearish_sweep.htf_marker, bar_index - settings.width + t_buffer, prev_candle.h)
+                line.set_xy2(existing_bearish_sweep.htf_marker, bar_index + settings.width + t_buffer, prev_candle.h)
+                existing_bearish_sweep.end_idx := next_period_end
+                
+                if settings.sweep_show_on_chart and not na(existing_bearish_sweep.price_marker)
+                    end_bar = bar_index + 2
+                    line.set_x2(existing_bearish_sweep.price_marker, end_bar)
+        
+        if (settings.bias != "Bearish") and low < prev_candle.l and close > prev_candle.l
+            Sweep existing_bullish_sweep = na
+            if curr_candle.sweeps.size() > 0
+                for i = 0 to curr_candle.sweeps.size() - 1
+                    sweep_check = curr_candle.sweeps.get(i)
+                    if not sweep_check.is_high
+                        existing_bullish_sweep := sweep_check
+                        break
+            
+            if na(existing_bullish_sweep)
+                sweep = Sweep.new()
+                sweep.htf_marker := line.new(bar_index - settings.width + t_buffer, prev_candle.l, bar_index + settings.width + t_buffer, prev_candle.l, color=settings.sweep_color, style=helper.LineStyle(settings.sweep_style), width=settings.sweep_width)
+                sweep.is_high := false
+                sweep.end_idx := next_period_end
+                sweep.start_bar_idx := prev_candle.l_idx
+                sweep.sweep_price := prev_candle.l
+                sweep.is_fulfilled := false
+                sweep.sweep_bar_idx := bar_index
+                
+                if settings.sweep_show_on_chart
+                    end_bar = bar_index + 2
+                    sweep.price_marker := line.new(prev_candle.l_idx, prev_candle.l, end_bar, prev_candle.l, color=settings.sweep_chart_color, style=helper.LineStyle(settings.sweep_style), width=settings.sweep_width)
+                        
+                    if settings.sweep_show_chart_labels
+                        tf_name = helper.HTFName(candleSet.settings.htf)
+                        sweep.chart_label := label.new(prev_candle.l_idx, prev_candle.l, tf_name, 
+                                                     color=color_transparent, 
+                                                     textcolor=settings.sweep_chart_color, 
+                                                     style=label.style_label_up, 
+                                                     size=size.tiny,
+                                                     text_font_family=target_font)
+                
+                curr_candle.sweeps.push(sweep)
+                candleSet.active_sweeps.push(sweep)
+                  
+            else
+                line.set_xy1(existing_bullish_sweep.htf_marker, bar_index - settings.width + t_buffer, prev_candle.l)
+                line.set_xy2(existing_bullish_sweep.htf_marker, bar_index + settings.width + t_buffer, prev_candle.l)
+                existing_bullish_sweep.end_idx := next_period_end
+                
+                if settings.sweep_show_on_chart and not na(existing_bullish_sweep.price_marker)
+                    end_bar = bar_index + 2
+                    line.set_x2(existing_bullish_sweep.price_marker, end_bar)
+        
+        if settings.show_latest and candleSet.active_sweeps.size() > 0
+            latest_high_bar = -1
+            latest_low_bar = -1
+            
+            for i = 0 to candleSet.active_sweeps.size() - 1
+                sweep = candleSet.active_sweeps.get(i)
+                if sweep.is_high and sweep.sweep_bar_idx > latest_high_bar
+                    latest_high_bar := sweep.sweep_bar_idx
+                else if not sweep.is_high and sweep.sweep_bar_idx > latest_low_bar
+                    latest_low_bar := sweep.sweep_bar_idx
+            
+            for i = candleSet.active_sweeps.size() - 1 to 0
+                sweep = candleSet.active_sweeps.get(i)
+                should_keep = false
+                
+                if sweep.is_high and sweep.sweep_bar_idx == latest_high_bar
+                    should_keep := true
+                else if not sweep.is_high and sweep.sweep_bar_idx == latest_low_bar
+                    should_keep := true
+                
+                if not should_keep
+                    if not na(sweep.htf_marker)
+                        line.delete(sweep.htf_marker)
+                    if not na(sweep.price_marker)
+                        line.delete(sweep.price_marker)
+                    if not na(sweep.chart_label)
+                        label.delete(sweep.chart_label)
+                    candleSet.active_sweeps.remove(i)
+        
+    candleSet
+
+method _clearMidpoints(array<Midpoint> midpoints) =>
+    if midpoints.size() > 0
+        for i = midpoints.size() - 1 to 0
+            midpoint = midpoints.get(i)
+            if not na(midpoint.htf_marker)
+                line.delete(midpoint.htf_marker)
+            if not na(midpoint.chart_marker)
+                line.delete(midpoint.chart_marker)
+            midpoints.remove(i)
+
+method _createMidpoint(float midpoint_price, int next_period_end, CandleSet candleSet, int totalOffset) =>
+    midpoint = Midpoint.new()
+    midpoint.price := midpoint_price
+    midpoint.end_idx := next_period_end
+    
+    t_buffer = totalOffset + (settings.width + settings.buffer) * (candleSet.candles.size() - 1)
+    midpoint.htf_marker := line.new(bar_index - settings.width + t_buffer, midpoint_price, bar_index + settings.width + t_buffer, midpoint_price, color=settings.midpoint_color, style=helper.LineStyle(settings.midpoint_style), width=settings.midpoint_width)
+    
+    if settings.midpoint_show_on_chart
+        chart_start_bar = candleSet.candles.size() > 1 ? candleSet.candles.get(1).o_idx : bar_index - 1
+        chart_end_bar = bar_index + 2
+        midpoint.chart_marker := line.new(chart_start_bar, midpoint_price, chart_end_bar, midpoint_price, color=settings.midpoint_chart_color, style=helper.LineStyle(settings.midpoint_style), width=settings.midpoint_width)
+        chart_midpoint_lines.push(midpoint.chart_marker)
+    
+    midpoint
+
+method _cleanupExpiredMidpoints(CandleSet candleSet, Candle curr_candle) =>
+    midpoint = candleSet.active_midpoints.get(0)
+    if time > midpoint.end_idx
+        if not na(midpoint.htf_marker)
+            line.delete(midpoint.htf_marker)
+        if not na(midpoint.chart_marker)
+            line.delete(midpoint.chart_marker)
+        
+        candleSet.active_midpoints.remove(0)
+
+method CheckMidpoints(CandleSet candleSet, int totalOffset) =>
+    if not settings.midpoint_show or candleSet.candles.size() < 2
+        candleSet
+    else
+        curr_candle = candleSet.candles.get(0)
+        
+        if na(curr_candle.midpoints)
+            curr_candle.midpoints := array.new<Midpoint>()
+            
+        htf_change = ta.change(time(getEffectiveTimeframe(candleSet.settings.htf)))
+        isNewHTFCandle = htf_change > 0
+        
+        if isNewHTFCandle
+            _clearMidpoints(candleSet.active_midpoints)
+            _clearMidpoints(curr_candle.midpoints)
+            
+            prev_candle = candleSet.candles.get(1)
+            midpoint_price = (prev_candle.h + prev_candle.l) / 2
+            next_period_end = curr_candle.o_time + timeframe.in_seconds(getEffectiveTimeframe(candleSet.settings.htf)) * 1000
+            
+            midpoint = _createMidpoint(midpoint_price, next_period_end, candleSet, totalOffset)
+            
+            curr_candle.midpoints.push(midpoint)
+            candleSet.active_midpoints.push(midpoint)
+        
+        if settings.midpoint_show_on_chart and candleSet.active_midpoints.size() > 0
+            for i = 0 to candleSet.active_midpoints.size() - 1
+                midpoint = candleSet.active_midpoints.get(i)
+                if not na(midpoint.chart_marker)
+                    line.set_x2(midpoint.chart_marker, bar_index + 2)
+        
+        if barstate.islast and candleSet.active_midpoints.size() > 0
+            _cleanupExpiredMidpoints(candleSet, curr_candle)
+        
+        candleSet
+
+method Monitor(CandleSet candleSet) =>
+    timezone = 'America/New_York'
+    
+    isNewHTFCandle = false
+    effectiveHTF = getEffectiveTimeframe(candleSet.settings.htf)
+      
+    // Reverted to standard daily logic since Custom Daily setting is removed
+    isNewHTFCandle := ta.change(time(effectiveHTF, timezone)) > 0
+    
+    if isNewHTFCandle
+        bull = close > open
+        body_top = math.max(open, close)
+        body_bottom = math.min(open, close)
+        
+        candle = Candle.new(open, close, high, low, time, bar_index, bar_index, bar_index, bar_index, effectiveHTF == '1D' ? helper.DayofWeek(dayofweek(time_tradingday, timezone)) : str.tonumber(effectiveHTF) < 60 ? str.format_time(time, 'm', timezone) : str.format_time(time, 'H', timezone), box.new(bar_index, body_top, bar_index + 2, body_bottom, bull ? settings.bull_border : settings.bear_border, 1, bgcolor=bull ? settings.bull_body : settings.bear_body), line.new(bar_index + 1, high, bar_index, body_top, color=bull ? settings.bull_wick : settings.bear_wick), line.new(bar_index + 1, body_bottom, bar_index, low, color=bull ? settings.bull_wick : settings.bear_wick), na, array.new<Sweep>(0), array.new<Midpoint>(0))
+        
+        candleSet.candles.unshift(candle)
+        
+        if candleSet.candles.size() > candleSet.settings.max_display
+            delCandle = candleSet.candles.pop()
+            
+            box.delete(delCandle.body)
+            line.delete(delCandle.wick_up)
+            line.delete(delCandle.wick_down)
+            
+            if not na(delCandle.dow_label)
+                label.delete(delCandle.dow_label)
+            
+            if delCandle.sweeps.size() > 0
+                for i = 0 to delCandle.sweeps.size() - 1
+                    sweep = delCandle.sweeps.get(i)
+                    if not na(sweep.htf_marker)
+                        line.delete(sweep.htf_marker)
+                    if not na(sweep.price_marker)
+                        line.delete(sweep.price_marker)
+                    if not na(sweep.chart_label)
+                        label.delete(sweep.chart_label)
+                delCandle.sweeps.clear()
+            
+            if delCandle.midpoints.size() > 0
+                for i = 0 to delCandle.midpoints.size() - 1
+                    midpoint = delCandle.midpoints.get(i)
+                    if not na(midpoint.htf_marker)
+                        line.delete(midpoint.htf_marker)
+                    if not na(midpoint.chart_marker)
+                        line.delete(midpoint.chart_marker)
+                delCandle.midpoints.clear()
+        
+        if settings.show_sep and settings.sep_tf == candleSet.tfNumber
+            new_separator = line.new(x1=bar_index, x2=bar_index, y1=high + syminfo.mintick, y2=low - syminfo.mintick, extend=extend.both, color=settings.sep_color, style=helper.LineStyle(settings.sep_style), width=settings.sep_width)
+            separators.push(new_separator)
+            
+            if separators.size() > candleSet.settings.max_display
+                line.delete(separators.shift())
+    
+    [candleSet, isNewHTFCandle]
+
+method UpdateTime(CandleSet candleSet, int offset) =>
+    if settings.htf_timer_show and (barstate.isrealtime or barstate.islast)
+        string tmr = '(' + helper.RemainingTime(candleSet.settings.htf) + ')'
+        if not na(candleSet.tfTimerTop)
+            candleSet.tfTimerTop.set_text(tmr)
+        if not na(candleSet.tfTimerBottom)
+            candleSet.tfTimerBottom.set_text(tmr)
+    candleSet
+
+method Reorder(CandleSet candleSet, int offset) =>
+    int size = candleSet.candles.size()
+    if size > 0
+        top = settings.label_alignment == 'Align' ? helper.CandlesHigh(candleSet.candles) : helper.CandleSetHigh(candleSet.candles, 0)
+        bottom = settings.label_alignment == 'Align' ? helper.CandlesLow(candleSet.candles, top) : helper.CandleSetLow(candleSet.candles, top)
+        left = bar_index + offset + (settings.width + settings.buffer) * (size - 1) / 2
+        for i = size - 1 to 0
+            Candle candle = candleSet.candles.get(i)
+            int t_buffer = offset + (settings.width + settings.buffer) * (size - i - 1)
+            box.set_lefttop(candle.body, bar_index + t_buffer, math.max(candle.o, candle.c))
+            box.set_rightbottom(candle.body, bar_index + settings.width + t_buffer, math.min(candle.o, candle.c))
+            int x = bar_index + settings.width / 2 + t_buffer
+            line.set_xy1(candle.wick_up, x, candle.h)
+            line.set_xy2(candle.wick_up, x, math.max(candle.o, candle.c))
+            line.set_xy1(candle.wick_down, x, math.min(candle.o, candle.c))
+            line.set_xy2(candle.wick_down, x, candle.l)
+            if settings.daily_name and not na(candle.dow_label)
+                candle.dow_label.set_xy(bar_index + settings.width / 2 + t_buffer, candle.h)
+                candle.dow_label.set_text(candle.dow)
+            else if settings.daily_name
+                candle.dow_label := label.new(bar_index + settings.width / 2 + t_buffer, candle.h, candle.dow, color=color_transparent, textcolor=settings.dow_color, style=label.style_label_down, size=settings.dow_size, text_font_family=target_font)
+            if candle.sweeps.size() > 0
+                for j = candle.sweeps.size() - 1 to 0
+                    Sweep sweep = candle.sweeps.get(j)
+                    if i == size - 1 and not na(sweep.htf_marker)
+                        line.delete(sweep.htf_marker)
+                        if not na(sweep.price_marker)
+                            line.delete(sweep.price_marker)
+                        if not na(sweep.chart_label)
+                            label.delete(sweep.chart_label)
+                        candle.sweeps.remove(j)
+                        continue
+                    if not na(sweep.htf_marker)
+                        line.set_x1(sweep.htf_marker, bar_index - settings.width + t_buffer)
+                        line.set_x2(sweep.htf_marker, bar_index + settings.width + t_buffer + 2)
+            if candle.midpoints.size() > 0
+                for j = candle.midpoints.size() - 1 to 0
+                    Midpoint midpoint = candle.midpoints.get(j)
+                    if i == size - 1 and not na(midpoint.htf_marker)
+                        line.delete(midpoint.htf_marker)
+                        if not na(midpoint.chart_marker)
+                            line.delete(midpoint.chart_marker)
+                        candle.midpoints.remove(j)
+                        continue
+                    if not na(midpoint.htf_marker)
+                        line.set_x1(midpoint.htf_marker, bar_index - settings.width + t_buffer)
+                        line.set_x2(midpoint.htf_marker, bar_index + settings.width + t_buffer + 2)
+        if settings.htf_label_show
+            string lbl = helper.HTFName(candleSet.settings.htf)
+            string tmr = settings.htf_timer_show ? '(' + helper.RemainingTime(candleSet.settings.htf) + ')' : ''
+            if settings.label_position == 'Both' or settings.label_position == 'Top'
+                if not na(candleSet.tfNameTop)
+                    candleSet.tfNameTop.set_xy(left, top)
+                    candleSet.tfNameTop.set_text(lbl + (settings.htf_timer_show ? '\n' : '') + (settings.daily_name ? '\n' : ''))
+                else
+                    candleSet.tfNameTop := label.new(left, top, lbl + (settings.htf_timer_show ? '\n' : '') + (settings.daily_name ? '\n' : ''), color=color_transparent, textcolor=settings.htf_label_color, style=label.style_label_down, size=settings.htf_label_size, text_font_family=target_font)
+                if settings.htf_timer_show
+                    if not na(candleSet.tfTimerTop)
+                        candleSet.tfTimerTop.set_xy(left, top)
+                        candleSet.tfTimerTop.set_text(tmr + (settings.daily_name ? '\n' : ''))
+                    else
+                        candleSet.tfTimerTop := label.new(left, top, tmr + (settings.daily_name ? '\n' : ''), color=color_transparent, textcolor=settings.htf_timer_color, style=label.style_label_down, size=settings.htf_timer_size, text_font_family=target_font)
+            if settings.label_position == 'Both' or settings.label_position == 'Bottom'
+                if not na(candleSet.tfNameBottom)
+                    candleSet.tfNameBottom.set_xy(left, bottom)
+                    candleSet.tfNameBottom.set_text((settings.htf_timer_show ? '\n' : '') + lbl + (settings.daily_name ? '\n' : ''))
+                else
+                    candleSet.tfNameBottom := label.new(left, bottom, (settings.htf_timer_show ? '\n' : '') + lbl + (settings.daily_name ? '\n' : ''), color=color_transparent, textcolor=settings.htf_label_color, style=label.style_label_up, size=settings.htf_label_size, text_font_family=target_font)
+                if settings.htf_timer_show
+                    if not na(candleSet.tfTimerBottom)
+                        candleSet.tfTimerBottom.set_xy(left, bottom)
+                        candleSet.tfTimerBottom.set_text(tmr + (settings.daily_name ? '\n' : ''))
+                    else
+                        candleSet.tfTimerBottom := label.new(left, bottom, tmr + (settings.daily_name ? '\n' : ''), color=color_transparent, textcolor=settings.htf_timer_color, style=label.style_label_up, size=settings.htf_timer_size, text_font_family=target_font)
+    candleSet
+
+method Update(CandleSet candleSet, int offset, bool showTrace) =>
+    if candleSet.candles.size() > 0
+        Candle candle = candleSet.candles.first()
+        candle.h_idx := high > candle.h ? bar_index : candle.h_idx
+        candle.h := math.max(high, candle.h)
+        candle.l_idx := low < candle.l ? bar_index : candle.l_idx
+        candle.l := math.min(low, candle.l)
+        candle.c := close
+        candle.c_idx := bar_index
+        bool bull = candle.c > candle.o
+        box.set_lefttop(candle.body, box.get_left(candle.body), math.max(candle.o, candle.c))
+        box.set_rightbottom(candle.body, box.get_right(candle.body), math.min(candle.o, candle.c))
+        box.set_bgcolor(candle.body, bull ? settings.bull_body : settings.bear_body)
+        box.set_border_color(candle.body, bull ? settings.bull_border : settings.bear_border)
+        line.set_color(candle.wick_up, bull ? settings.bull_wick : settings.bear_wick)
+        line.set_color(candle.wick_down, bull ? settings.bull_wick : settings.bear_wick)
+        line.set_y1(candle.wick_up, candle.h)
+        line.set_y2(candle.wick_up, math.max(candle.o, candle.c))
+        line.set_y1(candle.wick_down, math.min(candle.o, candle.c))
+        line.set_y2(candle.wick_down, candle.l)
+        if barstate.isrealtime or barstate.islast
+            candleSet.Reorder(offset)
+            if settings.trace_show and showTrace and bar_index - candle.o_idx < 2000
+                if na(trace.o)
+                    trace.o := line.new(candle.o_idx, candle.o, box.get_left(candle.body), candle.o, xloc=xloc.bar_index, color=settings.trace_o_color, style=helper.LineStyle(settings.trace_o_style), width=settings.trace_o_size)
+                else
+                    line.set_xy1(trace.o, candle.o_idx, candle.o)
+                    line.set_xy2(trace.o, box.get_left(candle.body), candle.o)
+                if settings.label_show
+                    if na(trace.o_l)
+                        trace.o_l := label.new(box.get_right(candle.body), candle.o, str.tostring(candle.o), textalign=text.align_center, style=label.style_label_left, size=settings.label_size, color=color_transparent, textcolor=settings.label_color, text_font_family=target_font)
+                    else
+                        label.set_xy(trace.o_l, box.get_right(candle.body), candle.o)
+                        label.set_text(trace.o_l, str.tostring(candle.o))
+                if na(trace.c)
+                    trace.c := line.new(candle.c_idx, candle.c, box.get_left(candle.body), candle.c, xloc=xloc.bar_index, color=settings.trace_c_color, style=helper.LineStyle(settings.trace_c_style), width=settings.trace_c_size)
+                else
+                    line.set_xy1(trace.c, candle.c_idx, candle.c)
+                    line.set_xy2(trace.c, box.get_left(candle.body), candle.c)
+                if settings.label_show
+                    if na(trace.c_l)
+                        trace.c_l := label.new(box.get_right(candle.body), candle.c, str.tostring(candle.c), textalign=text.align_center, style=label.style_label_left, size=settings.label_size, color=color_transparent, textcolor=settings.label_color, text_font_family=target_font)
+                    else
+                        label.set_xy(trace.c_l, box.get_right(candle.body), candle.c)
+                        label.set_text(trace.c_l, str.tostring(candle.c))
+                if na(trace.h)
+                    trace.h := line.new(candle.h_idx, candle.h, line.get_x1(candle.wick_up), candle.h, xloc=xloc.bar_index, color=settings.trace_h_color, style=helper.LineStyle(settings.trace_h_style), width=settings.trace_h_size)
+                else
+                    line.set_xy1(trace.h, candle.h_idx, candle.h)
+                    line.set_xy2(trace.h, line.get_x1(candle.wick_up), candle.h)
+                if settings.label_show
+                    if na(trace.h_l)
+                        trace.h_l := label.new(box.get_right(candle.body), candle.h, str.tostring(candle.h), textalign=text.align_center, style=label.style_label_left, size=settings.label_size, color=color_transparent, textcolor=settings.label_color, text_font_family=target_font)
+                    else
+                        label.set_xy(trace.h_l, box.get_right(candle.body), candle.h)
+                        label.set_text(trace.h_l, str.tostring(candle.h))
+                if na(trace.l)
+                    trace.l := line.new(candle.l_idx, candle.l, line.get_x1(candle.wick_down), candle.l, xloc=xloc.bar_index, color=settings.trace_l_color, style=helper.LineStyle(settings.trace_l_style), width=settings.trace_l_size)
+                else
+                    line.set_xy1(trace.l, candle.l_idx, candle.l)
+                    line.set_xy2(trace.l, line.get_x1(candle.wick_down), candle.l)
+                if settings.label_show
+                    if na(trace.l_l)
+                        trace.l_l := label.new(box.get_right(candle.body), candle.l, str.tostring(candle.l), textalign=text.align_center, style=label.style_label_left, size=settings.label_size, color=color_transparent, textcolor=settings.label_color, text_font_family=target_font)
+                    else
+                        label.set_xy(trace.l_l, box.get_right(candle.body), candle.l)
+                        label.set_text(trace.l_l, str.tostring(candle.l))
+    candleSet
+
+// Chart FVG Functions
+detectChartFVG() =>
+    if not fvg_settings.show_chart_fvg or bar_index < 3
+        na
+    else
+        if low > high[2]
+            gap_size = low - high[2]
+            if fvg_settings.threshold <= 0.0 or gap_size >= (fvg_settings.threshold * cached_atr)
+                fvg = ChartFVG.new()
+                fvg.top := low
+                fvg.bottom := high[2]
+                fvg.start_bar := bar_index - 2
+                fvg.is_bullish := true
+                fvg.is_mitigated := false
+                fvg.mitigation_price := na
+                fvg.mitigation_bar := na
+                
+                right_bar = fvg_settings.extend_fvg ? bar_index : bar_index
+                fvg.fvg_box := box.new(fvg.start_bar, fvg.top, right_bar, fvg.bottom,
+                                     bgcolor=fvg_settings.bullish_fvg_color,
+                                     border_color=color_transparent,
+                                     border_width=0)
+                
+                if fvg_settings.show_fvg_labels
+                    label.new(fvg.start_bar, (fvg.top + fvg.bottom) / 2, "Bull FVG",
+                             color=color_transparent, textcolor=color.green,
+                             style=label.style_label_left, size=size.small, text_font_family=target_font)
+                
+                fvg
+            else
+                na
+        
+        else if high < low[2]
+            gap_size = low[2] - high
+            if fvg_settings.threshold <= 0.0 or gap_size >= (fvg_settings.threshold * cached_atr)
+                fvg = ChartFVG.new()
+                fvg.top := low[2]
+                fvg.bottom := high
+                fvg.start_bar := bar_index - 2
+                fvg.is_bullish := false
+                fvg.is_mitigated := false
+                fvg.mitigation_price := na
+                fvg.mitigation_bar := na
+                
+                right_bar = fvg_settings.extend_fvg ? bar_index : bar_index
+                fvg.fvg_box := box.new(fvg.start_bar, fvg.top, right_bar, fvg.bottom,
+                                     bgcolor=fvg_settings.bearish_fvg_color,
+                                     border_color=color_transparent,
+                                     border_width=0)
+                
+                if fvg_settings.show_fvg_labels
+                    label.new(fvg.start_bar, (fvg.top + fvg.bottom) / 2, "Bear FVG",
+                             color=color_transparent, textcolor=color.red,
+                             style=label.style_label_left, size=size.small, text_font_family=target_font)
+                
+                fvg
+            else
+                na
+        else
+            na
+
+checkFVGMitigation(ChartFVG fvg) =>
+    if fvg.is_mitigated
+        false
+    else
+        mitigated = false
+        
+        if fvg.is_bullish
+            if low <= fvg.bottom
+                mitigated := true
+                fvg.mitigation_price := low
+                fvg.mitigation_bar := bar_index
+        else
+            if high >= fvg.top
+                mitigated := true
+                fvg.mitigation_price := high
+                fvg.mitigation_bar := bar_index
+        
+        if mitigated
+            fvg.is_mitigated := true
+            
+            if fvg_settings.delete_mitigated
+                if not na(fvg.fvg_box)
+                    box.delete(fvg.fvg_box)
+                    fvg.fvg_box := na
+            else
+                if fvg_settings.show_mitigated
+                    box.set_bgcolor(fvg.fvg_box, fvg_settings.mitigated_fvg_color)
+                else
+                    if not na(fvg.fvg_box)
+                        box.delete(fvg.fvg_box)
+                        fvg.fvg_box := na
+        
+        mitigated
+
+updateFVGExtension(ChartFVG fvg) =>
+    if not na(fvg.fvg_box) and fvg_settings.extend_fvg and not fvg.is_mitigated
+        box.set_right(fvg.fvg_box, bar_index)
+
+cleanupOldFVGs() =>
+    if chart_fvgs.size() > fvg_settings.max_fvg_display
+        max_cleanup = math.min(chart_fvgs.size() - fvg_settings.max_fvg_display, 10)
+        for i = 0 to max_cleanup - 1
+            if chart_fvgs.size() > 0
+                old_fvg = chart_fvgs.shift()
+                if not na(old_fvg.fvg_box)
+                    box.delete(old_fvg.fvg_box)
+
+if (settings.fvg_threshold > 0.0 or fvg_settings.threshold > 0.0) and (bar_index % 10 == 0)
+    cached_atr := ta.atr(14)
+
+// Initialize HTF settings with effective timeframes
+if barstate.isfirst
+    htf1.settings.htf := getEffectiveTimeframe(htf_1)
+    htf2.settings.htf := getEffectiveTimeframe(htf_2)
+    htf3.settings.htf := getEffectiveTimeframe(htf_3)
+    htf4.settings.htf := getEffectiveTimeframe(htf_4)
+    htf5.settings.htf := getEffectiveTimeframe(htf_5)
+    htf6.settings.htf := getEffectiveTimeframe(htf_6)
+
+// HTF Chart FVGs Processing
+if settings.fvg_show_on_chart and htf_chart_fvgs.size() > 0
+    for i = 0 to htf_chart_fvgs.size() - 1
+        htf_fvg = htf_chart_fvgs.get(i)
+        updateHTFChartFVGExtension(htf_fvg)
+
+if settings.fvg_show_on_chart
+    cleanupOldHTFChartFVGs()
+
+if settings.midpoint_show_on_chart
+    cleanupOldChartMidpointLines()
+
+// Chart FVG Processing
+if fvg_settings.show_chart_fvg
+    new_fvg = detectChartFVG()
+    if not na(new_fvg)
+        chart_fvgs.push(new_fvg)
+    
+    if chart_fvgs.size() > 0
+        for i = chart_fvgs.size() - 1 to 0
+            if i >= chart_fvgs.size()
+                continue
+            fvg = chart_fvgs.get(i)
+            
+            checkFVGMitigation(fvg)
+            
+            updateFVGExtension(fvg)
+            
+            if fvg.is_mitigated and fvg_settings.delete_mitigated
+                chart_fvgs.remove(i)
+    
+    cleanupOldFVGs()
+
+// MTF Candles Execution
+if barstate.isfirst
+    enabled_htfs := helper.HTFEnabled()
+    htf1_valid := helper.ValidTimeframe(htf1.settings.htf)
+    htf2_valid := helper.ValidTimeframe(htf2.settings.htf)
+    htf3_valid := helper.ValidTimeframe(htf3.settings.htf)
+    htf4_valid := helper.ValidTimeframe(htf4.settings.htf)
+    htf5_valid := helper.ValidTimeframe(htf5.settings.htf)
+    htf6_valid := helper.ValidTimeframe(htf6.settings.htf)
+
+    // OPTIMIZATION: Initialize arrays once
+    array.set(htf_show_array, 0, htf1.settings.show)
+    array.set(htf_show_array, 1, htf2.settings.show)
+    array.set(htf_show_array, 2, htf3.settings.show)
+    array.set(htf_show_array, 3, htf4.settings.show)
+    array.set(htf_show_array, 4, htf5.settings.show)
+    array.set(htf_show_array, 5, htf6.settings.show)
+    
+    array.set(htf_valid_array, 0, htf1_valid)
+    array.set(htf_valid_array, 1, htf2_valid)
+    array.set(htf_valid_array, 2, htf3_valid)
+    array.set(htf_valid_array, 3, htf4_valid)
+    array.set(htf_valid_array, 4, htf5_valid)
+    array.set(htf_valid_array, 5, htf6_valid)
+
+// --- FIX START: Recalculate 'last' based on VALID frames, not just enabled ones ---
+int actual_valid_count = 0
+for i = 0 to 5
+    if array.get(htf_show_array, i) and array.get(htf_valid_array, i)
+        actual_valid_count += 1
+// --- FIX END ---
+
+int cnt = 0
+// We use the actual valid count so 'cnt' can successfully reach 'last - 1'
+int last = math.min(actual_valid_count, settings.max_sets) 
+int offset = settings.offset
+bool isFirstAnchor = settings.trace_anchor == 'First Timeframe'
+bool isLastAnchor = settings.trace_anchor == 'Last Timeframe'
+
+processHTF(htf, offset, showTrace) =>
+    [updatedHTF, isNewHTFCandle] = htf.UpdateTime(offset).Monitor()
+    updatedHTF2 = updatedHTF.Update(offset, showTrace).FindImbalance().CheckSweeps(offset)
+    final_htf = updatedHTF2.CheckMidpoints(offset)
+    final_htf
+
+calcOffset(htf) =>
+    candleSize = htf.candles.size()
+    candleSize * (settings.width + settings.buffer) - (candleSize > 0 ? settings.buffer : 0) + settings.htf_buffer
+
+for i = 0 to 5
+    if cnt >= last
+        break
+        
+    show = array.get(htf_show_array, i)
+    valid = array.get(htf_valid_array, i)
+    
+    if not show or not valid
+        continue
+    
+    // Logic: If 'last' is 4, we want to trace on cnt==0 (first) or cnt==3 (last)
+    showTrace = (isFirstAnchor and cnt == 0) or (isLastAnchor and cnt == last - 1)
+    
+    updated_htf = switch i
+        0 => processHTF(htf1, offset, showTrace)
+        1 => processHTF(htf2, offset, showTrace)
+        2 => processHTF(htf3, offset, showTrace)
+        3 => processHTF(htf4, offset, showTrace)
+        4 => processHTF(htf5, offset, showTrace)
+        5 => processHTF(htf6, offset, showTrace)
+    
+    cnt += 1
+    
+    if cnt < last and i < 5
+        offset += switch i
+            0 => calcOffset(htf1)
+            1 => calcOffset(htf2)
+            2 => calcOffset(htf3)
+            3 => calcOffset(htf4)
+            4 => calcOffset(htf5)
+            => 0
+
+// ============================================
+// INFO TABLE LOGIC (Execution)
+// ============================================
+
+// Map inputs to Pine types
+t_pos = switch table_pos_input
+    "Top Right" => position.top_right
+    "Top Left" => position.top_left
+    "Bottom Right" => position.bottom_right
+    => position.bottom_left
+
+t_size = switch table_size_input
+    "tiny" => size.tiny
+    "small" => size.small
+    "large" => size.large
+    => size.normal
+
+// Helper to calculate time remaining
+f_time_remaining() =>
+    t = time_close(timeframe.period) - timenow
+    if t > 0
+        seconds = math.floor((t / 1000) % 60)
+        minutes = math.floor((t / (1000 * 60)) % 60)
+        hours = math.floor((t / (1000 * 60 * 60)) % 24)
+        
+        // If hours > 0, show H:MM:SS (e.g., 2:15:30)
+        // If hours == 0, show only MM:SS (e.g., 14:05)
+        if hours > 0
+            str.format("{0}:{1,number,00}:{2,number,00}", hours, minutes, seconds)
+        else
+            str.format("{0,number,00}:{1,number,00}", minutes, seconds)
+    else
+        "Closed"
+
+// Helper to clean symbol names
+f_clean_sym(s) =>
+    split_s = str.split(s, ":")
+    array.size(split_s) > 1 ? array.get(split_s, 1) : s
+
+// Helper to Format Timeframe
+f_format_tf_display(t) =>
+    if str.contains(t, "D") or str.contains(t, "W") or str.contains(t, "M")
+        t
+    else
+        val = str.tonumber(t)
+        if not na(val)
+            if val >= 60 and val % 60 == 0
+                str.tostring(val / 60) + "H"
+            else
+                t + "m"
+        else
+            t
+
+var table info_tbl = na
+
+if show_info_table and barstate.islast
+    // Initialize table once
+    if na(info_tbl)
+        // BORDER LOGIC: If table_border_on is true, width is 1. Else 0.
+        border_w = table_border_on ? 1 : 0
+        
+        info_tbl := table.new(t_pos, 2, 6, border_width = border_w, border_color = tbl_txt_color, frame_color = table_border_on ? tbl_txt_color : na, frame_width = border_w)
+    
+    // 1. Header (Asset + TF)
+    tf_str = f_format_tf_display(timeframe.period)
+    header_txt = syminfo.ticker + (show_tf_row ? " (" + tf_str + ")" : "")
+    
+    table.cell(info_tbl, 0, 0, header_txt, text_color=tbl_txt_color, bgcolor=tbl_bg_color, text_size=t_size, text_halign=text.align_center, width=12, text_font_family=font.family_monospace)
+    table.merge_cells(info_tbl, 0, 0, 1, 0)
+    
+    int row = 1
+    
+    // 2. SSMT Status / Model
+    if show_ssmt_status
+        mode_str = triad_selection_mode != "Off" ? triad_selection_mode : dyad_selection_mode != "Off" ? dyad_selection_mode : "Off"
+        type_str = triad_ok ? "Triad" : dyad_ok ? "Dyad" : "None"
+        
+        table.cell(info_tbl, 0, row, "Model", text_color=tbl_txt_color, bgcolor=tbl_bg_color, text_size=t_size, text_halign=text.align_left, text_font_family=font.family_monospace)
+        table.cell(info_tbl, 1, row, mode_str + " (" + type_str + ")", text_color=tbl_txt_color, bgcolor=tbl_bg_color, text_size=t_size, text_halign=text.align_right, text_font_family=font.family_monospace)
+        row += 1
+
+    // 3. Time to Close
+    if show_timer_row
+        table.cell(info_tbl, 0, row, "Closes in", text_color=tbl_txt_color, bgcolor=tbl_bg_color, text_size=t_size, text_halign=text.align_left, text_font_family=font.family_monospace)
+        table.cell(info_tbl, 1, row, f_time_remaining(), text_color=tbl_txt_color, bgcolor=tbl_bg_color, text_size=t_size, text_halign=text.align_right, text_font_family=font.family_monospace)
+        row += 1
+
+    // 4. Correlated Pairs (Auto Display)
+    if show_ssmt_status and (triad_ok or dyad_ok)
+        pairs_txt = ""
+        p2 = f_clean_sym(csym)
+        p3 = f_clean_sym(tsym3)
+        pairs_txt := triad_ok ? p2 + ", " + p3 : p2
+        
+        table.cell(info_tbl, 0, row, "(Pairs)", text_color=tbl_txt_color, bgcolor=tbl_bg_color, text_size=t_size, text_halign=text.align_left, text_font_family=font.family_monospace)
+        table.cell(info_tbl, 1, row, pairs_txt, text_color=tbl_txt_color, bgcolor=tbl_bg_color, text_size=size.tiny, text_halign=text.align_right, text_font_family=font.family_monospace)
+        row += 1
