@@ -10,10 +10,12 @@ library("QTEngine", overlay=false)
 // - Non-repaint: any request.security(..., lookahead_off) only
 // - Step 2 (implemented): quarter OHLC aggregated on chart TF into QuarterRecords
 // - Step 3 (implemented): Micro/Nano H/L/C sourced from aligned TF quarters
+// - Step 3b (implemented): 90m O/C sourced from aligned TF quarters
 // - Weekly cycle intentionally excluded for now
 //
-// NOTE: Chart-TF aggregation still drives Daily/m90. Micro/Nano now use aligned-TF
-//       quarters for H/L/C, while opens remain aligned to the first printed bar.
+// NOTE: Chart-TF aggregation still drives Daily. Micro/Nano now use aligned-TF
+//       quarters for H/L/C, and 90m uses aligned-TF O/C, while Micro/Nano opens
+//       remain aligned to the first printed bar.
 // ============================================================================
 
 // ============================================================================
@@ -28,8 +30,9 @@ const int LEN_22M30S = 22 * MS_MIN + 30 * MS_SEC  // 22.5 minutes
 
 const string NANO_OPEN_TF = "5S"
 const string MICRO_OPEN_TF = "30S"
+const string M90_ALIGNED_TF = "5"
 // Micro/Nano open capture uses fixed config to satisfy library request.* constraints.
-// Aligned-TF OHLC uses the same fixed anchor to keep request.security inputs constant.
+// Aligned-TF OHLC uses fixed TFs to keep request.security inputs constant.
 const string NANO_TZ = "America/New_York"
 const int NANO_DAY_START_HOUR = 18
 const int NANO_DAY_START_MIN = 0
@@ -117,7 +120,7 @@ export type FixedCycleState
     int   pendingOpenTs
     bool  pendingHas
 
-    // Aligned-TF quarter records (Micro/Nano only; read-only path for now)
+    // Aligned-TF quarter records (Micro/Nano/90m; read-only path for now)
     QuarterRecord aq1
     QuarterRecord aq2
     QuarterRecord aq3
@@ -302,7 +305,18 @@ f_nano_aligned_ohlc_current() =>
         lookahead=barmerge.lookahead_off
     )
 
-f_aligned_ohlc_pick(bool isNano, bool isMicro) =>
+f_m90_aligned_ohlc_expr() =>
+    [open, high, low, close, time]
+
+f_m90_aligned_ohlc_current() =>
+    request.security(
+        syminfo.tickerid,
+        M90_ALIGNED_TF,
+        f_m90_aligned_ohlc_expr(),
+        lookahead=barmerge.lookahead_off
+    )
+
+f_aligned_ohlc_pick(bool isNano, bool isMicro, bool isM90) =>
     float pickO = float(na)
     float pickH = float(na)
     float pickL = float(na)
@@ -322,10 +336,17 @@ f_aligned_ohlc_pick(bool isNano, bool isMicro) =>
         pickL := tmpL
         pickC := tmpC
         pickT := tmpT
+    else if isM90
+        [tmpO, tmpH, tmpL, tmpC, tmpT] = f_m90_aligned_ohlc_current()
+        pickO := tmpO
+        pickH := tmpH
+        pickL := tmpL
+        pickC := tmpC
+        pickT := tmpT
     [pickO, pickH, pickL, pickC, pickT]
 
-f_aligned_bar_timing(bool isNano, int aT) =>
-    int aLen = isNano ? 5 * MS_SEC : 30 * MS_SEC
+f_aligned_bar_timing(bool isNano, bool isMicro, bool isM90, int aT) =>
+    int aLen = isNano ? 5 * MS_SEC : isMicro ? 30 * MS_SEC : isM90 ? 5 * MS_MIN : int(na)
     int aRef = isNano ? aT : (aT + aLen - 1)
     int aClose = aT + aLen
     [aLen, aRef, aClose]
@@ -488,6 +509,7 @@ f_fixed_cycle_update(
 ) =>
     bool isNano = (lenMs == LEN_22M30S)
     bool isMicro = (lenMs == LEN_90M)
+    bool isM90 = (lenMs == LEN_6H)
     int tRef = isNano ? t : (tClose - 1)
     int ds = f_qt_day_start(tRef, cfg)
 
@@ -669,13 +691,13 @@ f_fixed_cycle_update(
                 pendingOpenTs2 := microOTs30
                 pendingHas2 := true
 
-    // Aligned-TF quarter aggregation (read-only path for now).
-    [aO, aH, aL, aC, aT] = f_aligned_ohlc_pick(isNano, isMicro)
+    // Aligned-TF quarter aggregation (Micro/Nano/90m).
+    [aO, aH, aL, aC, aT] = f_aligned_ohlc_pick(isNano, isMicro, isM90)
 
     bool aNew = not na(aT) and (na(alignedLastBar2) or aT != alignedLastBar2)
     if aNew
         alignedLastBar2 := aT
-        [aLen, aRef, aClose] = f_aligned_bar_timing(isNano, aT)
+        [aLen, aRef, aClose] = f_aligned_bar_timing(isNano, isMicro, isM90, aT)
         int aDs = f_qt_day_start(aRef, cfg)
         int aCStart = f_cycle_start(aRef, aDs, lenMs)
         int aCEnd = aCStart + lenMs
@@ -934,6 +956,28 @@ f_fixed_cycle_update(
         q4.c := aq4.c
         q4.cTs := aq4.cTs
 
+    // Phase 3b: 90m O/C come from aligned-TF quarter aggregation.
+    if isM90
+        q1.o := aq1.o
+        q1.oTs := aq1.oTs
+        q1.c := aq1.c
+        q1.cTs := aq1.cTs
+
+        q2.o := aq2.o
+        q2.oTs := aq2.oTs
+        q2.c := aq2.c
+        q2.cTs := aq2.cTs
+
+        q3.o := aq3.o
+        q3.oTs := aq3.oTs
+        q3.c := aq3.c
+        q3.cTs := aq3.cTs
+
+        q4.o := aq4.o
+        q4.oTs := aq4.oTs
+        q4.c := aq4.c
+        q4.cTs := aq4.cTs
+
     FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2, pendingBoundary2, pendingOpen2, pendingOpenTs2, pendingHas2, aq1, aq2, aq3, aq4, aprev1, aprev2, alignedLastStart2, alignedLastBoundary2, alignedLastBar2)
 
     CycleResult res = CycleResult.new(
@@ -984,6 +1028,9 @@ export qt_micro_aligned_ohlc_debug() =>
 
 export qt_nano_aligned_ohlc_debug() =>
     f_nano_aligned_ohlc_current()
+
+export qt_m90_aligned_ohlc_debug() =>
+    f_m90_aligned_ohlc_current()
 
 export qt_micro_aligned_qr_debug(CycleState st) =>
     [st.micro.aq1, st.micro.aq2, st.micro.aq3, st.micro.aq4]
