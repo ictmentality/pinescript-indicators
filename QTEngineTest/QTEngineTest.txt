@@ -1,12 +1,13 @@
 //@version=6
 indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/8 as qt
+import Jaw1312/QTEngine/12 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
 // -----------------------------------------------------------------------------
 groupCycles = "TIME CYCLES"
+showDaily = input.bool(true, "Daily (24h cycle; q=6h)", group=groupCycles)
 show90m  = input.bool(true, "90m (6h cycle; q=90m)", group=groupCycles)
 showMicro = input.bool(true, "Micro (90m cycle; q=22m30s)", group=groupCycles)
 showNano  = input.bool(true, "Nano (22m30s cycle; q=5m37.5s)", group=groupCycles)
@@ -72,14 +73,17 @@ f_ceil_5s(int ts) =>
 // Nano  = 5s - 15s
 // Micro = 30s - 4m
 // 90m   = 5m - 14m
+// Daily = 15m - 30m
 // -----------------------------------------------------------------------------
 int tfSec = timeframe.in_seconds(timeframe.period)
 bool visNanoTf = not na(tfSec) and tfSec >= 5 and tfSec <= 15
 bool visMicroTf = not na(tfSec) and tfSec >= 30 and tfSec <= 240
 bool vis90mTf = not na(tfSec) and tfSec >= 300 and tfSec <= 840
+bool visDailyTf = not na(tfSec) and tfSec >= 900 and tfSec <= 1800
 bool showNanoTf = showNano and visNanoTf
 bool showMicroTf = showMicro and visMicroTf
 bool show90mTf = show90m and vis90mTf
+bool showDailyTf = showDaily and visDailyTf
 
 // QTIndicator mapping (string → TradingView style)
 lineStyleFrom(string s) =>
@@ -196,7 +200,7 @@ f_kill(line ln) =>
     out
 
 // -----------------------------------------------------------------------------
-// QT Core update (Micro + Nano)
+// QT Core update (Daily + 90m + Micro + Nano)
 // -----------------------------------------------------------------------------
 var qt.QTConfig   cfg = qt.qt_config_default()
 var qt.CycleState st  = qt.qt_state_new()
@@ -204,15 +208,16 @@ var qt.CycleState st  = qt.qt_state_new()
 int t  = time
 int tc = time_close
 
-[st0, m90] = qt.qt_m90_update(st, cfg, t, tc)
-[st1, m] = qt.qt_micro_update(st0, cfg, t, tc)
-[st2, n] = qt.qt_nano_update(st1, cfg, t, tc)
-st := st2
+[st0, d] = qt.qt_daily_update(st, cfg, t, tc)
+[st1, m90] = qt.qt_m90_update(st0, cfg, t, tc)
+[st2, m] = qt.qt_micro_update(st1, cfg, t, tc)
+[st3, n] = qt.qt_nano_update(st2, cfg, t, tc)
+st := st3
 
 [m_aq1, m_aq2, m_aq3, m_aq4] = qt.qt_micro_aligned_qr_debug(st)
 [n_aq1, n_aq2, n_aq3, n_aq4] = qt.qt_nano_aligned_qr_debug(st)
-qt.QuarterRecord m_aq = f_pick_qr(m.curQuarterIndex, m_aq1, m_aq2, m_aq3, m_aq4)
-qt.QuarterRecord n_aq = f_pick_qr(n.curQuarterIndex, n_aq1, n_aq2, n_aq3, n_aq4)
+qt.QuarterRecord m_q = f_pick_qr(m.curQuarterIndex, m.q1, m.q2, m.q3, m.q4)
+qt.QuarterRecord n_q = f_pick_qr(n.curQuarterIndex, n.q1, n.q2, n.q3, n.q4)
 
 // -----------------------------------------------------------------------------
 // Data Window — Step 1: boundaryTs checks
@@ -338,20 +343,20 @@ if showAlignedOhlc and barstate.islast
     table.cell(aligned_tbl, 1, 6, str.tostring(m.curQuarterIndex), text_color=color.black)
     table.cell(aligned_tbl, 2, 6, str.tostring(n.curQuarterIndex), text_color=color.black)
     table.cell(aligned_tbl, 0, 7, "QO", text_color=color.black)
-    table.cell(aligned_tbl, 1, 7, f_fmt(m_aq.o), text_color=color.black)
-    table.cell(aligned_tbl, 2, 7, f_fmt(n_aq.o), text_color=color.black)
+    table.cell(aligned_tbl, 1, 7, f_fmt(m_q.o), text_color=color.black)
+    table.cell(aligned_tbl, 2, 7, f_fmt(n_q.o), text_color=color.black)
     table.cell(aligned_tbl, 0, 8, "QH", text_color=color.black)
-    table.cell(aligned_tbl, 1, 8, f_fmt(m_aq.h), text_color=color.black)
-    table.cell(aligned_tbl, 2, 8, f_fmt(n_aq.h), text_color=color.black)
+    table.cell(aligned_tbl, 1, 8, f_fmt(m_q.h), text_color=color.black)
+    table.cell(aligned_tbl, 2, 8, f_fmt(n_q.h), text_color=color.black)
     table.cell(aligned_tbl, 0, 9, "QL", text_color=color.black)
-    table.cell(aligned_tbl, 1, 9, f_fmt(m_aq.l), text_color=color.black)
-    table.cell(aligned_tbl, 2, 9, f_fmt(n_aq.l), text_color=color.black)
+    table.cell(aligned_tbl, 1, 9, f_fmt(m_q.l), text_color=color.black)
+    table.cell(aligned_tbl, 2, 9, f_fmt(n_q.l), text_color=color.black)
     table.cell(aligned_tbl, 0, 10, "QC", text_color=color.black)
-    table.cell(aligned_tbl, 1, 10, f_fmt(m_aq.c), text_color=color.black)
-    table.cell(aligned_tbl, 2, 10, f_fmt(n_aq.c), text_color=color.black)
+    table.cell(aligned_tbl, 1, 10, f_fmt(m_q.c), text_color=color.black)
+    table.cell(aligned_tbl, 2, 10, f_fmt(n_q.c), text_color=color.black)
     table.cell(aligned_tbl, 0, 11, "QT", text_color=color.black)
-    table.cell(aligned_tbl, 1, 11, f_fmt_time(m_aq.oTs, cfg.tz), text_color=color.black)
-    table.cell(aligned_tbl, 2, 11, f_fmt_time(n_aq.oTs, cfg.tz), text_color=color.black)
+    table.cell(aligned_tbl, 1, 11, f_fmt_time(m_q.oTs, cfg.tz), text_color=color.black)
+    table.cell(aligned_tbl, 2, 11, f_fmt_time(n_q.oTs, cfg.tz), text_color=color.black)
 else if not showAlignedOhlc and not na(aligned_tbl)
     table.delete(aligned_tbl)
     aligned_tbl := na
@@ -390,6 +395,125 @@ var int MAX_LINES = 500
 var int STORE_MAX = 800
 
 // -----------------------------------------------------------------------------
+// Daily cycle storage
+// -----------------------------------------------------------------------------
+var int[] dailyStarts = array.new_int()
+var vset  dailyV = vset_new()
+
+var line dailyProjQ2  = na
+var line dailyProjQ3  = na
+var line dailyProjQ4  = na
+var line dailyProjEnd = na
+
+var int[]   dailyHistStart = array.new_int()
+var int[]   dailyHistEnd   = array.new_int()
+
+var float[] daily_h_q1o   = array.new_float()
+var int[]   daily_h_q1oTs = array.new_int()
+var float[] daily_h_q2o   = array.new_float()
+var int[]   daily_h_q2oTs = array.new_int()
+var float[] daily_h_q3o   = array.new_float()
+var int[]   daily_h_q3oTs = array.new_int()
+var float[] daily_h_q4o   = array.new_float()
+var int[]   daily_h_q4oTs = array.new_int()
+
+var line[]  daily_l_q1o   = array.new_line()
+var line[]  daily_l_q2o   = array.new_line()
+var line[]  daily_l_q3o   = array.new_line()
+var line[]  daily_l_q4o   = array.new_line()
+
+f_dhist_kill_at(int idx) =>
+    line a = array.get(daily_l_q1o, idx)
+    line b = array.get(daily_l_q2o, idx)
+    line c = array.get(daily_l_q3o, idx)
+    line l4 = array.get(daily_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(daily_l_q1o, idx, na)
+    array.set(daily_l_q2o, idx, na)
+    array.set(daily_l_q3o, idx, na)
+    array.set(daily_l_q4o, idx, na)
+    0
+
+f_dhist_shift_front() =>
+    if array.size(dailyHistStart) > 0
+        f_dhist_kill_at(0)
+        array.shift(dailyHistStart)
+        array.shift(dailyHistEnd)
+
+        array.shift(daily_h_q1o),  array.shift(daily_h_q1oTs)
+        array.shift(daily_h_q2o),  array.shift(daily_h_q2oTs)
+        array.shift(daily_h_q3o),  array.shift(daily_h_q3oTs)
+        array.shift(daily_h_q4o),  array.shift(daily_h_q4oTs)
+
+        array.shift(daily_l_q1o)
+        array.shift(daily_l_q2o)
+        array.shift(daily_l_q3o)
+        array.shift(daily_l_q4o)
+    0
+
+f_dhist_trim_cutoff(int cutoffTs) =>
+    while array.size(dailyHistStart) > 0 and array.get(dailyHistStart, 0) < cutoffTs
+        f_dhist_shift_front()
+    0
+
+f_dhist_ensure_current() =>
+    if d.inWindow and not na(d.q1Ts)
+        int key = d.q1Ts
+        int idx = f_find_int(dailyHistStart, key)
+        if idx == -1
+            array.push(dailyHistStart, key)
+            array.push(dailyHistEnd, d.endTs)
+
+            array.push(daily_h_q1o, na), array.push(daily_h_q1oTs, na)
+            array.push(daily_h_q2o, na), array.push(daily_h_q2oTs, na)
+            array.push(daily_h_q3o, na), array.push(daily_h_q3oTs, na)
+            array.push(daily_h_q4o, na), array.push(daily_h_q4oTs, na)
+
+            line naL = na
+            array.push(daily_l_q1o, naL)
+            array.push(daily_l_q2o, naL)
+            array.push(daily_l_q3o, naL)
+            array.push(daily_l_q4o, naL)
+            idx := array.size(dailyHistStart) - 1
+
+        array.set(dailyHistEnd, idx, d.endTs)
+
+        float q1o = d.q1.o
+        int   q1t = d.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(daily_h_q1o, idx, q1o)
+            array.set(daily_h_q1oTs, idx, q1t)
+
+        float q2o = d.q2.o
+        int   q2t = d.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(daily_h_q2o, idx, q2o)
+            array.set(daily_h_q2oTs, idx, q2t)
+
+        float q3o = d.q3.o
+        int   q3t = d.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(daily_h_q3o, idx, q3o)
+            array.set(daily_h_q3oTs, idx, q3t)
+
+        float q4o = d.q4.o
+        int   q4t = d.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(daily_h_q4o, idx, q4o)
+            array.set(daily_h_q4oTs, idx, q4t)
+
+        while array.size(dailyHistStart) > STORE_MAX
+            f_dhist_shift_front()
+    0
+
+// -----------------------------------------------------------------------------
 // 90m cycle storage
 // -----------------------------------------------------------------------------
 var int[] m90Starts = array.new_int()
@@ -421,15 +545,15 @@ f_m90hist_kill_at(int idx) =>
     line a = array.get(m90_l_q1o, idx)
     line b = array.get(m90_l_q2o, idx)
     line c = array.get(m90_l_q3o, idx)
-    line d = array.get(m90_l_q4o, idx)
+    line l4 = array.get(m90_l_q4o, idx)
     if not na(a)
         line.delete(a)
     if not na(b)
         line.delete(b)
     if not na(c)
         line.delete(c)
-    if not na(d)
-        line.delete(d)
+    if not na(l4)
+        line.delete(l4)
     array.set(m90_l_q1o, idx, na)
     array.set(m90_l_q2o, idx, na)
     array.set(m90_l_q3o, idx, na)
@@ -540,15 +664,15 @@ f_mhist_kill_at(int idx) =>
     line a = array.get(micro_l_q1o, idx)
     line b = array.get(micro_l_q2o, idx)
     line c = array.get(micro_l_q3o, idx)
-    line d = array.get(micro_l_q4o, idx)
+    line l4 = array.get(micro_l_q4o, idx)
     if not na(a)
         line.delete(a)
     if not na(b)
         line.delete(b)
     if not na(c)
         line.delete(c)
-    if not na(d)
-        line.delete(d)
+    if not na(l4)
+        line.delete(l4)
     array.set(micro_l_q1o, idx, na)
     array.set(micro_l_q2o, idx, na)
     array.set(micro_l_q3o, idx, na)
@@ -663,15 +787,15 @@ f_hist_kill_at(int idx) =>
     line a = array.get(l_q1o, idx)
     line b = array.get(l_q2o, idx)
     line c = array.get(l_q3o, idx)
-    line d = array.get(l_q4o, idx)
+    line l4 = array.get(l_q4o, idx)
     if not na(a)
         line.delete(a)
     if not na(b)
         line.delete(b)
     if not na(c)
         line.delete(c)
-    if not na(d)
-        line.delete(d)
+    if not na(l4)
+        line.delete(l4)
     array.set(l_q1o, idx, na)
     array.set(l_q2o, idx, na)
     array.set(l_q3o, idx, na)
@@ -757,13 +881,118 @@ f_hist_ensure_current() =>
 // -----------------------------------------------------------------------------
 // Main draw logic
 // -----------------------------------------------------------------------------
-int enabledCycles = (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
+int enabledCycles = (showDailyTf ? 1 : 0) + (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
 if enabledCycles < 1
     enabledCycles := 1
 int perCycle = showOpens ? 9 : 5
 int maxC = int(math.floor((MAX_LINES - 10) / (perCycle * (enabledCycles * 1.0))))
 maxC := f_clamp_int(maxC, 1, 200)
 int keepEff = f_clamp_int(keepCycles, 1, maxC)
+
+if not showDailyTf
+    vset_clear(dailyV)
+    dailyProjQ2  := f_kill(dailyProjQ2)
+    dailyProjQ3  := f_kill(dailyProjQ3)
+    dailyProjQ4  := f_kill(dailyProjQ4)
+    dailyProjEnd := f_kill(dailyProjEnd)
+
+    int di = array.size(dailyHistStart) - 1
+    while di >= 0
+        f_dhist_kill_at(di)
+        di -= 1
+    array.clear(dailyHistStart), array.clear(dailyHistEnd)
+    array.clear(daily_h_q1o), array.clear(daily_h_q1oTs)
+    array.clear(daily_h_q2o), array.clear(daily_h_q2oTs)
+    array.clear(daily_h_q3o), array.clear(daily_h_q3oTs)
+    array.clear(daily_h_q4o), array.clear(daily_h_q4oTs)
+    array.clear(daily_l_q1o), array.clear(daily_l_q2o), array.clear(daily_l_q3o), array.clear(daily_l_q4o)
+    array.clear(dailyStarts)
+else
+    if not na(d.q2Ts)
+        dailyProjQ2 := tc > d.q2Ts ? f_kill(dailyProjQ2) : f_set_or_make_vline(dailyProjQ2, d.q2Ts, COL_Q2)
+    if not na(d.q3Ts)
+        dailyProjQ3 := tc > d.q3Ts ? f_kill(dailyProjQ3) : f_set_or_make_vline(dailyProjQ3, d.q3Ts, COL_Q3)
+    if not na(d.q4Ts)
+        dailyProjQ4 := tc > d.q4Ts ? f_kill(dailyProjQ4) : f_set_or_make_vline(dailyProjQ4, d.q4Ts, COL_Q4)
+
+    if not na(d.endTs)
+        dailyProjEnd := f_set_or_make_vline(dailyProjEnd, d.endTs, COL_Q1)
+
+    if d.inWindow and not na(d.q1Ts)
+        f_push_unique_int(dailyStarts, d.q1Ts, STORE_MAX)
+
+    int dCutoff = na(d.q1Ts) ? 0 : d.q1Ts
+    int dAvail = array.size(dailyStarts)
+    int dUse   = math.min(keepEff, dAvail)
+    int dFirst = dAvail - dUse
+    if dUse > 0
+        dCutoff := array.get(dailyStarts, dFirst)
+
+    vset_trim_since(dailyV, dCutoff)
+
+    f_dhist_ensure_current()
+    f_dhist_trim_cutoff(dCutoff)
+
+    if d.inWindow
+        if not na(d.q1Ts) and tc > d.q1Ts
+            vset_add(dailyV, d.q1Ts, COL_Q1)
+        if not na(d.q2Ts) and tc > d.q2Ts
+            vset_add(dailyV, d.q2Ts, COL_Q2)
+        if not na(d.q3Ts) and tc > d.q3Ts
+            vset_add(dailyV, d.q3Ts, COL_Q3)
+        if not na(d.q4Ts) and tc > d.q4Ts
+            vset_add(dailyV, d.q4Ts, COL_Q4)
+        if not na(d.endTs) and tc > d.endTs
+            vset_add(dailyV, d.endTs, COL_Q1)
+
+    if not showOpens
+        int dj = array.size(dailyHistStart) - 1
+        while dj >= 0
+            f_dhist_kill_at(dj)
+            dj -= 1
+    else
+        int dsz = array.size(dailyHistStart)
+        int dk = 0
+        while dk < dsz
+            int dEndTs = array.get(dailyHistEnd, dk)
+
+            float dy1 = array.get(daily_h_q1o, dk)
+            int   dx1 = array.get(daily_h_q1oTs, dk)
+            line  dl1 = array.get(daily_l_q1o, dk)
+            if not na(dy1) and not na(dx1) and not na(dEndTs)
+                dl1 := f_set_or_make_hline(dl1, dx1, dEndTs, dy1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                dl1 := f_kill(dl1)
+            array.set(daily_l_q1o, dk, dl1)
+
+            float dy2 = array.get(daily_h_q2o, dk)
+            int   dx2 = array.get(daily_h_q2oTs, dk)
+            line  dl2 = array.get(daily_l_q2o, dk)
+            if not na(dy2) and not na(dx2) and not na(dEndTs)
+                dl2 := f_set_or_make_hline(dl2, dx2, dEndTs, dy2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                dl2 := f_kill(dl2)
+            array.set(daily_l_q2o, dk, dl2)
+
+            float dy3 = array.get(daily_h_q3o, dk)
+            int   dx3 = array.get(daily_h_q3oTs, dk)
+            line  dl3 = array.get(daily_l_q3o, dk)
+            if not na(dy3) and not na(dx3) and not na(dEndTs)
+                dl3 := f_set_or_make_hline(dl3, dx3, dEndTs, dy3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                dl3 := f_kill(dl3)
+            array.set(daily_l_q3o, dk, dl3)
+
+            float dy4 = array.get(daily_h_q4o, dk)
+            int   dx4 = array.get(daily_h_q4oTs, dk)
+            line  dl4 = array.get(daily_l_q4o, dk)
+            if not na(dy4) and not na(dx4) and not na(dEndTs)
+                dl4 := f_set_or_make_hline(dl4, dx4, dEndTs, dy4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                dl4 := f_kill(dl4)
+            array.set(daily_l_q4o, dk, dl4)
+
+            dk += 1
 
 if not showMicroTf
     vset_clear(microV)
