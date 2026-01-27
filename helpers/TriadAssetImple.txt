@@ -1,0 +1,335 @@
+Triad Asset Handling (QTUltimate+ extract)
+=========================================
+Source file: other/QTUltimate+/QTUltimate+.txt
+Focus: how QTUltimate+ handles triad assets, matching, and selection logic.
+
+1) Triad asset definitions (auto mode)
+--------------------------------------
+- Futures triad (Index mini):
+  st10 = "CME_MINI:MNQ1!"
+  st11 = "CME_MINI:MES1!"
+  st12 = "CBOT_MINI:MYM1!"
+- Other auto triads exist (metals, crypto, FX, indices) but for our use we only
+  care about the futures triad. The logic is shared across groups.
+
+2) Triad selection modes
+------------------------
+- triad_selection_mode input: "Auto" | "Manual" | "Off".
+- Manual mode supports multiple triad slots (m1..m5). Each slot defines 3 symbols
+  and has an optional inversion flag.
+- Auto mode uses substring checks to determine which group the chart belongs to.
+
+3) Robust manual matching function
+----------------------------------
+- Helper: f_check_match(input_sym)
+  - Rejects empty or malformed symbols (no colon).
+  - Splits "EXCHANGE:TICKER" and compares against current_ticker and the full
+    tickerid string.
+  - Matching rules:
+    - current_ticker == t_sym
+    - OR sym contains t_sym
+    - OR input_sym contains current_ticker
+
+4) Auto group detection for futures triad
+-----------------------------------------
+- Uses substring checks on syminfo.tickerid:
+  - is_nq_asset = contains "NQ" or "MNQ"
+  - is_es_asset = contains "ES" or "MES"
+  - is_ym_asset = contains "YM" or "MYM"
+- triad_ok = (Auto && in any group) OR (Manual && in a manual triad)
+
+5) Triad assignment logic (tsym2/tsym3)
+----------------------------------------
+- If triad_ok:
+  - If in manual: set tsym2/tsym3 based on which of st1/st2/st3 matches chart.
+  - If in auto futures group:
+    - If chart is NQ/MNQ: tsym2 = st11 (MES), tsym3 = st12 (MYM)
+    - If chart is ES/MES: tsym2 = st10 (MNQ), tsym3 = st12 (MYM)
+    - If chart is YM/MYM: tsym2 = st10 (MNQ), tsym3 = st11 (MES)
+- Safety check prevents tsym2==chart symbol.
+
+6) Session/backadjustment normalization
+---------------------------------------
+- If syminfo.type == "futures", QTUltimate+ wraps tsym2/tsym3 with
+  ticker.modify(..., session = syminfo.session, backadjustment = ...).
+- This normalizes session alignment and backadjustment across the triad.
+
+How to integrate into QTEngineTest (suggested plan)
+===================================================
+A) Add a small helper block
+- Implement a minimal f_check_match() equivalent (no manual triads needed unless
+  we want optional manual overrides).
+- Implement f_ssmt_sym_ticker() or a split-based helper to normalize prefixes.
+
+B) Build auto triad mapping for our inputs
+- Keep the current explicit input symbols (MES/MNQ/MYM) as defaults.
+- Use the auto logic only for chart identification (ES/NQ/YM detection).
+- If chart is MES/MNQ/MYM, map the other two symbols based on the rules above.
+
+C) Apply session/backadjustment normalization for request.security
+- Use ticker.modify(symbol, session=syminfo.session) if syminfo.type == "futures".
+- This should reduce mismatched quarter boundaries between symbols.
+
+D) Keep QTEngineTest scope tight
+- Do NOT pull in QTUltimate+ dyad logic or full multi-group triads.
+- Only futures triad support is needed for Daily Bearish SSMT testing.
+
+Notes
+-----
+- QTUltimate+ uses dynamic_requests=true and heavy auto logic; we can keep
+  our implementation simple while borrowing the matching + session normalization.
+- The two biggest robustness wins are:
+  1) chart symbol matching via split/contains (f_check_match style)
+  2) ticker.modify for session alignment on futures.
+
+Useful QTUltimate+ code snippets (minimal)
+==========================================
+Note: these are lifted verbatim or lightly trimmed from QTUltimate+ and kept
+minimal so we can transplant only what we need.
+
+A) Triad mode input (selection switch)
+-------------------------------------
+```pine
+triad_selection_mode = input.string("Auto", "Triad Selection", options = ["Auto", "Manual", "Off"])
+```
+
+B) Robust manual matching helper (f_check_match)
+------------------------------------------------
+```pine
+var string current_ticker = syminfo.ticker
+
+f_check_match(input_sym) =>
+    if str.length(input_sym) == 0 or not str.contains(input_sym, ":")
+        false
+    else
+        t_sym = array.get(str.split(input_sym, ":"), 1)
+        (current_ticker == t_sym) or str.contains(sym, t_sym) or str.contains(input_sym, current_ticker)
+```
+
+C) Auto detection for futures triad (NQ/ES/YM)
+----------------------------------------------
+```pine
+is_nq_asset = str.contains(sym, "NQ") or str.contains(sym, "MNQ")
+is_es_asset = str.contains(sym, "ES") or str.contains(sym, "MES")
+is_ym_asset = str.contains(sym, "YM") or str.contains(sym, "MYM")
+```
+
+D) Triad OK gating (Auto vs Manual)
+-----------------------------------
+```pine
+triad_ok = triad_selection_mode == "Off" ? false : triad_selection_mode == "Auto" ? (is_in_g2 or is_in_g3 or is_in_g4 or is_in_g5 or is_in_g6 or is_in_g7) : is_in_manual
+```
+(For our use: replace the group list with just the futures group.)
+
+E) Futures triad assignment (tsym2/tsym3)
+-----------------------------------------
+```pine
+if is_in_g4
+    if is_nq_asset
+        tsym2 := st11, tsym3 := st12
+    else if is_es_asset
+        tsym2 := st10, tsym3 := st12
+    else if is_ym_asset
+        tsym2 := st10, tsym3 := st11
+```
+(Where st10/st11/st12 are MNQ/MES/MYM.)
+
+F) Session/backadjustment normalization for futures
+---------------------------------------------------
+```pine
+if triad_ok
+    csym  := syminfo.type == "futures" ? (ticker.modify(tsym2,session = syminfo.session,backadjustment=badj ? backadjustment.off:backadjustment.on) ) :tsym2
+    tsym3 := syminfo.type == "futures" ? (ticker.modify(tsym3,session = syminfo.session,backadjustment=badj ? backadjustment.off:backadjustment.on) ) :tsym3
+```
+
+G) Safety check (avoid same symbol)
+----------------------------------
+```pine
+if tsym2 == sym or array.get(str.split(tsym2, ":"), 1) == current_ticker
+    tsym2 := tsym2
+```
+
+Suggested minimal transplant (for QTEngineTest)
+===============================================
+- Keep our explicit input symbols as defaults.
+- Use the matching helper + auto detection to decide if chart is ES/NQ/YM.
+- Build tsym2/tsym3 accordingly (like snippet E).
+- Wrap request.security symbols with ticker.modify when futures.
+
+H) Manual triad slots (multi‑slot selection)
+-------------------------------------------
+```pine
+// Example: 5 manual triad slots (st1_m1..st3_m5) with enable toggles + inversion flags
+triad_selection_mode = input.string("Auto", "Triad Selection", options = ["Auto", "Manual", "Off"])
+tr1A = triad_selection_mode == "Manual"
+
+// ... define enable_m1..enable_m5, st1_m1..st3_m5, inv_m1..inv_m5 as inputs ...
+
+match_m1_1 = f_check_match(st1_m1), match_m1_2 = f_check_match(st2_m1), match_m1_3 = f_check_match(st3_m1)
+match_m2_1 = f_check_match(st1_m2), match_m2_2 = f_check_match(st2_m2), match_m2_3 = f_check_match(st3_m2)
+match_m3_1 = f_check_match(st1_m3), match_m3_2 = f_check_match(st2_m3), match_m3_3 = f_check_match(st3_m3)
+match_m4_1 = f_check_match(st1_m4), match_m4_2 = f_check_match(st2_m4), match_m4_3 = f_check_match(st3_m4)
+match_m5_1 = f_check_match(st1_m5), match_m5_2 = f_check_match(st2_m5), match_m5_3 = f_check_match(st3_m5)
+
+is_in_manual_m1 = tr1A and enable_m1 and (match_m1_1 or match_m1_2 or match_m1_3)
+is_in_manual_m2 = tr1A and enable_m2 and (match_m2_1 or match_m2_2 or match_m2_3)
+is_in_manual_m3 = tr1A and enable_m3 and (match_m3_1 or match_m3_2 or match_m3_3)
+is_in_manual_m4 = tr1A and enable_m4 and (match_m4_1 or match_m4_2 or match_m4_3)
+is_in_manual_m5 = tr1A and enable_m5 and (match_m5_1 or match_m5_2 or match_m5_3)
+
+is_in_manual = is_in_manual_m1 or is_in_manual_m2 or is_in_manual_m3 or is_in_manual_m4 or is_in_manual_m5
+
+var st1 = ""
+var st2 = ""
+var st3 = ""
+if is_in_manual_m1 and enable_m1
+    st1 := st1_m1, st2 := st2_m1, st3 := st3_m1
+else if is_in_manual_m2 and enable_m2
+    st1 := st1_m2, st2 := st2_m2, st3 := st3_m2
+else if is_in_manual_m3 and enable_m3
+    st1 := st1_m3, st2 := st2_m3, st3 := st3_m3
+else if is_in_manual_m4 and enable_m4
+    st1 := st1_m4, st2 := st2_m4, st3 := st3_m4
+else if is_in_manual_m5 and enable_m5
+    st1 := st1_m5, st2 := st2_m5, st3 := st3_m5
+```
+
+I) Manual triad assignment + inversion flags
+-------------------------------------------
+```pine
+array.set(arr_inv, 0, false)
+array.set(arr_inv, 1, false)
+
+if triad_ok
+    if is_in_manual
+        if match_1
+            tsym2 := st2
+            tsym3 := st3
+            if (is_in_manual_m1 and inv_m1) or (is_in_manual_m2 and inv_m2) or (is_in_manual_m3 and inv_m3) or (is_in_manual_m4 and inv_m4) or (is_in_manual_m5 and inv_m5)
+                array.set(arr_inv, 1, true) // Invert st3
+        else if match_2
+            tsym2 := st1
+            tsym3 := st3
+            if (is_in_manual_m1 and inv_m1) or (is_in_manual_m2 and inv_m2) or (is_in_manual_m3 and inv_m3) or (is_in_manual_m4 and inv_m4) or (is_in_manual_m5 and inv_m5)
+                array.set(arr_inv, 1, true) // Invert st3
+        else if match_3
+            tsym2 := st1
+            tsym3 := st2
+            if (is_in_manual_m1 and inv_m1) or (is_in_manual_m2 and inv_m2) or (is_in_manual_m3 and inv_m3) or (is_in_manual_m4 and inv_m4) or (is_in_manual_m5 and inv_m5)
+                array.set(arr_inv, 0, true)
+                array.set(arr_inv, 1, true)
+```
+
+J) Dyad selection (Auto/Manual)
+-------------------------------
+```pine
+// Dyad selection input
+
+dyad_selection_mode = input.string("Off", "Dyad Selection", options = ["Auto", "Manual", "Off"])
+
+if not triad_ok and dyad_selection_mode != "Off"
+    if dyad_selection_mode == "Manual"
+        is_on_dyad_m1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
+        is_on_dyad_m2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
+        is_on_dyad_m3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
+        is_on_dyad_m4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
+        is_on_dyad_m5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
+
+        if is_on_dyad_m1
+            csym := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
+            if inv_dyad_m1 and f_check_match(dyad_m1_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m2
+            csym := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
+            if inv_dyad_m2 and f_check_match(dyad_m2_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m3
+            csym := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
+            if inv_dyad_m3 and f_check_match(dyad_m3_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m4
+            csym := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
+            if inv_dyad_m4 and f_check_match(dyad_m4_sym1)
+                array.set(arr_inv, 0, true)
+        else if is_on_dyad_m5
+            csym := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
+            if inv_dyad_m5 and f_check_match(dyad_m5_sym1)
+                array.set(arr_inv, 0, true)
+
+    else if dyad_selection_mode == "Auto"
+        if str.contains(sym, s1) or sym == s1
+            csym := s2
+        else if str.contains(sym, s2) or sym == s2
+            csym := s1
+        else if str.contains(sym, s3) or sym == s3
+            csym := s4
+        else if str.contains(sym, s4) or sym == s4
+            csym := s3
+        else if str.contains(sym, s5) or sym == s5
+            csym := s6
+        else if str.contains(sym, s6) or sym == s6
+            csym := s5
+        else if str.contains(sym, s7) or sym == s7
+            csym := s8
+        else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
+            csym := s7
+```
+
+
+Minimal adapted version (QTEngineTest defaults: MESH2026/MNQH2026/MYMH2026)
+=========================================================================
+Purpose: simple triad mapping for MES/NQ/MYM charts using explicit inputs.
+Assumes you only care about the futures triad and want the other two symbols.
+
+K) Minimal triad mapping snippet
+-------------------------------
+```pine
+// Inputs (already in QTEngineTest)
+ssmtSymES = input.symbol("MESH2026", "ES / MES")
+ssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ")
+ssmtSymYM = input.symbol("MYMH2026", "YM / MYM")
+
+// Detect which triad asset is on the chart (by ticker substring)
+string sym = syminfo.tickerid
+bool is_nq_asset = str.contains(sym, "NQ") or str.contains(sym, "MNQ")
+bool is_es_asset = str.contains(sym, "ES") or str.contains(sym, "MES")
+bool is_ym_asset = str.contains(sym, "YM") or str.contains(sym, "MYM")
+
+// Map other two symbols based on chart symbol
+string tsym2 = na
+string tsym3 = na
+if is_nq_asset
+    tsym2 := ssmtSymES
+    tsym3 := ssmtSymYM
+else if is_es_asset
+    tsym2 := ssmtSymNQ
+    tsym3 := ssmtSymYM
+else if is_ym_asset
+    tsym2 := ssmtSymNQ
+    tsym3 := ssmtSymES
+
+// Optional: normalize for futures sessions/backadjustment
+if syminfo.type == "futures"
+    tsym2 := ticker.modify(tsym2, session=syminfo.session)
+    tsym3 := ticker.modify(tsym3, session=syminfo.session)
+
+// Example usage
+// [a,b] = request.security(tsym2, timeframe.period, expr)
+// [c,d] = request.security(tsym3, timeframe.period, expr)
+```
+
+K2) Optional robust match guard (if you want to ensure chart is in the triad)
+---------------------------------------------------------------------------
+```pine
+bool is_triad_chart = is_nq_asset or is_es_asset or is_ym_asset
+if not is_triad_chart
+    // skip SSMT calculations
+```
+
+Notes
+-----
+- This is intentionally minimal; no manual triad slots or dyad logic.
+- This mirrors QTUltimate+ behavior for futures triad only, using our explicit
+  input symbols instead of hardcoded "MNQ1!/MES1!/MYM1!".
+- Use ticker.modify when requesting other futures symbols to avoid
+  session/backadjustment mismatches across the triad.

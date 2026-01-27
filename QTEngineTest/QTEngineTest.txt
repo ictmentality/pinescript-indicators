@@ -1,7 +1,7 @@
 //@version=6
 indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/12 as qt
+import Jaw1312/QTEngine/14 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -35,6 +35,16 @@ dwNanoStep2  = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — min
 
 groupDbg = "ALIGNED TF DEBUG"
 showAlignedOhlc = input.bool(false, "Show aligned TF OHLC table", group=groupDbg)
+
+groupSSMT = "SSMT TEST (Daily Bearish)"
+showDailyBearSSMT = input.bool(false, "Show Bearish Daily SSMT (Triad)", group=groupSSMT)
+ssmtSymES = input.symbol("MESH2026", "ES / MES", group=groupSSMT)
+ssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ", group=groupSSMT)
+ssmtSymYM = input.symbol("MYMH2026", "YM / MYM", group=groupSSMT)
+ssmtLineCol = input.color(color.new(color.red, 0), "SSMT Line Color", group=groupSSMT)
+ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
+ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
+ssmtDebug = input.bool(false, "Debug SSMT values", group=groupSSMT)
 
 // -----------------------------------------------------------------------------
 // Color palette (Old QT Indicator) + divider opacity rule
@@ -104,6 +114,99 @@ f_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3
     else if idx == 4
         out := q4
     out
+
+f_ssmt_daily_highs() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, d] = qt.qt_daily_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
+    float hcur = qcur.h
+    int   hcurTs = qcur.hTs
+    float hprev = st.daily.prev1.h
+    int   hprevTs = st.daily.prev1.hTs
+
+    int qcurTs = d.q1Ts
+    if d.curQuarterIndex == 2
+        qcurTs := d.q2Ts
+    else if d.curQuarterIndex == 3
+        qcurTs := d.q3Ts
+    else if d.curQuarterIndex == 4
+        qcurTs := d.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, d.curQuarterIndex, qcurTs]
+
+f_ssmt_sym_ticker(string sym) =>
+    string s = str.upper(sym)
+    string[] parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+f_ssmt_norm_sym(string sym) =>
+    syminfo.type == "futures" ? ticker.modify(sym, session=syminfo.session) : sym
+
+f_ssmt_tag(string sym) =>
+    string s = f_ssmt_sym_ticker(sym)
+    string tag = s
+    if str.contains(s, "MES")
+        tag := "ES"
+    else if str.contains(s, "MNQ")
+        tag := "NQ"
+    else if str.contains(s, "MYM")
+        tag := "YM"
+    else if str.contains(s, "ES")
+        tag := "ES"
+    else if str.contains(s, "NQ")
+        tag := "NQ"
+    else if str.contains(s, "YM")
+        tag := "YM"
+    tag
+
+f_ssmt_hist_push(line ln, label lb, line[] lines, label[] labels, int maxN) =>
+    if not na(ln) or not na(lb)
+        if maxN <= 0
+            if not na(ln)
+                line.delete(ln)
+            if not na(lb)
+                label.delete(lb)
+        else
+            array.push(lines, ln)
+            array.push(labels, lb)
+            while array.size(lines) > maxN
+                line oldLn = array.shift(lines)
+                if not na(oldLn)
+                    line.delete(oldLn)
+                label oldLb = array.shift(labels)
+                if not na(oldLb)
+                    label.delete(oldLb)
+    0
+
+f_ssmt_hist_trim(line[] lines, label[] labels, int maxN) =>
+    while array.size(lines) > maxN
+        line oldLn = array.shift(lines)
+        if not na(oldLn)
+            line.delete(oldLn)
+        label oldLb = array.shift(labels)
+        if not na(oldLb)
+            label.delete(oldLb)
+    while array.size(labels) > maxN
+        label oldLb = array.shift(labels)
+        if not na(oldLb)
+            label.delete(oldLb)
+    0
+
+f_ssmt_hist_clear(line[] lines, label[] labels) =>
+    while array.size(lines) > 0
+        line oldLn = array.shift(lines)
+        if not na(oldLn)
+            line.delete(oldLn)
+    while array.size(labels) > 0
+        label oldLb = array.shift(labels)
+        if not na(oldLb)
+            label.delete(oldLb)
+    0
 
 // -----------------------------------------------------------------------------
 // Array helpers
@@ -180,6 +283,32 @@ f_set_or_make_vline(line ln, int ts, color c) =>
         line.set_color(out, f_vcol(c))
     out
 
+f_set_or_make_vline_raw(line ln, int ts, color c, int w) =>
+    line out = ln
+    if na(out)
+        out := line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=w, color=c)
+    else
+        line.set_xy1(out, ts, low)
+        line.set_xy2(out, ts, high)
+        line.set_extend(out, extend.both)
+        line.set_style(out, line.style_solid)
+        line.set_width(out, w)
+        line.set_color(out, c)
+    out
+
+f_set_or_make_line(line ln, int x1, float y1, int x2, float y2, color c, int w) =>
+    line out = ln
+    if na(out)
+        out := line.new(x1, y1, x2, y2, xloc=xloc.bar_time, extend=extend.none, style=line.style_solid, width=w, color=c)
+    else
+        line.set_xy1(out, x1, y1)
+        line.set_xy2(out, x2, y2)
+        line.set_extend(out, extend.none)
+        line.set_style(out, line.style_solid)
+        line.set_width(out, w)
+        line.set_color(out, c)
+    out
+
 f_set_or_make_hline(line ln, int x1, int x2, float y, color c, sty) =>
     line out = ln
     if na(out)
@@ -190,6 +319,19 @@ f_set_or_make_hline(line ln, int x1, int x2, float y, color c, sty) =>
         line.set_extend(out, extend.none)
         line.set_style(out, sty)
         line.set_width(out, 1)
+        line.set_color(out, c)
+    out
+
+f_set_or_make_hline_w(line ln, int x1, int x2, float y, color c, sty, int w) =>
+    line out = ln
+    if na(out)
+        out := line.new(x1, y, x2, y, xloc=xloc.bar_time, extend=extend.none, style=sty, width=w, color=c)
+    else
+        line.set_xy1(out, x1, y)
+        line.set_xy2(out, x2, y)
+        line.set_extend(out, extend.none)
+        line.set_style(out, sty)
+        line.set_width(out, w)
         line.set_color(out, c)
     out
 
@@ -400,6 +542,149 @@ plot(showNanoTf and dwNanoStep2 ? n.q4.h : na, "Nano QR q4.h", display=display.d
 plot(showNanoTf and dwNanoStep2 ? n.q4.l : na, "Nano QR q4.l", display=display.data_window)
 plot(showNanoTf and dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.data_window)
 plot(showNanoTf and dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
+
+// -----------------------------------------------------------------------------
+// Bearish Daily SSMT (Triad) — test-only
+// -----------------------------------------------------------------------------
+var table ssmtDbgTbl = na
+var line[] ssmtHistLines = array.new_line()
+var label[] ssmtHistLbls = array.new_label()
+var line ssmtLine = na
+var int  ssmtQStart = na
+var label ssmtLbl = na
+int SSmtQLen = 6 * 60 * 60 * 1000
+
+if showDailyBearSSMT
+    string esSym = f_ssmt_norm_sym(ssmtSymES)
+    string nqSym = f_ssmt_norm_sym(ssmtSymNQ)
+    string ymSym = f_ssmt_norm_sym(ssmtSymYM)
+
+    [esHcur, esHcurTs, esHprev, esHprevTs, esQi, esQts] = request.security(esSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    [nqHcur, nqHcurTs, nqHprev, nqHprevTs, nqQi, nqQts] = request.security(nqSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    [ymHcur, ymHcurTs, ymHprev, ymHprevTs, ymQi, ymQts] = request.security(ymSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+    string chartSym = syminfo.tickerid
+    bool isChartES = str.contains(chartSym, "ES") or str.contains(chartSym, "MES")
+    bool isChartNQ = str.contains(chartSym, "NQ") or str.contains(chartSym, "MNQ")
+    bool isChartYM = str.contains(chartSym, "YM") or str.contains(chartSym, "MYM")
+    bool isTriadChart = isChartES or isChartNQ or isChartYM
+
+    int qStartRef = isChartES ? esQts : isChartNQ ? nqQts : isChartYM ? ymQts : na
+    bool qstartChanged = not na(qStartRef) and (na(ssmtQStart) or qStartRef != ssmtQStart)
+    if qstartChanged
+        f_ssmt_hist_push(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtKeep)
+        ssmtLine := na
+        ssmtLbl := na
+        ssmtQStart := qStartRef
+
+    bool ssmtReady = not na(esHcur) and not na(esHprev) and not na(nqHcur) and not na(nqHprev) and not na(ymHcur) and not na(ymHprev)
+    if ssmtDebug and barstate.islast
+        if na(ssmtDbgTbl)
+            ssmtDbgTbl := table.new(position.top_right, 4, 5, border_width=1, border_color=color.gray)
+        table.cell(ssmtDbgTbl, 0, 0, "Sym", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(ssmtDbgTbl, 1, 0, "Hprev", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(ssmtDbgTbl, 2, 0, "Hcur", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(ssmtDbgTbl, 3, 0, "Sweep", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(ssmtDbgTbl, 0, 1, f_ssmt_tag(ssmtSymES), text_color=color.black)
+        table.cell(ssmtDbgTbl, 1, 1, f_fmt(esHprev), text_color=color.black)
+        table.cell(ssmtDbgTbl, 2, 1, f_fmt(esHcur), text_color=color.black)
+        table.cell(ssmtDbgTbl, 3, 1, esHcur > esHprev ? "Y" : "N", text_color=color.black)
+        table.cell(ssmtDbgTbl, 0, 2, f_ssmt_tag(ssmtSymNQ), text_color=color.black)
+        table.cell(ssmtDbgTbl, 1, 2, f_fmt(nqHprev), text_color=color.black)
+        table.cell(ssmtDbgTbl, 2, 2, f_fmt(nqHcur), text_color=color.black)
+        table.cell(ssmtDbgTbl, 3, 2, nqHcur > nqHprev ? "Y" : "N", text_color=color.black)
+        table.cell(ssmtDbgTbl, 0, 3, f_ssmt_tag(ssmtSymYM), text_color=color.black)
+        table.cell(ssmtDbgTbl, 1, 3, f_fmt(ymHprev), text_color=color.black)
+        table.cell(ssmtDbgTbl, 2, 3, f_fmt(ymHcur), text_color=color.black)
+        table.cell(ssmtDbgTbl, 3, 3, ymHcur > ymHprev ? "Y" : "N", text_color=color.black)
+        table.cell(ssmtDbgTbl, 0, 4, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(ssmtDbgTbl, 1, 4, f_fmt_time(esQts, cfg.tz), text_color=color.black)
+        table.cell(ssmtDbgTbl, 2, 4, f_fmt_time(nqQts, cfg.tz), text_color=color.black)
+        table.cell(ssmtDbgTbl, 3, 4, f_fmt_time(ymQts, cfg.tz), text_color=color.black)
+    else if not ssmtDebug and not na(ssmtDbgTbl)
+        table.delete(ssmtDbgTbl)
+        ssmtDbgTbl := na
+    if ssmtReady
+        bool esSweep = esHcur > esHprev
+        bool nqSweep = nqHcur > nqHprev
+        bool ymSweep = ymHcur > ymHprev
+        int sweeps = (esSweep ? 1 : 0) + (nqSweep ? 1 : 0) + (ymSweep ? 1 : 0)
+        bool allSweep = sweeps == 3
+        bool split = sweeps >= 1 and sweeps <= 2
+
+        string cracked = ""
+        if esSweep
+            cracked := cracked + (cracked == "" ? "" : ",") + f_ssmt_tag(ssmtSymES)
+        if nqSweep
+            cracked := cracked + (cracked == "" ? "" : ",") + f_ssmt_tag(ssmtSymNQ)
+        if ymSweep
+            cracked := cracked + (cracked == "" ? "" : ",") + f_ssmt_tag(ssmtSymYM)
+
+        float curH = na
+        int   curHTs = na
+        float prevH = na
+        int   prevHTs = na
+        int   curQTs = na
+        bool  curSweep = false
+        if isChartES
+            curH := esHcur
+            curHTs := esHcurTs
+            prevH := esHprev
+            prevHTs := esHprevTs
+            curQTs := esQts
+            curSweep := esSweep
+        else if isChartNQ
+            curH := nqHcur
+            curHTs := nqHcurTs
+            prevH := nqHprev
+            prevHTs := nqHprevTs
+            curQTs := nqQts
+            curSweep := nqSweep
+        else if isChartYM
+            curH := ymHcur
+            curHTs := ymHcurTs
+            prevH := ymHprev
+            prevHTs := ymHprevTs
+            curQTs := ymQts
+            curSweep := ymSweep
+
+        if allSweep or not split or not isTriadChart
+            if not na(ssmtLine)
+                line.delete(ssmtLine)
+                ssmtLine := na
+            if not na(ssmtLbl)
+                label.delete(ssmtLbl)
+                ssmtLbl := na
+        else
+            bool hasPoints = not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if hasPoints and curSweep
+                int x2 = curQTs + SSmtQLen
+                ssmtLine := f_set_or_make_hline_w(ssmtLine, prevHTs, x2, prevH, color.new(ssmtLineCol, 50), line.style_solid, ssmtLineWidth)
+            else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtLineCol, 50), ssmtLineWidth)
+
+            if hasPoints and cracked != ""
+                string lblText = "D.SSMT " + cracked
+                if na(ssmtLbl)
+                    ssmtLbl := label.new(prevHTs, prevH, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                else
+                    label.set_xy(ssmtLbl, prevHTs, prevH)
+                    label.set_text(ssmtLbl, lblText)
+                    label.set_textcolor(ssmtLbl, color.black)
+                    label.set_color(ssmtLbl, color.new(color.black, 100))
+    f_ssmt_hist_trim(ssmtHistLines, ssmtHistLbls, ssmtKeep)
+else
+    if not na(ssmtLine)
+        line.delete(ssmtLine)
+        ssmtLine := na
+    if not na(ssmtLbl)
+        label.delete(ssmtLbl)
+        ssmtLbl := na
+    f_ssmt_hist_clear(ssmtHistLines, ssmtHistLbls)
+    if not na(ssmtDbgTbl)
+        table.delete(ssmtDbgTbl)
+        ssmtDbgTbl := na
+    ssmtQStart := na
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)

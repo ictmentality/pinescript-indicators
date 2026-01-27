@@ -1,0 +1,14 @@
+QTEngine TODO
+
+- SSMT on D, m90, Micro, Nano
+- HSSMT on D, m90, Micro, Nano
+- tCISD on D, m90, Micro, Nano
+
+- Weekly Cycle functionality (boundaries then OHLC)
+- Monthly Cycle functionality 
+- Quarterly Cycle functionality
+- Yearly Cycle functionality
+- Quandrennial Cycle functionality
+
+- Forex Time Handling
+- Better Asset Selector (already have helper file)
