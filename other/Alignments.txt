@@ -34,3 +34,14 @@ Monthly = H4
 Quarterly = D
 Yearly = W
 Quadrennial = M
+
+Visibility Alignments
+Nano = 5s - 15s
+Micro = 30s - m4
+90m = m5 - m14
+Daily = m15 - m30
+Weekly = H1 - H3 (m90 included)
+Monthly = H4 - H6
+Quarterly = H12 - D
+Yearly = W - 3W
+Quadrennial = M - 3M

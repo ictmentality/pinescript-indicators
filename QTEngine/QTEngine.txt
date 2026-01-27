@@ -26,6 +26,10 @@ const int LEN_90M = 90 * MS_MIN
 const int LEN_22M30S = 22 * MS_MIN + 30 * MS_SEC  // 22.5 minutes
 
 const string NANO_OPEN_TF = "5S"
+// Nano open capture uses fixed config to satisfy library request.* constraints.
+const string NANO_TZ = "America/New_York"
+const int NANO_DAY_START_HOUR = 18
+const int NANO_DAY_START_MIN = 0
 // ============================================================================
 // USER-DEFINED TYPES (UDTs)
 // ============================================================================
@@ -104,6 +108,12 @@ export type FixedCycleState
     QuarterRecord prev1
     QuarterRecord prev2
 
+    // Nano-only: pending true-open capture (applied when quarter becomes active)
+    int   pendingBoundaryTs
+    float pendingOpen
+    int   pendingOpenTs
+    bool  pendingHas
+
 export type CycleState
     FixedCycleState daily
     FixedCycleState m90
@@ -145,10 +155,10 @@ export qt_state_new() =>
         false
     )
 
-    FixedCycleState d = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
-    FixedCycleState m = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
-    FixedCycleState u = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
-    FixedCycleState n = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ)
+    FixedCycleState d = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false)
+    FixedCycleState m = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false)
+    FixedCycleState u = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false)
+    FixedCycleState n = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false)
     CycleState st = CycleState.new(d, m, u, n)
     st
 
@@ -201,9 +211,15 @@ f_make_empty_q(int qStart) =>
 // - H/L/C are still chart-TF aggregated (Step 2 scope stays intact).
 // ============================================================================
 
-f_nano_open_5s_expr(string tz, int dayStartHour, int dayStartMin) =>
-    int tRef = time_close - 1
-    int ds = f_qt_day_start_raw(tRef, tz, dayStartHour, dayStartMin)
+f_ceil_to_5s(int ts) =>
+    int step = 5 * MS_SEC
+    int rem  = ts % step
+    rem == 0 ? ts : ts + (step - rem)
+
+f_nano_open_5s_expr() =>
+    // Use bar start time to align "first printed bar on/after boundary".
+    int tRef = time
+    int ds = f_qt_day_start_raw(tRef, NANO_TZ, NANO_DAY_START_HOUR, NANO_DAY_START_MIN)
 
     int cStart = f_cycle_start(tRef, ds, LEN_22M30S)
     int qLen   = int(LEN_22M30S / 4)
@@ -224,9 +240,7 @@ f_nano_open_5s_expr(string tz, int dayStartHour, int dayStartMin) =>
         qCurTs := q4Ts
 
     // Target = first 5s bar time on/after the (possibly half-second) boundary.
-    int rem   = qCurTs % (5 * MS_SEC)
-    int delta = rem == 0 ? 0 : (5 * MS_SEC - rem)
-    int targetTs = qCurTs + delta
+    int targetTs = f_ceil_to_5s(qCurTs)
 
     var int   lastTarget = int(na)
     var float oOut  = float(na)
@@ -244,13 +258,17 @@ f_nano_open_5s_expr(string tz, int dayStartHour, int dayStartMin) =>
 
     [oOut, tsOut, qi, qCurTs]
 
-f_nano_open_current_5s(string tz, int dayStartHour, int dayStartMin) =>
+f_nano_open_current_5s() =>
     request.security(
         syminfo.tickerid,
         NANO_OPEN_TF,
-        f_nano_open_5s_expr(tz, dayStartHour, dayStartMin),
+        f_nano_open_5s_expr(),
         lookahead=barmerge.lookahead_off
     )
+
+// Debug helper (read-only): expose Nano 5S open capture tuple for tests.
+export qt_nano_open_debug() =>
+    f_nano_open_current_5s()
 
 // ============================================================================
 // STEP 2 HELPERS — Chart-TF quarter OHLC aggregation (minimal, gap-safe)
@@ -381,6 +399,10 @@ f_fixed_cycle_update_step1(FixedCycleState stIn, QTConfig cfg, int t, int tClose
     QuarterRecord prev1 = f_q_clear_evts(stIn.prev1)
     QuarterRecord prev2 = f_q_clear_evts(stIn.prev2)
     int lastBoundary2 = stIn.lastBoundaryTs
+    int pendingBoundary2 = stIn.pendingBoundaryTs
+    float pendingOpen2 = stIn.pendingOpen
+    int pendingOpenTs2 = stIn.pendingOpenTs
+    bool pendingHas2 = stIn.pendingHas
 
     // On new cycle, reset the quarter records to the new boundaries.
     if cycleChanged
@@ -389,6 +411,10 @@ f_fixed_cycle_update_step1(FixedCycleState stIn, QTConfig cfg, int t, int tClose
         q3 := f_make_empty_q(q3Ts)
         q4 := f_make_empty_q(q4Ts)
         lastBoundary2 := int(na)
+        pendingBoundary2 := int(na)
+        pendingOpen2 := float(na)
+        pendingOpenTs2 := int(na)
+        pendingHas2 := false
 
     // Ensure boundaryTs always matches the computed timestamps (gap/holiday safe).
     if na(q1.boundaryTs) or q1.boundaryTs != q1Ts
@@ -399,6 +425,11 @@ f_fixed_cycle_update_step1(FixedCycleState stIn, QTConfig cfg, int t, int tClose
         q3 := f_make_empty_q(q3Ts)
     if na(q4.boundaryTs) or q4.boundaryTs != q4Ts
         q4 := f_make_empty_q(q4Ts)
+    if pendingHas2 and pendingBoundary2 != q1Ts and pendingBoundary2 != q2Ts and pendingBoundary2 != q3Ts and pendingBoundary2 != q4Ts
+        pendingBoundary2 := int(na)
+        pendingOpen2 := float(na)
+        pendingOpenTs2 := int(na)
+        pendingHas2 := false
 
     // State-trigger: realize the current quarter boundary (early mode) to prevent missing gaps.
     int qCurTs = q1Ts
@@ -413,7 +444,7 @@ f_fixed_cycle_update_step1(FixedCycleState stIn, QTConfig cfg, int t, int tClose
     if startEdge
         lastBoundary2 := qCurTs
 
-    FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2)
+    FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2, pendingBoundary2, pendingOpen2, pendingOpenTs2, pendingHas2)
 
     CycleResult res = CycleResult.new(cStart, cEnd, startRealized, endRealized, q1Ts, q2Ts, q3Ts, q4Ts, q2Realized, q3Realized, q4Realized, qIdx, inWindow, q1, q2, q3, q4)
     [stOut, res]
@@ -431,7 +462,8 @@ f_fixed_cycle_update(
     int tClose,
     int lenMs
 ) =>
-    int tRef = tClose - 1
+    bool isNano = (lenMs == LEN_22M30S)
+    int tRef = isNano ? t : (tClose - 1)
     int ds = f_qt_day_start(tRef, cfg)
 
     int cStart = f_cycle_start(tRef, ds, lenMs)
@@ -471,6 +503,10 @@ f_fixed_cycle_update(
     QuarterRecord prev2 = f_q_clear_evts(stIn.prev2)
 
     int lastBoundary2 = stIn.lastBoundaryTs
+    int pendingBoundary2 = stIn.pendingBoundaryTs
+    float pendingOpen2 = stIn.pendingOpen
+    int pendingOpenTs2 = stIn.pendingOpenTs
+    bool pendingHas2 = stIn.pendingHas
 
     // If cycle rolled, finalize remaining old-cycle quarters (gap-safe), then reset records for the new cycle.
     if cycleChanged
@@ -536,6 +572,10 @@ f_fixed_cycle_update(
         q3 := f_make_empty_q(q3Ts)
         q4 := f_make_empty_q(q4Ts)
         lastBoundary2 := int(na)
+        pendingBoundary2 := int(na)
+        pendingOpen2 := float(na)
+        pendingOpenTs2 := int(na)
+        pendingHas2 := false
 
     // Ensure boundaries are correct (first run or mismatch)
     if na(q1.boundaryTs) or q1.boundaryTs != q1Ts
@@ -546,6 +586,11 @@ f_fixed_cycle_update(
         q3 := f_make_empty_q(q3Ts)
     if na(q4.boundaryTs) or q4.boundaryTs != q4Ts
         q4 := f_make_empty_q(q4Ts)
+    if pendingHas2 and pendingBoundary2 != q1Ts and pendingBoundary2 != q2Ts and pendingBoundary2 != q3Ts and pendingBoundary2 != q4Ts
+        pendingBoundary2 := int(na)
+        pendingOpen2 := float(na)
+        pendingOpenTs2 := int(na)
+        pendingHas2 := false
 
     // Current quarter boundary for this bar
     int qCurTs = q1Ts
@@ -557,13 +602,18 @@ f_fixed_cycle_update(
         qCurTs := q4Ts
 
     bool startEdge = inW and (tClose > qCurTs) and (na(lastBoundary2) or qCurTs != lastBoundary2)
-    bool isNano = (lenMs == LEN_22M30S)
     float nanoO5 = float(na)
     int   nanoOTs5 = int(na)
     int   nanoQi5 = int(na)
     int   nanoQCurTs5 = int(na)
     if isNano
-        [nanoO5, nanoOTs5, nanoQi5, nanoQCurTs5] = f_nano_open_current_5s(cfg.tz, cfg.dayStartHour, cfg.dayStartMin)
+        [nanoO5, nanoOTs5, nanoQi5, nanoQCurTs5] = f_nano_open_current_5s()
+        if not na(nanoO5) and not na(nanoOTs5)
+            if nanoQCurTs5 == q1Ts or nanoQCurTs5 == q2Ts or nanoQCurTs5 == q3Ts or nanoQCurTs5 == q4Ts
+                pendingBoundary2 := nanoQCurTs5
+                pendingOpen2 := nanoO5
+                pendingOpenTs2 := nanoOTs5
+                pendingHas2 := true
 
 
     // Finalize the quarter we were last in (and any skipped quarters) on the first bar of the new quarter.
@@ -621,23 +671,31 @@ f_fixed_cycle_update(
     else if qi == 4 and not q4.isFinal
         q4 := f_q_apply_bar(q4, t, open, high, low, close, startEdge)
 
-    // Nano-only: override quarter open using forced 5S "first on/after boundary" open.
-    // Must happen after f_q_apply_bar(), since apply_bar seeds the open on first `has`.
-    if isNano and not na(nanoO5) and not na(nanoOTs5) and nanoQi5 == qi and nanoQCurTs5 == qCurTs
-        if qi == 1
-            q1.o   := nanoO5
-            q1.oTs := nanoOTs5
-        else if qi == 2
-            q2.o   := nanoO5
-            q2.oTs := nanoOTs5
-        else if qi == 3
-            q3.o   := nanoO5
-            q3.oTs := nanoOTs5
-        else if qi == 4
-            q4.o   := nanoO5
-            q4.oTs := nanoOTs5
+    // Nano-only: apply pending true-open when its quarter becomes active.
+    if isNano and pendingHas2
+        if pendingBoundary2 == q1Ts and qi == 1
+            q1.o   := pendingOpen2
+            q1.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if pendingBoundary2 == q2Ts and qi == 2
+            q2.o   := pendingOpen2
+            q2.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if pendingBoundary2 == q3Ts and qi == 3
+            q3.o   := pendingOpen2
+            q3.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if pendingBoundary2 == q4Ts and qi == 4
+            q4.o   := pendingOpen2
+            q4.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if (pendingBoundary2 == q1Ts and qi > 1) or (pendingBoundary2 == q2Ts and qi > 2) or (pendingBoundary2 == q3Ts and qi > 3)
+            pendingBoundary2 := int(na)
+            pendingOpen2 := float(na)
+            pendingOpenTs2 := int(na)
+            pendingHas2 := false
 
-    FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2)
+    FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2, pendingBoundary2, pendingOpen2, pendingOpenTs2, pendingHas2)
 
     CycleResult res = CycleResult.new(
         cStart, cEnd,

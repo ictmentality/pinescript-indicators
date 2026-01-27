@@ -5,28 +5,30 @@ import Jaw1312/QTEngine/1 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
-// Nano Cycle — 4 quarters × 5 minutes 37.5 seconds each (22.5m total)
 // -----------------------------------------------------------------------------
-groupVis = "Drawings"
-showNano = input.bool(true, "Draw Nano quarter dividers (22m30s cycle; q=5m37.5s)", group=groupVis)
-keepCycles = input.int(50, "Cycles to display (Nano)", minval=1, maxval=200, group=groupVis)
+groupCycles = "TIME CYCLES"
+showMicro = input.bool(true, "Micro (90m cycle; q=22m30s)", group=groupCycles)
+showNano  = input.bool(true, "Nano (22m30s cycle; q=5m37.5s)", group=groupCycles)
 
-groupOp = "Open Lines"
-showOpens = input.bool(true, "Draw quarter open lines (Q1–Q4) to cycle end", group=groupOp)
+groupAll = "CYCLE SETTINGS"
+showOpens = input.bool(true, "Show Opens", group=groupAll)
+keepCycles = input.int(50, "# of Cycles", minval=1, maxval=200, group=groupAll)
 
-q1OpenCol = input.color(color.rgb(255, 152, 0), "Q1 Open color", group=groupOp)
-q2OpenCol = input.color(color.rgb(0, 0, 0), "Q2 Open / True Open color", group=groupOp)
-q3OpenCol = input.color(color.rgb(76, 175, 80), "Q3 Open color", group=groupOp)
-q4OpenCol = input.color(color.rgb(41, 98, 255), "Q4 Open color", group=groupOp)
+q1OpenCol = input.color(color.rgb(255, 152, 0), "Q1 Open Color", group=groupAll)
+q2OpenCol = input.color(color.rgb(0, 0, 0), "Q2 Open / True Open Color", group=groupAll)
+q3OpenCol = input.color(color.rgb(76, 175, 80), "Q3 Open Color", group=groupAll)
+q4OpenCol = input.color(color.rgb(41, 98, 255), "Q4 Open Color", group=groupAll)
 
-q1OpenStyleStr = input.string("Solid", "Q1 Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
-q2OpenStyleStr = input.string("Solid", "Q2 Open / True Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
-q3OpenStyleStr = input.string("Solid", "Q3 Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
-q4OpenStyleStr = input.string("Solid", "Q4 Open style", options=["Solid", "Dashed", "Dotted"], group=groupOp)
+q1OpenStyleStr = input.string("Solid", "Q1 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
+q2OpenStyleStr = input.string("Solid", "Q2 Open / True Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
+q3OpenStyleStr = input.string("Solid", "Q3 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
+q4OpenStyleStr = input.string("Solid", "Q4 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
 
-groupDW     = "Data Window"
-dwNanoStep1 = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
-dwNanoStep2 = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
+groupDW      = "DATA WINDOW"
+dwMicroStep1 = input.bool(true, "Step 1 — Micro boundaryTs checks", group=groupDW)
+dwMicroStep2 = input.bool(true, "Step 2 — Micro QuarterRecord (q1–q4) — minimal", group=groupDW)
+dwNanoStep1  = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
+dwNanoStep2  = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
 
 // -----------------------------------------------------------------------------
 // Color palette (Old QT Indicator) + divider opacity rule
@@ -48,6 +50,11 @@ f_hhmmss(int ts, string tz) =>
     int mm = minute(ts, tz)
     int ss = second(ts, tz)
     float(hh * 10000 + mm * 100 + ss)
+
+f_ceil_5s(int ts) =>
+    int step = 5 * 1000
+    int rem = ts % step
+    rem == 0 ? ts : ts + (step - rem)
 
 // QTIndicator mapping (string → TradingView style)
 lineStyleFrom(string s) =>
@@ -154,7 +161,7 @@ f_kill(line ln) =>
     out
 
 // -----------------------------------------------------------------------------
-// QT Core update (Nano only)
+// QT Core update (Micro + Nano)
 // -----------------------------------------------------------------------------
 var qt.QTConfig   cfg = qt.qt_config_default()
 var qt.CycleState st  = qt.qt_state_new()
@@ -162,12 +169,21 @@ var qt.CycleState st  = qt.qt_state_new()
 int t  = time
 int tc = time_close
 
-[st2, n] = qt.qt_nano_update(st, cfg, t, tc)
+[st1, m] = qt.qt_micro_update(st, cfg, t, tc)
+[st2, n] = qt.qt_nano_update(st1, cfg, t, tc)
 st := st2
 
 // -----------------------------------------------------------------------------
 // Data Window — Step 1: boundaryTs checks
 // -----------------------------------------------------------------------------
+plot(dwMicroStep1 ? m.q1Ts : na, "Micro q1Ts", display=display.data_window)
+plot(dwMicroStep1 ? m.q2Ts : na, "Micro q2Ts", display=display.data_window)
+plot(dwMicroStep1 ? m.q3Ts : na, "Micro q3Ts", display=display.data_window)
+plot(dwMicroStep1 ? m.q4Ts : na, "Micro q4Ts", display=display.data_window)
+plot(dwMicroStep1 ? (m.q2Realized ? 1.0 : 0.0) : na, "Micro q2Realized", display=display.data_window)
+plot(dwMicroStep1 ? (m.q3Realized ? 1.0 : 0.0) : na, "Micro q3Realized", display=display.data_window)
+plot(dwMicroStep1 ? (m.q4Realized ? 1.0 : 0.0) : na, "Micro q4Realized", display=display.data_window)
+
 plot(dwNanoStep1 ? n.q1Ts : na, "Nano q1Ts", display=display.data_window)
 plot(dwNanoStep1 ? n.q2Ts : na, "Nano q2Ts", display=display.data_window)
 plot(dwNanoStep1 ? n.q3Ts : na, "Nano q3Ts", display=display.data_window)
@@ -179,34 +195,96 @@ plot(dwNanoStep1 ? (n.q4Realized ? 1.0 : 0.0) : na, "Nano q4Realized", display=d
 // -----------------------------------------------------------------------------
 // Data Window — Step 2: QuarterRecord (minimal)
 // -----------------------------------------------------------------------------
+float m_q1_o_hhmmss = f_hhmmss(m.q1.oTs, cfg.tz)
+float m_q2_o_hhmmss = f_hhmmss(m.q2.oTs, cfg.tz)
+float m_q3_o_hhmmss = f_hhmmss(m.q3.oTs, cfg.tz)
+float m_q4_o_hhmmss = f_hhmmss(m.q4.oTs, cfg.tz)
+
+plot(dwMicroStep2 ? m.q1.o : na, "Micro QR q1.o", display=display.data_window)
+plot(dwMicroStep2 ? m.q1.h : na, "Micro QR q1.h", display=display.data_window)
+plot(dwMicroStep2 ? m.q1.l : na, "Micro QR q1.l", display=display.data_window)
+plot(dwMicroStep2 ? m.q1.c : na, "Micro QR q1.c", display=display.data_window)
+plot(dwMicroStep2 ? m_q1_o_hhmmss : na, "Micro QR q1.oTs (HHMMSS)", display=display.data_window)
+
+plot(dwMicroStep2 ? m.q2.o : na, "Micro QR q2.o", display=display.data_window)
+plot(dwMicroStep2 ? m.q2.h : na, "Micro QR q2.h", display=display.data_window)
+plot(dwMicroStep2 ? m.q2.l : na, "Micro QR q2.l", display=display.data_window)
+plot(dwMicroStep2 ? m.q2.c : na, "Micro QR q2.c", display=display.data_window)
+plot(dwMicroStep2 ? m_q2_o_hhmmss : na, "Micro QR q2.oTs (HHMMSS)", display=display.data_window)
+
+plot(dwMicroStep2 ? m.q3.o : na, "Micro QR q3.o", display=display.data_window)
+plot(dwMicroStep2 ? m.q3.h : na, "Micro QR q3.h", display=display.data_window)
+plot(dwMicroStep2 ? m.q3.l : na, "Micro QR q3.l", display=display.data_window)
+plot(dwMicroStep2 ? m.q3.c : na, "Micro QR q3.c", display=display.data_window)
+plot(dwMicroStep2 ? m_q3_o_hhmmss : na, "Micro QR q3.oTs (HHMMSS)", display=display.data_window)
+
+plot(dwMicroStep2 ? m.q4.o : na, "Micro QR q4.o", display=display.data_window)
+plot(dwMicroStep2 ? m.q4.h : na, "Micro QR q4.h", display=display.data_window)
+plot(dwMicroStep2 ? m.q4.l : na, "Micro QR q4.l", display=display.data_window)
+plot(dwMicroStep2 ? m.q4.c : na, "Micro QR q4.c", display=display.data_window)
+plot(dwMicroStep2 ? m_q4_o_hhmmss : na, "Micro QR q4.oTs (HHMMSS)", display=display.data_window)
+
 float n_q1_o_hhmmss = f_hhmmss(n.q1.oTs, cfg.tz)
 float n_q2_o_hhmmss = f_hhmmss(n.q2.oTs, cfg.tz)
 float n_q3_o_hhmmss = f_hhmmss(n.q3.oTs, cfg.tz)
 float n_q4_o_hhmmss = f_hhmmss(n.q4.oTs, cfg.tz)
+
+[nano_o5, nano_ts5, nano_qi5, nano_qcurts5] = qt.qt_nano_open_debug()
+float nano_ts5_hhmmss = f_hhmmss(nano_ts5, cfg.tz)
+float nano_qcurts5_hhmmss = f_hhmmss(nano_qcurts5, cfg.tz)
+float nano_target_delta = not na(nano_ts5) and not na(nano_qcurts5) ? (nano_ts5 - f_ceil_5s(nano_qcurts5)) / 1000.0 : na
+
+int n_qcurts_engine = n.curQuarterIndex == 1 ? n.q1Ts : n.curQuarterIndex == 2 ? n.q2Ts : n.curQuarterIndex == 3 ? n.q3Ts : n.q4Ts
+float n_qcurts_delta = not na(n_qcurts_engine) and not na(nano_qcurts5) ? (nano_qcurts5 - n_qcurts_engine) / 1000.0 : na
+
+int n_q1_target = f_ceil_5s(n.q1Ts)
+int n_q2_target = f_ceil_5s(n.q2Ts)
+int n_q3_target = f_ceil_5s(n.q3Ts)
+int n_q4_target = f_ceil_5s(n.q4Ts)
+
+float n_q1_target_hhmmss = f_hhmmss(n_q1_target, cfg.tz)
+float n_q2_target_hhmmss = f_hhmmss(n_q2_target, cfg.tz)
+float n_q3_target_hhmmss = f_hhmmss(n_q3_target, cfg.tz)
+float n_q4_target_hhmmss = f_hhmmss(n_q4_target, cfg.tz)
+
+float n_q1_open_delta = not na(n.q1.oTs) ? (n.q1.oTs - n_q1_target) / 1000.0 : na
+float n_q2_open_delta = not na(n.q2.oTs) ? (n.q2.oTs - n_q2_target) / 1000.0 : na
+float n_q3_open_delta = not na(n.q3.oTs) ? (n.q3.oTs - n_q3_target) / 1000.0 : na
+float n_q4_open_delta = not na(n.q4.oTs) ? (n.q4.oTs - n_q4_target) / 1000.0 : na
 
 plot(dwNanoStep2 ? n.q1.o : na, "Nano QR q1.o", display=display.data_window)
 plot(dwNanoStep2 ? n.q1.h : na, "Nano QR q1.h", display=display.data_window)
 plot(dwNanoStep2 ? n.q1.l : na, "Nano QR q1.l", display=display.data_window)
 plot(dwNanoStep2 ? n.q1.c : na, "Nano QR q1.c", display=display.data_window)
 plot(dwNanoStep2 ? n_q1_o_hhmmss : na, "Nano QR q1.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? nano_target_delta : na, "Nano 5s open delta (sec)", display=display.data_window)
+plot(dwNanoStep2 ? n_qcurts_delta : na, "Nano qCurTs mismatch (sec)", display=display.data_window)
+plot(dwNanoStep2 ? n_q1_target_hhmmss : na, "Nano q1 targetTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? n_q1_open_delta : na, "Nano q1 open delta (sec)", display=display.data_window)
 
 plot(dwNanoStep2 ? n.q2.o : na, "Nano QR q2.o", display=display.data_window)
 plot(dwNanoStep2 ? n.q2.h : na, "Nano QR q2.h", display=display.data_window)
 plot(dwNanoStep2 ? n.q2.l : na, "Nano QR q2.l", display=display.data_window)
 plot(dwNanoStep2 ? n.q2.c : na, "Nano QR q2.c", display=display.data_window)
 plot(dwNanoStep2 ? n_q2_o_hhmmss : na, "Nano QR q2.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? n_q2_target_hhmmss : na, "Nano q2 targetTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? n_q2_open_delta : na, "Nano q2 open delta (sec)", display=display.data_window)
 
 plot(dwNanoStep2 ? n.q3.o : na, "Nano QR q3.o", display=display.data_window)
 plot(dwNanoStep2 ? n.q3.h : na, "Nano QR q3.h", display=display.data_window)
 plot(dwNanoStep2 ? n.q3.l : na, "Nano QR q3.l", display=display.data_window)
 plot(dwNanoStep2 ? n.q3.c : na, "Nano QR q3.c", display=display.data_window)
 plot(dwNanoStep2 ? n_q3_o_hhmmss : na, "Nano QR q3.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? n_q3_target_hhmmss : na, "Nano q3 targetTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? n_q3_open_delta : na, "Nano q3 open delta (sec)", display=display.data_window)
 
 plot(dwNanoStep2 ? n.q4.o : na, "Nano QR q4.o", display=display.data_window)
 plot(dwNanoStep2 ? n.q4.h : na, "Nano QR q4.h", display=display.data_window)
 plot(dwNanoStep2 ? n.q4.l : na, "Nano QR q4.l", display=display.data_window)
 plot(dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.data_window)
 plot(dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? n_q4_target_hhmmss : na, "Nano q4 targetTs (HHMMSS)", display=display.data_window)
+plot(dwNanoStep2 ? n_q4_open_delta : na, "Nano q4 open delta (sec)", display=display.data_window)
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)
@@ -214,6 +292,128 @@ plot(dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=displa
 var int MAX_LINES = 500
 var int STORE_MAX = 800
 
+// -----------------------------------------------------------------------------
+// Micro cycle storage
+// -----------------------------------------------------------------------------
+var int[] microStarts = array.new_int()
+var vset  microV = vset_new()
+
+var line microProjQ2  = na
+var line microProjQ3  = na
+var line microProjQ4  = na
+var line microProjEnd = na
+
+var int[]   microHistStart = array.new_int()
+var int[]   microHistEnd   = array.new_int()
+
+var float[] micro_h_q1o   = array.new_float()
+var int[]   micro_h_q1oTs = array.new_int()
+var float[] micro_h_q2o   = array.new_float()
+var int[]   micro_h_q2oTs = array.new_int()
+var float[] micro_h_q3o   = array.new_float()
+var int[]   micro_h_q3oTs = array.new_int()
+var float[] micro_h_q4o   = array.new_float()
+var int[]   micro_h_q4oTs = array.new_int()
+
+var line[]  micro_l_q1o   = array.new_line()
+var line[]  micro_l_q2o   = array.new_line()
+var line[]  micro_l_q3o   = array.new_line()
+var line[]  micro_l_q4o   = array.new_line()
+
+f_mhist_kill_at(int idx) =>
+    line a = array.get(micro_l_q1o, idx)
+    line b = array.get(micro_l_q2o, idx)
+    line c = array.get(micro_l_q3o, idx)
+    line d = array.get(micro_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(d)
+        line.delete(d)
+    array.set(micro_l_q1o, idx, na)
+    array.set(micro_l_q2o, idx, na)
+    array.set(micro_l_q3o, idx, na)
+    array.set(micro_l_q4o, idx, na)
+    0
+
+f_mhist_shift_front() =>
+    if array.size(microHistStart) > 0
+        f_mhist_kill_at(0)
+        array.shift(microHistStart)
+        array.shift(microHistEnd)
+
+        array.shift(micro_h_q1o),  array.shift(micro_h_q1oTs)
+        array.shift(micro_h_q2o),  array.shift(micro_h_q2oTs)
+        array.shift(micro_h_q3o),  array.shift(micro_h_q3oTs)
+        array.shift(micro_h_q4o),  array.shift(micro_h_q4oTs)
+
+        array.shift(micro_l_q1o)
+        array.shift(micro_l_q2o)
+        array.shift(micro_l_q3o)
+        array.shift(micro_l_q4o)
+    0
+
+f_mhist_trim_cutoff(int cutoffTs) =>
+    while array.size(microHistStart) > 0 and array.get(microHistStart, 0) < cutoffTs
+        f_mhist_shift_front()
+    0
+
+f_mhist_ensure_current() =>
+    if m.inWindow and not na(m.q1Ts)
+        int key = m.q1Ts
+        int idx = f_find_int(microHistStart, key)
+        if idx == -1
+            array.push(microHistStart, key)
+            array.push(microHistEnd, m.endTs)
+
+            array.push(micro_h_q1o, na), array.push(micro_h_q1oTs, na)
+            array.push(micro_h_q2o, na), array.push(micro_h_q2oTs, na)
+            array.push(micro_h_q3o, na), array.push(micro_h_q3oTs, na)
+            array.push(micro_h_q4o, na), array.push(micro_h_q4oTs, na)
+
+            line naL = na
+            array.push(micro_l_q1o, naL)
+            array.push(micro_l_q2o, naL)
+            array.push(micro_l_q3o, naL)
+            array.push(micro_l_q4o, naL)
+            idx := array.size(microHistStart) - 1
+
+        array.set(microHistEnd, idx, m.endTs)
+
+        float q1o = m.q1.o
+        int   q1t = m.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(micro_h_q1o, idx, q1o)
+            array.set(micro_h_q1oTs, idx, q1t)
+
+        float q2o = m.q2.o
+        int   q2t = m.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(micro_h_q2o, idx, q2o)
+            array.set(micro_h_q2oTs, idx, q2t)
+
+        float q3o = m.q3.o
+        int   q3t = m.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(micro_h_q3o, idx, q3o)
+            array.set(micro_h_q3oTs, idx, q3t)
+
+        float q4o = m.q4.o
+        int   q4t = m.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(micro_h_q4o, idx, q4o)
+            array.set(micro_h_q4oTs, idx, q4t)
+
+        while array.size(microHistStart) > STORE_MAX
+            f_mhist_shift_front()
+    0
+
+// -----------------------------------------------------------------------------
+// Nano cycle storage
+// -----------------------------------------------------------------------------
 var int[] nanoStarts = array.new_int()
 var vset  nanoV = vset_new()
 
@@ -341,6 +541,119 @@ f_hist_ensure_current() =>
 // -----------------------------------------------------------------------------
 // Main draw logic
 // -----------------------------------------------------------------------------
+int enabledCycles = (showMicro ? 1 : 0) + (showNano ? 1 : 0)
+if enabledCycles < 1
+    enabledCycles := 1
+int perCycle = showOpens ? 9 : 5
+int maxC = int(math.floor((MAX_LINES - 10) / (perCycle * (enabledCycles * 1.0))))
+maxC := f_clamp_int(maxC, 1, 200)
+int keepEff = f_clamp_int(keepCycles, 1, maxC)
+
+if not showMicro
+    vset_clear(microV)
+    microProjQ2  := f_kill(microProjQ2)
+    microProjQ3  := f_kill(microProjQ3)
+    microProjQ4  := f_kill(microProjQ4)
+    microProjEnd := f_kill(microProjEnd)
+
+    int mi = array.size(microHistStart) - 1
+    while mi >= 0
+        f_mhist_kill_at(mi)
+        mi -= 1
+    array.clear(microHistStart), array.clear(microHistEnd)
+    array.clear(micro_h_q1o), array.clear(micro_h_q1oTs)
+    array.clear(micro_h_q2o), array.clear(micro_h_q2oTs)
+    array.clear(micro_h_q3o), array.clear(micro_h_q3oTs)
+    array.clear(micro_h_q4o), array.clear(micro_h_q4oTs)
+    array.clear(micro_l_q1o), array.clear(micro_l_q2o), array.clear(micro_l_q3o), array.clear(micro_l_q4o)
+    array.clear(microStarts)
+else
+    if not na(m.q2Ts)
+        microProjQ2 := tc > m.q2Ts ? f_kill(microProjQ2) : f_set_or_make_vline(microProjQ2, m.q2Ts, COL_Q2)
+    if not na(m.q3Ts)
+        microProjQ3 := tc > m.q3Ts ? f_kill(microProjQ3) : f_set_or_make_vline(microProjQ3, m.q3Ts, COL_Q3)
+    if not na(m.q4Ts)
+        microProjQ4 := tc > m.q4Ts ? f_kill(microProjQ4) : f_set_or_make_vline(microProjQ4, m.q4Ts, COL_Q4)
+
+    if not na(m.endTs)
+        microProjEnd := f_set_or_make_vline(microProjEnd, m.endTs, COL_Q1)
+
+    if m.inWindow and not na(m.q1Ts)
+        f_push_unique_int(microStarts, m.q1Ts, STORE_MAX)
+
+    int mCutoff = na(m.q1Ts) ? 0 : m.q1Ts
+    int mAvail = array.size(microStarts)
+    int mUse   = math.min(keepEff, mAvail)
+    int mFirst = mAvail - mUse
+    if mUse > 0
+        mCutoff := array.get(microStarts, mFirst)
+
+    vset_trim_since(microV, mCutoff)
+
+    f_mhist_ensure_current()
+    f_mhist_trim_cutoff(mCutoff)
+
+    if m.inWindow
+        if not na(m.q1Ts) and tc > m.q1Ts
+            vset_add(microV, m.q1Ts, COL_Q1)
+        if not na(m.q2Ts) and tc > m.q2Ts
+            vset_add(microV, m.q2Ts, COL_Q2)
+        if not na(m.q3Ts) and tc > m.q3Ts
+            vset_add(microV, m.q3Ts, COL_Q3)
+        if not na(m.q4Ts) and tc > m.q4Ts
+            vset_add(microV, m.q4Ts, COL_Q4)
+        if not na(m.endTs) and tc > m.endTs
+            vset_add(microV, m.endTs, COL_Q1)
+
+    if not showOpens
+        int mj = array.size(microHistStart) - 1
+        while mj >= 0
+            f_mhist_kill_at(mj)
+            mj -= 1
+    else
+        int msz = array.size(microHistStart)
+        int mk = 0
+        while mk < msz
+            int mEndTs = array.get(microHistEnd, mk)
+
+            float my1 = array.get(micro_h_q1o, mk)
+            int   mx1 = array.get(micro_h_q1oTs, mk)
+            line  ml1 = array.get(micro_l_q1o, mk)
+            if not na(my1) and not na(mx1) and not na(mEndTs)
+                ml1 := f_set_or_make_hline(ml1, mx1, mEndTs, my1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                ml1 := f_kill(ml1)
+            array.set(micro_l_q1o, mk, ml1)
+
+            float my2 = array.get(micro_h_q2o, mk)
+            int   mx2 = array.get(micro_h_q2oTs, mk)
+            line  ml2 = array.get(micro_l_q2o, mk)
+            if not na(my2) and not na(mx2) and not na(mEndTs)
+                ml2 := f_set_or_make_hline(ml2, mx2, mEndTs, my2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                ml2 := f_kill(ml2)
+            array.set(micro_l_q2o, mk, ml2)
+
+            float my3 = array.get(micro_h_q3o, mk)
+            int   mx3 = array.get(micro_h_q3oTs, mk)
+            line  ml3 = array.get(micro_l_q3o, mk)
+            if not na(my3) and not na(mx3) and not na(mEndTs)
+                ml3 := f_set_or_make_hline(ml3, mx3, mEndTs, my3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                ml3 := f_kill(ml3)
+            array.set(micro_l_q3o, mk, ml3)
+
+            float my4 = array.get(micro_h_q4o, mk)
+            int   mx4 = array.get(micro_h_q4oTs, mk)
+            line  ml4 = array.get(micro_l_q4o, mk)
+            if not na(my4) and not na(mx4) and not na(mEndTs)
+                ml4 := f_set_or_make_hline(ml4, mx4, mEndTs, my4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                ml4 := f_kill(ml4)
+            array.set(micro_l_q4o, mk, ml4)
+
+            mk += 1
+
 if not showNano
     // Clear everything
     vset_clear(nanoV)
@@ -378,13 +691,6 @@ else
     // Track printed cycle starts
     if n.inWindow and not na(n.q1Ts)
         f_push_unique_int(nanoStarts, n.q1Ts, STORE_MAX)
-
-    // Determine effective keepCycles based on line budget
-    int perCycle = showOpens ? 9 : 5
-    int maxC = int(math.floor((MAX_LINES - 10) / (perCycle * 1.0)))
-    maxC := f_clamp_int(maxC, 1, 200)
-
-    int keepEff = f_clamp_int(keepCycles, 1, maxC)
 
     int cutoff = na(n.q1Ts) ? 0 : n.q1Ts
     int nAvail = array.size(nanoStarts)

@@ -1,0 +1,58 @@
+Pinescript Tips
+
+1. If an `if` or `switch` is used as an expression (assigned, returned, or passed as an argument), every branch (including `else`/`default`) must produce a value of the exact same type; no missing `else`, and no branch that returns nothing (use typed `na` when needed).
+
+2. Don’t assign a numeric `series` result to a `bool`/`const bool`; either declare the variable with the same type/qualifier as the right-hand side, or explicitly convert the number to a boolean (for example, `ta.change(ws) != 0`).
+
+3. Don’t split a ternary across lines; keep `condition ? value : value` on one line, or wrap the entire ternary in parentheses so any line breaks occur inside the parentheses.
+
+4. In Pine v6, you can’t declare a function’s return type before the function name; only type the parameters, then use => (the return type is inferred or handled via typed variables inside).
+
+5. "do" cannot be used as a variable or function name.
+
+6. Before declaring the receiving variable type, check the function’s return type (tooltip/docs) and match it exactly; Pine won’t auto-cast between int/float/bool, so convert explicitly if you need a different type.
+
+7. input.string(..., options=...) must use a literal, compile-time constant tuple of strings (e.g., options=["00:00","00:15",...]). You cannot pass a variable (like timeOpts) as options.
+
+8. Pine has no line-continuation token—if you split any expression across lines (e.g., string concat), wrap the whole expression in parentheses.
+
+9. Never compare to na with == / != (e.g., x == na or x != na). Always use na(x) or not na(x) instead.
+
+10. In Pine v6, don’t use tostring() — it doesn’t exist. Use str.tostring() for numbers, and for timestamps use str.format_time(unix_ms, "yyyy-MM-dd HH:mm", syminfo.timezone).
+
+11. If you use if/switch as an expression, every branch must return the same type — always include an else/default, and when returning na use a typed na (e.g., float(na), int(na), bool(na)) so Pine doesn’t infer mixed types.
+
+12. All Pinescript code must be v6 and should always be uploaded in a .txt file to the user, not written in a code block (this avoids clutter and lag)
+
+13. Tuple destructuring rule: When assigning multiple return values (e.g., [...] = request.security()), do not put type keywords inside the brackets. Pine will throw “Mismatched input … expecting ‘]’”. Use [a, b, c] = ... and (if needed) type variables separately outside the destructure.
+
+14. Pine won’t let you modify global scalar variables (e.g., var int x) inside a function. If you need to update “global state” from a function, use a global array (array.set(...)), or return a value from the function and assign it in global scope.
+
+15. In => functions, Pine infers the function’s return from the last block/expression. Don’t let the last statement be an if/switch where one branch is break (void) and another is a value/assignment (series). Always end such helper functions with an explicit final return expression (e.g., cnt, true, 0, or typed na) and avoid break in the last-returning block.
+
+16. Functions must be declared at global scope (top level). Don’t define name(args) => ... inside if/for/while blocks or inside other functions—Pine will throw ‘Syntax error at input =>’ (or at typed params).
+
+17. Tuple/destructuring assignment is declaration-only and uses = (not :=); if you pre-declare the targets you’ll get “already defined”, and if you try := you’ll get a syntax error—use temps + single-variable := only when you truly need reassignment.
+
+18. Don’t build week IDs as year()*100 + weekofyear(); use the actual week-start timestamp as the key (or compute the ISO week-year correctly), otherwise New Year will split one ISO week into two “weeks.”
+
+19. Don’t let a function/method end with an if/switch where different branches end on different types (e.g., one branch’s last line assigns a string, another assigns a label). Make the last statement a single, consistent return value (like 0), or refactor so the if isn’t the final statement.
+
+20. Pine tip: ta.change(x) returns a series int (difference), not a bool—so don’t assign it to bool. Convert it explicitly: use ta.change(x) != 0 (or compare to 0) when you need a true/false “changed this bar” flag.
+
+21. time_close on realtime bars is in the future. If you use time_close > ts, boundaries can “realize” before the bar actually closes. Decide whether that’s desired for QT. (Your current engine logic leans on this for gap safety.)
+
+22. request.security_lower_tf() arrays can be empty or mismatched (especially around gaps/holidays/session transitions). Always guard with n = min(size(tArr), size(oArr)) and never index if n == 0. This is the “Nano on 15s” crash class.
+
+23. Don’t call request.security() repeatedly inside loops / heavy blocks. Cache series outside loops; refresh only when anchors change (like ds changes).
+
+24. Loop bounds: never do for i = 0 to n-1 unless you guard if n > 0 first.
+
+25. Library constraints: don’t rely on “mutating global scalars inside functions.” Treat state as UDT/arrays returned and assigned at top-level (your tips already nod at this, but it becomes mandatory in a library).
+
+26. Enum params can’t be typed. Don’t type-annotate sty as line.style / line_style; leave it untyped or use a string/int + mapping.
+
+27. Don’t put type keywords inside tuple destructuring. In Pine v6, this is invalid: [bool a, string b] = fn().
+Instead: declare variables first, then destructure: [a, b] = fn().
+
+28. Plot limit: scripts can create at most 64 plots. If you exceed this, reduce data-window plots or guard them behind inputs.
