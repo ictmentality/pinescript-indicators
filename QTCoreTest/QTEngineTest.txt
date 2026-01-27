@@ -1,9 +1,7 @@
 //@version=6
-indicator("QTCore Test — Nano Only", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=500)
 
-// paste the copied import line here:
-// import <you>/<QT Core>/<version> as qt
-import Jaw1312/QTCore/6 as qt
+import Jaw1312/QTEngine/1 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -43,23 +41,6 @@ f_vcol(color c) =>
     color.new(c, V_TRANSP)
 
 // -----------------------------------------------------------------------------
-// QTIndicator-style drawing management helpers
-// -----------------------------------------------------------------------------
-f_clamp_int(int x, int lo, int hi) =>
-    math.max(lo, math.min(hi, x))
-
-f_push_unique_int(int[] a, int v, int maxSize) =>
-    if array.size(a) == 0 or array.get(a, array.size(a) - 1) != v
-        array.push(a, v)
-        while array.size(a) > maxSize
-            array.shift(a)
-    0
-
-var int STORE_MAX = 2400
-var int[] nanoStarts = array.new_int()
-
-
-// -----------------------------------------------------------------------------
 // Helpers (display-only)
 // -----------------------------------------------------------------------------
 f_hhmmss(int ts, string tz) =>
@@ -68,17 +49,37 @@ f_hhmmss(int ts, string tz) =>
     int ss = second(ts, tz)
     float(hh * 10000 + mm * 100 + ss)
 
+// QTIndicator mapping (string → TradingView style)
 lineStyleFrom(string s) =>
-    sty = line.style_dotted
-    if s == "Solid"
-        sty := line.style_solid
-    else if s == "Dashed"
-        sty := line.style_dashed
-    else
-        sty := line.style_dotted
-    sty
+    switch s
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        =>          line.style_dotted
+
+f_clamp_int(int v, int lo, int hi) =>
+    v < lo ? lo : v > hi ? hi : v
+
 // -----------------------------------------------------------------------------
-// Old-QT line storage + projection helpers (vertical-only)
+// Array helpers
+// -----------------------------------------------------------------------------
+f_find_int(int[] arr, int v) =>
+    int idx = -1
+    int i = array.size(arr) - 1
+    while i >= 0 and idx == -1
+        if array.get(arr, i) == v
+            idx := i
+        i -= 1
+    idx
+
+f_push_unique_int(int[] arr, int v, int maxN) =>
+    if f_find_int(arr, v) == -1
+        array.push(arr, v)
+        while array.size(arr) > maxN
+            array.shift(arr)
+    0
+
+// -----------------------------------------------------------------------------
+// Old-QT vertical divider line storage helpers
 // -----------------------------------------------------------------------------
 type vset
     line[] ln
@@ -96,17 +97,6 @@ vset_clear(vset s) =>
     array.clear(s.ts)
     0
 
-vset_trim_since(vset s, int cutoff) =>
-    int i = array.size(s.ts) - 1
-    while i >= 0
-        if array.get(s.ts, i) < cutoff
-            line.delete(array.get(s.ln, i))
-            array.remove(s.ln, i)
-            array.remove(s.ts, i)
-        i -= 1
-    0
-
-
 vset_has(vset s, int ts) =>
     bool found = false
     int i = array.size(s.ts) - 1
@@ -119,6 +109,17 @@ vset_add(vset s, int ts, color c) =>
     if not vset_has(s, ts)
         array.push(s.ln, line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c)))
         array.push(s.ts, ts)
+    0
+
+vset_trim_since(vset s, int cutoffTs) =>
+    int i = array.size(s.ts) - 1
+    while i >= 0
+        int t = array.get(s.ts, i)
+        if t < cutoffTs
+            line ln = array.remove(s.ln, i)
+            line.delete(ln)
+            array.remove(s.ts, i)
+        i -= 1
     0
 
 f_set_or_make_vline(line ln, int ts, color c) =>
@@ -208,24 +209,159 @@ plot(dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.data_window)
 plot(dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
 
 // -----------------------------------------------------------------------------
-// Vertical quarter dividers (realized + projections) — Old QT draw model,
-// but boundary timestamps come from QTCore (n.q1Ts/q2Ts/q3Ts/q4Ts/endTs).
+// Divider + cycle-window management (QTIndicator model)
 // -----------------------------------------------------------------------------
-var vset nanoV = vset_new()
+var int MAX_LINES = 500
+var int STORE_MAX = 800
+
+var int[] nanoStarts = array.new_int()
+var vset  nanoV = vset_new()
 
 var line projQ2  = na
 var line projQ3  = na
 var line projQ4  = na
 var line projEnd = na
 
-if not showNano
-    if array.size(nanoV.ln) > 0
-        vset_clear(nanoV)
+// -----------------------------------------------------------------------------
+// Open-line history (per displayed cycle) — values captured from QTCore during
+// the cycle, then retained + drawn as long as the cycle is inside keepCycles.
+// -----------------------------------------------------------------------------
+var int[]   histStart = array.new_int()
+var int[]   histEnd   = array.new_int()
 
+var float[] h_q1o     = array.new_float()
+var int[]   h_q1oTs   = array.new_int()
+var float[] h_q2o     = array.new_float()
+var int[]   h_q2oTs   = array.new_int()
+var float[] h_q3o     = array.new_float()
+var int[]   h_q3oTs   = array.new_int()
+var float[] h_q4o     = array.new_float()
+var int[]   h_q4oTs   = array.new_int()
+
+var line[]  l_q1o     = array.new_line()
+var line[]  l_q2o     = array.new_line()
+var line[]  l_q3o     = array.new_line()
+var line[]  l_q4o     = array.new_line()
+
+f_hist_kill_at(int idx) =>
+    line a = array.get(l_q1o, idx)
+    line b = array.get(l_q2o, idx)
+    line c = array.get(l_q3o, idx)
+    line d = array.get(l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(d)
+        line.delete(d)
+    array.set(l_q1o, idx, na)
+    array.set(l_q2o, idx, na)
+    array.set(l_q3o, idx, na)
+    array.set(l_q4o, idx, na)
+    0
+
+f_hist_shift_front() =>
+    if array.size(histStart) > 0
+        f_hist_kill_at(0)
+        array.shift(histStart)
+        array.shift(histEnd)
+
+        array.shift(h_q1o),  array.shift(h_q1oTs)
+        array.shift(h_q2o),  array.shift(h_q2oTs)
+        array.shift(h_q3o),  array.shift(h_q3oTs)
+        array.shift(h_q4o),  array.shift(h_q4oTs)
+
+        array.shift(l_q1o)
+        array.shift(l_q2o)
+        array.shift(l_q3o)
+        array.shift(l_q4o)
+    0
+
+f_hist_trim_cutoff(int cutoffTs) =>
+    while array.size(histStart) > 0 and array.get(histStart, 0) < cutoffTs
+        f_hist_shift_front()
+    0
+
+f_hist_ensure_current() =>
+    if n.inWindow and not na(n.q1Ts)
+        int key = n.q1Ts
+        int idx = f_find_int(histStart, key)
+        if idx == -1
+            array.push(histStart, key)
+            array.push(histEnd, n.endTs)
+
+            array.push(h_q1o, na), array.push(h_q1oTs, na)
+            array.push(h_q2o, na), array.push(h_q2oTs, na)
+            array.push(h_q3o, na), array.push(h_q3oTs, na)
+            array.push(h_q4o, na), array.push(h_q4oTs, na)
+
+            line naL = na
+            array.push(l_q1o, naL)
+            array.push(l_q2o, naL)
+            array.push(l_q3o, naL)
+            array.push(l_q4o, naL)
+            idx := array.size(histStart) - 1
+
+        // Update current cycle snapshot from QTCore values
+        // IMPORTANT: For sub-TF-aligned opens (e.g., Nano forced to 5S), always anchor open-lines to q?.oTs.
+        // Do NOT fall back to boundaryTs (q?Ts), or the line will be shifted on higher chart TFs.
+        array.set(histEnd, idx, n.endTs)
+
+        float q1o = n.q1.o
+        int   q1t = n.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(h_q1o, idx, q1o)
+            array.set(h_q1oTs, idx, q1t)
+
+        float q2o = n.q2.o
+        int   q2t = n.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(h_q2o, idx, q2o)
+            array.set(h_q2oTs, idx, q2t)
+
+        float q3o = n.q3.o
+        int   q3t = n.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(h_q3o, idx, q3o)
+            array.set(h_q3oTs, idx, q3t)
+
+        float q4o = n.q4.o
+        int   q4t = n.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(h_q4o, idx, q4o)
+            array.set(h_q4oTs, idx, q4t)
+
+        // Hard cap history storage (delete oldest if exceeded)
+        while array.size(histStart) > STORE_MAX
+            f_hist_shift_front()
+    0
+
+// -----------------------------------------------------------------------------
+// Main draw logic
+// -----------------------------------------------------------------------------
+if not showNano
+    // Clear everything
+    vset_clear(nanoV)
     projQ2  := f_kill(projQ2)
     projQ3  := f_kill(projQ3)
     projQ4  := f_kill(projQ4)
     projEnd := f_kill(projEnd)
+
+    // Kill open lines + clear history arrays
+    int i = array.size(histStart) - 1
+    while i >= 0
+        f_hist_kill_at(i)
+        i -= 1
+    array.clear(histStart), array.clear(histEnd)
+    array.clear(h_q1o), array.clear(h_q1oTs)
+    array.clear(h_q2o), array.clear(h_q2oTs)
+    array.clear(h_q3o), array.clear(h_q3oTs)
+    array.clear(h_q4o), array.clear(h_q4oTs)
+    array.clear(l_q1o), array.clear(l_q2o), array.clear(l_q3o), array.clear(l_q4o)
+
+    array.clear(nanoStarts)
 else
     // Projections (future boundaries only; killed once passed)
     if not na(n.q2Ts)
@@ -239,11 +375,16 @@ else
     if not na(n.endTs)
         projEnd := f_set_or_make_vline(projEnd, n.endTs, COL_Q1)
 
-    // Track printed cycle starts + compute cutoff window (QTIndicator model)
+    // Track printed cycle starts
     if n.inWindow and not na(n.q1Ts)
         f_push_unique_int(nanoStarts, n.q1Ts, STORE_MAX)
 
-    int keepEff = showOpens ? f_clamp_int(keepCycles, 1, 98) : f_clamp_int(keepCycles, 1, 99)
+    // Determine effective keepCycles based on line budget
+    int perCycle = showOpens ? 9 : 5
+    int maxC = int(math.floor((MAX_LINES - 10) / (perCycle * 1.0)))
+    maxC := f_clamp_int(maxC, 1, 200)
+
+    int keepEff = f_clamp_int(keepCycles, 1, maxC)
 
     int cutoff = na(n.q1Ts) ? 0 : n.q1Ts
     int nAvail = array.size(nanoStarts)
@@ -255,6 +396,11 @@ else
     // Trim realized divider set to cutoff window
     vset_trim_since(nanoV, cutoff)
 
+    // Update current-cycle snapshot (from QTCore) into open history
+    f_hist_ensure_current()
+
+    // Trim open history to cutoff
+    f_hist_trim_cutoff(cutoff)
 
     // Realized dividers (persist via vset; windowed by keepCycles)
     if n.inWindow
@@ -271,50 +417,56 @@ else
         if not na(n.endTs) and tc > n.endTs
             vset_add(nanoV, n.endTs, COL_Q1)
 
-// -----------------------------------------------------------------------------
-// Quarter open lines (Q1–Q4), each extending to the end of the current cycle
-// -----------------------------------------------------------------------------
-var line oQ1 = na
-var line oQ2 = na
-var line oQ3 = na
-var line oQ4 = na
-
-if (not showNano) or (not showOpens)
-    oQ1 := f_kill(oQ1)
-    oQ2 := f_kill(oQ2)
-    oQ3 := f_kill(oQ3)
-    oQ4 := f_kill(oQ4)
-else
-    int endTs = n.endTs
-
-    // Q1 Open
-    float y1 = n.q1.o
-    int x1 = na(n.q1.oTs) ? n.q1Ts : n.q1.oTs
-    if not na(y1) and not na(x1) and not na(endTs)
-        oQ1 := f_set_or_make_hline(oQ1, x1, endTs, y1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+    // Draw/update open lines for every retained cycle
+    if not showOpens
+        int j = array.size(histStart) - 1
+        while j >= 0
+            f_hist_kill_at(j)
+            j -= 1
     else
-        oQ1 := f_kill(oQ1)
+        int sz = array.size(histStart)
+        int k = 0
+        while k < sz
+            int endTs = array.get(histEnd, k)
 
-    // Q2 Open / True Open
-    float y2 = n.q2.o
-    int x2 = na(n.q2.oTs) ? n.q2Ts : n.q2.oTs
-    if tc > n.q2Ts and not na(y2) and not na(x2) and not na(endTs)
-        oQ2 := f_set_or_make_hline(oQ2, x2, endTs, y2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
-    else
-        oQ2 := f_kill(oQ2)
+            // Q1 open line
+            float y1 = array.get(h_q1o, k)
+            int   x1 = array.get(h_q1oTs, k)
+            line  l1 = array.get(l_q1o, k)
+            if not na(y1) and not na(x1) and not na(endTs)
+                l1 := f_set_or_make_hline(l1, x1, endTs, y1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                l1 := f_kill(l1)
+            array.set(l_q1o, k, l1)
 
-    // Q3 Open
-    float y3 = n.q3.o
-    int x3 = na(n.q3.oTs) ? n.q3Ts : n.q3.oTs
-    if tc > n.q3Ts and not na(y3) and not na(x3) and not na(endTs)
-        oQ3 := f_set_or_make_hline(oQ3, x3, endTs, y3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
-    else
-        oQ3 := f_kill(oQ3)
+            // Q2 open / true open line
+            float y2 = array.get(h_q2o, k)
+            int   x2 = array.get(h_q2oTs, k)
+            line  l2 = array.get(l_q2o, k)
+            if not na(y2) and not na(x2) and not na(endTs)
+                l2 := f_set_or_make_hline(l2, x2, endTs, y2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                l2 := f_kill(l2)
+            array.set(l_q2o, k, l2)
 
-    // Q4 Open
-    float y4 = n.q4.o
-    int x4 = na(n.q4.oTs) ? n.q4Ts : n.q4.oTs
-    if tc > n.q4Ts and not na(y4) and not na(x4) and not na(endTs)
-        oQ4 := f_set_or_make_hline(oQ4, x4, endTs, y4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
-    else
-        oQ4 := f_kill(oQ4)
+            // Q3 open line
+            float y3 = array.get(h_q3o, k)
+            int   x3 = array.get(h_q3oTs, k)
+            line  l3 = array.get(l_q3o, k)
+            if not na(y3) and not na(x3) and not na(endTs)
+                l3 := f_set_or_make_hline(l3, x3, endTs, y3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                l3 := f_kill(l3)
+            array.set(l_q3o, k, l3)
+
+            // Q4 open line
+            float y4 = array.get(h_q4o, k)
+            int   x4 = array.get(h_q4oTs, k)
+            line  l4 = array.get(l_q4o, k)
+            if not na(y4) and not na(x4) and not na(endTs)
+                l4 := f_set_or_make_hline(l4, x4, endTs, y4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                l4 := f_kill(l4)
+            array.set(l_q4o, k, l4)
+
+            k += 1
