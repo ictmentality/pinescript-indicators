@@ -1,34 +1,39 @@
 //@version=6
 indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/1 as qt
+import Jaw1312/QTEngine/8 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
 // -----------------------------------------------------------------------------
 groupCycles = "TIME CYCLES"
+show90m  = input.bool(true, "90m (6h cycle; q=90m)", group=groupCycles)
 showMicro = input.bool(true, "Micro (90m cycle; q=22m30s)", group=groupCycles)
 showNano  = input.bool(true, "Nano (22m30s cycle; q=5m37.5s)", group=groupCycles)
 
 groupAll = "CYCLE SETTINGS"
 showOpens = input.bool(true, "Show Opens", group=groupAll)
-keepCycles = input.int(50, "# of Cycles", minval=1, maxval=200, group=groupAll)
+keepCycles = input.int(4, "# of Cycles", minval=1, maxval=200, group=groupAll)
 
-q1OpenCol = input.color(color.rgb(255, 152, 0), "Q1 Open Color", group=groupAll)
-q2OpenCol = input.color(color.rgb(0, 0, 0), "Q2 Open / True Open Color", group=groupAll)
-q3OpenCol = input.color(color.rgb(76, 175, 80), "Q3 Open Color", group=groupAll)
-q4OpenCol = input.color(color.rgb(41, 98, 255), "Q4 Open Color", group=groupAll)
+q1OpenCol = input.color(color.new(color.rgb(99, 99, 99), 70), "Q1 Open Color", group=groupAll)
+q2OpenCol = input.color(color.new(color.rgb(242, 54, 69), 70), "Q2 Open / True Open Color", group=groupAll)
+q3OpenCol = input.color(color.new(color.rgb(76, 175, 80), 70), "Q3 Open Color", group=groupAll)
+q4OpenCol = input.color(color.new(color.rgb(41, 98, 255), 70), "Q4 Open Color", group=groupAll)
 
-q1OpenStyleStr = input.string("Solid", "Q1 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
-q2OpenStyleStr = input.string("Solid", "Q2 Open / True Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
-q3OpenStyleStr = input.string("Solid", "Q3 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
-q4OpenStyleStr = input.string("Solid", "Q4 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
+q1OpenStyleStr = input.string("Dashed", "Q1 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
+q2OpenStyleStr = input.string("Dashed", "Q2 Open / True Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
+q3OpenStyleStr = input.string("Dashed", "Q3 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
+q4OpenStyleStr = input.string("Dashed", "Q4 Open Style", options=["Solid", "Dashed", "Dotted"], group=groupAll)
 
 groupDW      = "DATA WINDOW"
+dw90mStep1  = input.bool(true, "Step 1 — 90m boundaryTs checks", group=groupDW)
 dwMicroStep1 = input.bool(true, "Step 1 — Micro boundaryTs checks", group=groupDW)
 dwMicroStep2 = input.bool(true, "Step 2 — Micro QuarterRecord (q1–q4) — minimal", group=groupDW)
 dwNanoStep1  = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
 dwNanoStep2  = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
+
+groupDbg = "ALIGNED TF DEBUG"
+showAlignedOhlc = input.bool(false, "Show aligned TF OHLC table", group=groupDbg)
 
 // -----------------------------------------------------------------------------
 // Color palette (Old QT Indicator) + divider opacity rule
@@ -51,10 +56,30 @@ f_hhmmss(int ts, string tz) =>
     int ss = second(ts, tz)
     float(hh * 10000 + mm * 100 + ss)
 
+f_fmt(float v) =>
+    na(v) ? "-" : str.tostring(v)
+
+f_fmt_time(int ts, string tz) =>
+    na(ts) ? "-" : str.tostring(f_hhmmss(ts, tz))
+
 f_ceil_5s(int ts) =>
     int step = 5 * 1000
     int rem = ts % step
     rem == 0 ? ts : ts + (step - rem)
+
+// -----------------------------------------------------------------------------
+// Visibility Alignments (hardcoded)
+// Nano  = 5s - 15s
+// Micro = 30s - 4m
+// 90m   = 5m - 14m
+// -----------------------------------------------------------------------------
+int tfSec = timeframe.in_seconds(timeframe.period)
+bool visNanoTf = not na(tfSec) and tfSec >= 5 and tfSec <= 15
+bool visMicroTf = not na(tfSec) and tfSec >= 30 and tfSec <= 240
+bool vis90mTf = not na(tfSec) and tfSec >= 300 and tfSec <= 840
+bool showNanoTf = showNano and visNanoTf
+bool showMicroTf = showMicro and visMicroTf
+bool show90mTf = show90m and vis90mTf
 
 // QTIndicator mapping (string → TradingView style)
 lineStyleFrom(string s) =>
@@ -65,6 +90,16 @@ lineStyleFrom(string s) =>
 
 f_clamp_int(int v, int lo, int hi) =>
     v < lo ? lo : v > hi ? hi : v
+
+f_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3, qt.QuarterRecord q4) =>
+    qt.QuarterRecord out = q1
+    if idx == 2
+        out := q2
+    else if idx == 3
+        out := q3
+    else if idx == 4
+        out := q4
+    out
 
 // -----------------------------------------------------------------------------
 // Array helpers
@@ -169,28 +204,42 @@ var qt.CycleState st  = qt.qt_state_new()
 int t  = time
 int tc = time_close
 
-[st1, m] = qt.qt_micro_update(st, cfg, t, tc)
+[st0, m90] = qt.qt_m90_update(st, cfg, t, tc)
+[st1, m] = qt.qt_micro_update(st0, cfg, t, tc)
 [st2, n] = qt.qt_nano_update(st1, cfg, t, tc)
 st := st2
+
+[m_aq1, m_aq2, m_aq3, m_aq4] = qt.qt_micro_aligned_qr_debug(st)
+[n_aq1, n_aq2, n_aq3, n_aq4] = qt.qt_nano_aligned_qr_debug(st)
+qt.QuarterRecord m_aq = f_pick_qr(m.curQuarterIndex, m_aq1, m_aq2, m_aq3, m_aq4)
+qt.QuarterRecord n_aq = f_pick_qr(n.curQuarterIndex, n_aq1, n_aq2, n_aq3, n_aq4)
 
 // -----------------------------------------------------------------------------
 // Data Window — Step 1: boundaryTs checks
 // -----------------------------------------------------------------------------
-plot(dwMicroStep1 ? m.q1Ts : na, "Micro q1Ts", display=display.data_window)
-plot(dwMicroStep1 ? m.q2Ts : na, "Micro q2Ts", display=display.data_window)
-plot(dwMicroStep1 ? m.q3Ts : na, "Micro q3Ts", display=display.data_window)
-plot(dwMicroStep1 ? m.q4Ts : na, "Micro q4Ts", display=display.data_window)
-plot(dwMicroStep1 ? (m.q2Realized ? 1.0 : 0.0) : na, "Micro q2Realized", display=display.data_window)
-plot(dwMicroStep1 ? (m.q3Realized ? 1.0 : 0.0) : na, "Micro q3Realized", display=display.data_window)
-plot(dwMicroStep1 ? (m.q4Realized ? 1.0 : 0.0) : na, "Micro q4Realized", display=display.data_window)
+plot(show90mTf and dw90mStep1 ? m90.q1Ts : na, "90m q1Ts", display=display.data_window)
+plot(show90mTf and dw90mStep1 ? m90.q2Ts : na, "90m q2Ts", display=display.data_window)
+plot(show90mTf and dw90mStep1 ? m90.q3Ts : na, "90m q3Ts", display=display.data_window)
+plot(show90mTf and dw90mStep1 ? m90.q4Ts : na, "90m q4Ts", display=display.data_window)
+plot(show90mTf and dw90mStep1 ? (m90.q2Realized ? 1.0 : 0.0) : na, "90m q2Realized", display=display.data_window)
+plot(show90mTf and dw90mStep1 ? (m90.q3Realized ? 1.0 : 0.0) : na, "90m q3Realized", display=display.data_window)
+plot(show90mTf and dw90mStep1 ? (m90.q4Realized ? 1.0 : 0.0) : na, "90m q4Realized", display=display.data_window)
 
-plot(dwNanoStep1 ? n.q1Ts : na, "Nano q1Ts", display=display.data_window)
-plot(dwNanoStep1 ? n.q2Ts : na, "Nano q2Ts", display=display.data_window)
-plot(dwNanoStep1 ? n.q3Ts : na, "Nano q3Ts", display=display.data_window)
-plot(dwNanoStep1 ? n.q4Ts : na, "Nano q4Ts", display=display.data_window)
-plot(dwNanoStep1 ? (n.q2Realized ? 1.0 : 0.0) : na, "Nano q2Realized", display=display.data_window)
-plot(dwNanoStep1 ? (n.q3Realized ? 1.0 : 0.0) : na, "Nano q3Realized", display=display.data_window)
-plot(dwNanoStep1 ? (n.q4Realized ? 1.0 : 0.0) : na, "Nano q4Realized", display=display.data_window)
+plot(showMicroTf and dwMicroStep1 ? m.q1Ts : na, "Micro q1Ts", display=display.data_window)
+plot(showMicroTf and dwMicroStep1 ? m.q2Ts : na, "Micro q2Ts", display=display.data_window)
+plot(showMicroTf and dwMicroStep1 ? m.q3Ts : na, "Micro q3Ts", display=display.data_window)
+plot(showMicroTf and dwMicroStep1 ? m.q4Ts : na, "Micro q4Ts", display=display.data_window)
+plot(showMicroTf and dwMicroStep1 ? (m.q2Realized ? 1.0 : 0.0) : na, "Micro q2Realized", display=display.data_window)
+plot(showMicroTf and dwMicroStep1 ? (m.q3Realized ? 1.0 : 0.0) : na, "Micro q3Realized", display=display.data_window)
+plot(showMicroTf and dwMicroStep1 ? (m.q4Realized ? 1.0 : 0.0) : na, "Micro q4Realized", display=display.data_window)
+
+plot(showNanoTf and dwNanoStep1 ? n.q1Ts : na, "Nano q1Ts", display=display.data_window)
+plot(showNanoTf and dwNanoStep1 ? n.q2Ts : na, "Nano q2Ts", display=display.data_window)
+plot(showNanoTf and dwNanoStep1 ? n.q3Ts : na, "Nano q3Ts", display=display.data_window)
+plot(showNanoTf and dwNanoStep1 ? n.q4Ts : na, "Nano q4Ts", display=display.data_window)
+plot(showNanoTf and dwNanoStep1 ? (n.q2Realized ? 1.0 : 0.0) : na, "Nano q2Realized", display=display.data_window)
+plot(showNanoTf and dwNanoStep1 ? (n.q3Realized ? 1.0 : 0.0) : na, "Nano q3Realized", display=display.data_window)
+plot(showNanoTf and dwNanoStep1 ? (n.q4Realized ? 1.0 : 0.0) : na, "Nano q4Realized", display=display.data_window)
 
 // -----------------------------------------------------------------------------
 // Data Window — Step 2: QuarterRecord (minimal)
@@ -200,29 +249,29 @@ float m_q2_o_hhmmss = f_hhmmss(m.q2.oTs, cfg.tz)
 float m_q3_o_hhmmss = f_hhmmss(m.q3.oTs, cfg.tz)
 float m_q4_o_hhmmss = f_hhmmss(m.q4.oTs, cfg.tz)
 
-plot(dwMicroStep2 ? m.q1.o : na, "Micro QR q1.o", display=display.data_window)
-plot(dwMicroStep2 ? m.q1.h : na, "Micro QR q1.h", display=display.data_window)
-plot(dwMicroStep2 ? m.q1.l : na, "Micro QR q1.l", display=display.data_window)
-plot(dwMicroStep2 ? m.q1.c : na, "Micro QR q1.c", display=display.data_window)
-plot(dwMicroStep2 ? m_q1_o_hhmmss : na, "Micro QR q1.oTs (HHMMSS)", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q1.o : na, "Micro QR q1.o", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q1.h : na, "Micro QR q1.h", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q1.l : na, "Micro QR q1.l", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q1.c : na, "Micro QR q1.c", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m_q1_o_hhmmss : na, "Micro QR q1.oTs (HHMMSS)", display=display.data_window)
 
-plot(dwMicroStep2 ? m.q2.o : na, "Micro QR q2.o", display=display.data_window)
-plot(dwMicroStep2 ? m.q2.h : na, "Micro QR q2.h", display=display.data_window)
-plot(dwMicroStep2 ? m.q2.l : na, "Micro QR q2.l", display=display.data_window)
-plot(dwMicroStep2 ? m.q2.c : na, "Micro QR q2.c", display=display.data_window)
-plot(dwMicroStep2 ? m_q2_o_hhmmss : na, "Micro QR q2.oTs (HHMMSS)", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q2.o : na, "Micro QR q2.o", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q2.h : na, "Micro QR q2.h", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q2.l : na, "Micro QR q2.l", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q2.c : na, "Micro QR q2.c", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m_q2_o_hhmmss : na, "Micro QR q2.oTs (HHMMSS)", display=display.data_window)
 
-plot(dwMicroStep2 ? m.q3.o : na, "Micro QR q3.o", display=display.data_window)
-plot(dwMicroStep2 ? m.q3.h : na, "Micro QR q3.h", display=display.data_window)
-plot(dwMicroStep2 ? m.q3.l : na, "Micro QR q3.l", display=display.data_window)
-plot(dwMicroStep2 ? m.q3.c : na, "Micro QR q3.c", display=display.data_window)
-plot(dwMicroStep2 ? m_q3_o_hhmmss : na, "Micro QR q3.oTs (HHMMSS)", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q3.o : na, "Micro QR q3.o", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q3.h : na, "Micro QR q3.h", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q3.l : na, "Micro QR q3.l", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q3.c : na, "Micro QR q3.c", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m_q3_o_hhmmss : na, "Micro QR q3.oTs (HHMMSS)", display=display.data_window)
 
-plot(dwMicroStep2 ? m.q4.o : na, "Micro QR q4.o", display=display.data_window)
-plot(dwMicroStep2 ? m.q4.h : na, "Micro QR q4.h", display=display.data_window)
-plot(dwMicroStep2 ? m.q4.l : na, "Micro QR q4.l", display=display.data_window)
-plot(dwMicroStep2 ? m.q4.c : na, "Micro QR q4.c", display=display.data_window)
-plot(dwMicroStep2 ? m_q4_o_hhmmss : na, "Micro QR q4.oTs (HHMMSS)", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q4.o : na, "Micro QR q4.o", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q4.h : na, "Micro QR q4.h", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q4.l : na, "Micro QR q4.l", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m.q4.c : na, "Micro QR q4.c", display=display.data_window)
+plot(showMicroTf and dwMicroStep2 ? m_q4_o_hhmmss : na, "Micro QR q4.oTs (HHMMSS)", display=display.data_window)
 
 float n_q1_o_hhmmss = f_hhmmss(n.q1.oTs, cfg.tz)
 float n_q2_o_hhmmss = f_hhmmss(n.q2.oTs, cfg.tz)
@@ -252,45 +301,212 @@ float n_q2_open_delta = not na(n.q2.oTs) ? (n.q2.oTs - n_q2_target) / 1000.0 : n
 float n_q3_open_delta = not na(n.q3.oTs) ? (n.q3.oTs - n_q3_target) / 1000.0 : na
 float n_q4_open_delta = not na(n.q4.oTs) ? (n.q4.oTs - n_q4_target) / 1000.0 : na
 
-plot(dwNanoStep2 ? n.q1.o : na, "Nano QR q1.o", display=display.data_window)
-plot(dwNanoStep2 ? n.q1.h : na, "Nano QR q1.h", display=display.data_window)
-plot(dwNanoStep2 ? n.q1.l : na, "Nano QR q1.l", display=display.data_window)
-plot(dwNanoStep2 ? n.q1.c : na, "Nano QR q1.c", display=display.data_window)
-plot(dwNanoStep2 ? n_q1_o_hhmmss : na, "Nano QR q1.oTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? nano_target_delta : na, "Nano 5s open delta (sec)", display=display.data_window)
-plot(dwNanoStep2 ? n_qcurts_delta : na, "Nano qCurTs mismatch (sec)", display=display.data_window)
-plot(dwNanoStep2 ? n_q1_target_hhmmss : na, "Nano q1 targetTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? n_q1_open_delta : na, "Nano q1 open delta (sec)", display=display.data_window)
+// -----------------------------------------------------------------------------
+// Aligned TF OHLC (read-only debug)
+// -----------------------------------------------------------------------------
+var table aligned_tbl = na
+if showAlignedOhlc and barstate.islast
+    if na(aligned_tbl)
+        aligned_tbl := table.new(position.top_right, 3, 12, border_width=1, border_color=color.gray)
+    table.cell(aligned_tbl, 0, 0, "Field", text_color=color.black, bgcolor=color.new(color.black, 60))
+    table.cell(aligned_tbl, 1, 0, "Micro 30s", text_color=color.black, bgcolor=color.new(color.black, 60))
+    table.cell(aligned_tbl, 2, 0, "Nano 5s", text_color=color.black, bgcolor=color.new(color.black, 60))
 
-plot(dwNanoStep2 ? n.q2.o : na, "Nano QR q2.o", display=display.data_window)
-plot(dwNanoStep2 ? n.q2.h : na, "Nano QR q2.h", display=display.data_window)
-plot(dwNanoStep2 ? n.q2.l : na, "Nano QR q2.l", display=display.data_window)
-plot(dwNanoStep2 ? n.q2.c : na, "Nano QR q2.c", display=display.data_window)
-plot(dwNanoStep2 ? n_q2_o_hhmmss : na, "Nano QR q2.oTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? n_q2_target_hhmmss : na, "Nano q2 targetTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? n_q2_open_delta : na, "Nano q2 open delta (sec)", display=display.data_window)
+    [m_a_o, m_a_h, m_a_l, m_a_c, m_a_t] = qt.qt_micro_aligned_ohlc_debug()
+    [n_a_o, n_a_h, n_a_l, n_a_c, n_a_t] = qt.qt_nano_aligned_ohlc_debug()
 
-plot(dwNanoStep2 ? n.q3.o : na, "Nano QR q3.o", display=display.data_window)
-plot(dwNanoStep2 ? n.q3.h : na, "Nano QR q3.h", display=display.data_window)
-plot(dwNanoStep2 ? n.q3.l : na, "Nano QR q3.l", display=display.data_window)
-plot(dwNanoStep2 ? n.q3.c : na, "Nano QR q3.c", display=display.data_window)
-plot(dwNanoStep2 ? n_q3_o_hhmmss : na, "Nano QR q3.oTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? n_q3_target_hhmmss : na, "Nano q3 targetTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? n_q3_open_delta : na, "Nano q3 open delta (sec)", display=display.data_window)
+    table.cell(aligned_tbl, 0, 1, "O", text_color=color.black)
+    table.cell(aligned_tbl, 1, 1, f_fmt(m_a_o), text_color=color.black)
+    table.cell(aligned_tbl, 2, 1, f_fmt(n_a_o), text_color=color.black)
 
-plot(dwNanoStep2 ? n.q4.o : na, "Nano QR q4.o", display=display.data_window)
-plot(dwNanoStep2 ? n.q4.h : na, "Nano QR q4.h", display=display.data_window)
-plot(dwNanoStep2 ? n.q4.l : na, "Nano QR q4.l", display=display.data_window)
-plot(dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.data_window)
-plot(dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? n_q4_target_hhmmss : na, "Nano q4 targetTs (HHMMSS)", display=display.data_window)
-plot(dwNanoStep2 ? n_q4_open_delta : na, "Nano q4 open delta (sec)", display=display.data_window)
+    table.cell(aligned_tbl, 0, 2, "H", text_color=color.black)
+    table.cell(aligned_tbl, 1, 2, f_fmt(m_a_h), text_color=color.black)
+    table.cell(aligned_tbl, 2, 2, f_fmt(n_a_h), text_color=color.black)
+
+    table.cell(aligned_tbl, 0, 3, "L", text_color=color.black)
+    table.cell(aligned_tbl, 1, 3, f_fmt(m_a_l), text_color=color.black)
+    table.cell(aligned_tbl, 2, 3, f_fmt(n_a_l), text_color=color.black)
+
+    table.cell(aligned_tbl, 0, 4, "C", text_color=color.black)
+    table.cell(aligned_tbl, 1, 4, f_fmt(m_a_c), text_color=color.black)
+    table.cell(aligned_tbl, 2, 4, f_fmt(n_a_c), text_color=color.black)
+
+    table.cell(aligned_tbl, 0, 5, "T", text_color=color.black)
+    table.cell(aligned_tbl, 1, 5, f_fmt_time(m_a_t, cfg.tz), text_color=color.black)
+    table.cell(aligned_tbl, 2, 5, f_fmt_time(n_a_t, cfg.tz), text_color=color.black)
+    table.cell(aligned_tbl, 0, 6, "Qi", text_color=color.black)
+    table.cell(aligned_tbl, 1, 6, str.tostring(m.curQuarterIndex), text_color=color.black)
+    table.cell(aligned_tbl, 2, 6, str.tostring(n.curQuarterIndex), text_color=color.black)
+    table.cell(aligned_tbl, 0, 7, "QO", text_color=color.black)
+    table.cell(aligned_tbl, 1, 7, f_fmt(m_aq.o), text_color=color.black)
+    table.cell(aligned_tbl, 2, 7, f_fmt(n_aq.o), text_color=color.black)
+    table.cell(aligned_tbl, 0, 8, "QH", text_color=color.black)
+    table.cell(aligned_tbl, 1, 8, f_fmt(m_aq.h), text_color=color.black)
+    table.cell(aligned_tbl, 2, 8, f_fmt(n_aq.h), text_color=color.black)
+    table.cell(aligned_tbl, 0, 9, "QL", text_color=color.black)
+    table.cell(aligned_tbl, 1, 9, f_fmt(m_aq.l), text_color=color.black)
+    table.cell(aligned_tbl, 2, 9, f_fmt(n_aq.l), text_color=color.black)
+    table.cell(aligned_tbl, 0, 10, "QC", text_color=color.black)
+    table.cell(aligned_tbl, 1, 10, f_fmt(m_aq.c), text_color=color.black)
+    table.cell(aligned_tbl, 2, 10, f_fmt(n_aq.c), text_color=color.black)
+    table.cell(aligned_tbl, 0, 11, "QT", text_color=color.black)
+    table.cell(aligned_tbl, 1, 11, f_fmt_time(m_aq.oTs, cfg.tz), text_color=color.black)
+    table.cell(aligned_tbl, 2, 11, f_fmt_time(n_aq.oTs, cfg.tz), text_color=color.black)
+else if not showAlignedOhlc and not na(aligned_tbl)
+    table.delete(aligned_tbl)
+    aligned_tbl := na
+
+plot(showNanoTf and dwNanoStep2 ? n.q1.o : na, "Nano QR q1.o", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q1.h : na, "Nano QR q1.h", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q1.l : na, "Nano QR q1.l", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q1.c : na, "Nano QR q1.c", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n_q1_o_hhmmss : na, "Nano QR q1.oTs (HHMMSS)", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? nano_target_delta : na, "Nano 5s open delta (sec)", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n_qcurts_delta : na, "Nano qCurTs mismatch (sec)", display=display.data_window)
+
+plot(showNanoTf and dwNanoStep2 ? n.q2.o : na, "Nano QR q2.o", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q2.h : na, "Nano QR q2.h", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q2.l : na, "Nano QR q2.l", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q2.c : na, "Nano QR q2.c", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n_q2_o_hhmmss : na, "Nano QR q2.oTs (HHMMSS)", display=display.data_window)
+
+plot(showNanoTf and dwNanoStep2 ? n.q3.o : na, "Nano QR q3.o", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q3.h : na, "Nano QR q3.h", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q3.l : na, "Nano QR q3.l", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q3.c : na, "Nano QR q3.c", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n_q3_o_hhmmss : na, "Nano QR q3.oTs (HHMMSS)", display=display.data_window)
+
+plot(showNanoTf and dwNanoStep2 ? n.q4.o : na, "Nano QR q4.o", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q4.h : na, "Nano QR q4.h", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q4.l : na, "Nano QR q4.l", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.data_window)
+plot(showNanoTf and dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)
 // -----------------------------------------------------------------------------
+// TODO Later: Add option to extend all opening lines an entire cycle length
 var int MAX_LINES = 500
 var int STORE_MAX = 800
+
+// -----------------------------------------------------------------------------
+// 90m cycle storage
+// -----------------------------------------------------------------------------
+var int[] m90Starts = array.new_int()
+var vset  m90V = vset_new()
+
+var line m90ProjQ2  = na
+var line m90ProjQ3  = na
+var line m90ProjQ4  = na
+var line m90ProjEnd = na
+
+var int[]   m90HistStart = array.new_int()
+var int[]   m90HistEnd   = array.new_int()
+
+var float[] m90_h_q1o   = array.new_float()
+var int[]   m90_h_q1oTs = array.new_int()
+var float[] m90_h_q2o   = array.new_float()
+var int[]   m90_h_q2oTs = array.new_int()
+var float[] m90_h_q3o   = array.new_float()
+var int[]   m90_h_q3oTs = array.new_int()
+var float[] m90_h_q4o   = array.new_float()
+var int[]   m90_h_q4oTs = array.new_int()
+
+var line[]  m90_l_q1o   = array.new_line()
+var line[]  m90_l_q2o   = array.new_line()
+var line[]  m90_l_q3o   = array.new_line()
+var line[]  m90_l_q4o   = array.new_line()
+
+f_m90hist_kill_at(int idx) =>
+    line a = array.get(m90_l_q1o, idx)
+    line b = array.get(m90_l_q2o, idx)
+    line c = array.get(m90_l_q3o, idx)
+    line d = array.get(m90_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(d)
+        line.delete(d)
+    array.set(m90_l_q1o, idx, na)
+    array.set(m90_l_q2o, idx, na)
+    array.set(m90_l_q3o, idx, na)
+    array.set(m90_l_q4o, idx, na)
+    0
+
+f_m90hist_shift_front() =>
+    if array.size(m90HistStart) > 0
+        f_m90hist_kill_at(0)
+        array.shift(m90HistStart)
+        array.shift(m90HistEnd)
+
+        array.shift(m90_h_q1o),  array.shift(m90_h_q1oTs)
+        array.shift(m90_h_q2o),  array.shift(m90_h_q2oTs)
+        array.shift(m90_h_q3o),  array.shift(m90_h_q3oTs)
+        array.shift(m90_h_q4o),  array.shift(m90_h_q4oTs)
+
+        array.shift(m90_l_q1o)
+        array.shift(m90_l_q2o)
+        array.shift(m90_l_q3o)
+        array.shift(m90_l_q4o)
+    0
+
+f_m90hist_trim_cutoff(int cutoffTs) =>
+    while array.size(m90HistStart) > 0 and array.get(m90HistStart, 0) < cutoffTs
+        f_m90hist_shift_front()
+    0
+
+f_m90hist_ensure_current() =>
+    if m90.inWindow and not na(m90.q1Ts)
+        int key = m90.q1Ts
+        int idx = f_find_int(m90HistStart, key)
+        if idx == -1
+            array.push(m90HistStart, key)
+            array.push(m90HistEnd, m90.endTs)
+
+            array.push(m90_h_q1o, na), array.push(m90_h_q1oTs, na)
+            array.push(m90_h_q2o, na), array.push(m90_h_q2oTs, na)
+            array.push(m90_h_q3o, na), array.push(m90_h_q3oTs, na)
+            array.push(m90_h_q4o, na), array.push(m90_h_q4oTs, na)
+
+            line naL = na
+            array.push(m90_l_q1o, naL)
+            array.push(m90_l_q2o, naL)
+            array.push(m90_l_q3o, naL)
+            array.push(m90_l_q4o, naL)
+            idx := array.size(m90HistStart) - 1
+
+        array.set(m90HistEnd, idx, m90.endTs)
+
+        float q1o = m90.q1.o
+        int   q1t = m90.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(m90_h_q1o, idx, q1o)
+            array.set(m90_h_q1oTs, idx, q1t)
+
+        float q2o = m90.q2.o
+        int   q2t = m90.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(m90_h_q2o, idx, q2o)
+            array.set(m90_h_q2oTs, idx, q2t)
+
+        float q3o = m90.q3.o
+        int   q3t = m90.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(m90_h_q3o, idx, q3o)
+            array.set(m90_h_q3oTs, idx, q3t)
+
+        float q4o = m90.q4.o
+        int   q4t = m90.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(m90_h_q4o, idx, q4o)
+            array.set(m90_h_q4oTs, idx, q4t)
+
+        while array.size(m90HistStart) > STORE_MAX
+            f_m90hist_shift_front()
+    0
 
 // -----------------------------------------------------------------------------
 // Micro cycle storage
@@ -541,7 +757,7 @@ f_hist_ensure_current() =>
 // -----------------------------------------------------------------------------
 // Main draw logic
 // -----------------------------------------------------------------------------
-int enabledCycles = (showMicro ? 1 : 0) + (showNano ? 1 : 0)
+int enabledCycles = (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
 if enabledCycles < 1
     enabledCycles := 1
 int perCycle = showOpens ? 9 : 5
@@ -549,7 +765,7 @@ int maxC = int(math.floor((MAX_LINES - 10) / (perCycle * (enabledCycles * 1.0)))
 maxC := f_clamp_int(maxC, 1, 200)
 int keepEff = f_clamp_int(keepCycles, 1, maxC)
 
-if not showMicro
+if not showMicroTf
     vset_clear(microV)
     microProjQ2  := f_kill(microProjQ2)
     microProjQ3  := f_kill(microProjQ3)
@@ -654,7 +870,112 @@ else
 
             mk += 1
 
-if not showNano
+if not show90mTf
+    vset_clear(m90V)
+    m90ProjQ2  := f_kill(m90ProjQ2)
+    m90ProjQ3  := f_kill(m90ProjQ3)
+    m90ProjQ4  := f_kill(m90ProjQ4)
+    m90ProjEnd := f_kill(m90ProjEnd)
+
+    int m90i = array.size(m90HistStart) - 1
+    while m90i >= 0
+        f_m90hist_kill_at(m90i)
+        m90i -= 1
+    array.clear(m90HistStart), array.clear(m90HistEnd)
+    array.clear(m90_h_q1o), array.clear(m90_h_q1oTs)
+    array.clear(m90_h_q2o), array.clear(m90_h_q2oTs)
+    array.clear(m90_h_q3o), array.clear(m90_h_q3oTs)
+    array.clear(m90_h_q4o), array.clear(m90_h_q4oTs)
+    array.clear(m90_l_q1o), array.clear(m90_l_q2o), array.clear(m90_l_q3o), array.clear(m90_l_q4o)
+    array.clear(m90Starts)
+else
+    if not na(m90.q2Ts)
+        m90ProjQ2 := tc > m90.q2Ts ? f_kill(m90ProjQ2) : f_set_or_make_vline(m90ProjQ2, m90.q2Ts, COL_Q2)
+    if not na(m90.q3Ts)
+        m90ProjQ3 := tc > m90.q3Ts ? f_kill(m90ProjQ3) : f_set_or_make_vline(m90ProjQ3, m90.q3Ts, COL_Q3)
+    if not na(m90.q4Ts)
+        m90ProjQ4 := tc > m90.q4Ts ? f_kill(m90ProjQ4) : f_set_or_make_vline(m90ProjQ4, m90.q4Ts, COL_Q4)
+
+    if not na(m90.endTs)
+        m90ProjEnd := f_set_or_make_vline(m90ProjEnd, m90.endTs, COL_Q1)
+
+    if m90.inWindow and not na(m90.q1Ts)
+        f_push_unique_int(m90Starts, m90.q1Ts, STORE_MAX)
+
+    int m90Cutoff = na(m90.q1Ts) ? 0 : m90.q1Ts
+    int m90Avail = array.size(m90Starts)
+    int m90Use   = math.min(keepEff, m90Avail)
+    int m90First = m90Avail - m90Use
+    if m90Use > 0
+        m90Cutoff := array.get(m90Starts, m90First)
+
+    vset_trim_since(m90V, m90Cutoff)
+
+    f_m90hist_ensure_current()
+    f_m90hist_trim_cutoff(m90Cutoff)
+
+    if m90.inWindow
+        if not na(m90.q1Ts) and tc > m90.q1Ts
+            vset_add(m90V, m90.q1Ts, COL_Q1)
+        if not na(m90.q2Ts) and tc > m90.q2Ts
+            vset_add(m90V, m90.q2Ts, COL_Q2)
+        if not na(m90.q3Ts) and tc > m90.q3Ts
+            vset_add(m90V, m90.q3Ts, COL_Q3)
+        if not na(m90.q4Ts) and tc > m90.q4Ts
+            vset_add(m90V, m90.q4Ts, COL_Q4)
+        if not na(m90.endTs) and tc > m90.endTs
+            vset_add(m90V, m90.endTs, COL_Q1)
+
+    if not showOpens
+        int m90j = array.size(m90HistStart) - 1
+        while m90j >= 0
+            f_m90hist_kill_at(m90j)
+            m90j -= 1
+    else
+        int m90sz = array.size(m90HistStart)
+        int m90k = 0
+        while m90k < m90sz
+            int m90EndTs = array.get(m90HistEnd, m90k)
+
+            float m90y1 = array.get(m90_h_q1o, m90k)
+            int   m90x1 = array.get(m90_h_q1oTs, m90k)
+            line  m90l1 = array.get(m90_l_q1o, m90k)
+            if not na(m90y1) and not na(m90x1) and not na(m90EndTs)
+                m90l1 := f_set_or_make_hline(m90l1, m90x1, m90EndTs, m90y1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                m90l1 := f_kill(m90l1)
+            array.set(m90_l_q1o, m90k, m90l1)
+
+            float m90y2 = array.get(m90_h_q2o, m90k)
+            int   m90x2 = array.get(m90_h_q2oTs, m90k)
+            line  m90l2 = array.get(m90_l_q2o, m90k)
+            if not na(m90y2) and not na(m90x2) and not na(m90EndTs)
+                m90l2 := f_set_or_make_hline(m90l2, m90x2, m90EndTs, m90y2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                m90l2 := f_kill(m90l2)
+            array.set(m90_l_q2o, m90k, m90l2)
+
+            float m90y3 = array.get(m90_h_q3o, m90k)
+            int   m90x3 = array.get(m90_h_q3oTs, m90k)
+            line  m90l3 = array.get(m90_l_q3o, m90k)
+            if not na(m90y3) and not na(m90x3) and not na(m90EndTs)
+                m90l3 := f_set_or_make_hline(m90l3, m90x3, m90EndTs, m90y3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                m90l3 := f_kill(m90l3)
+            array.set(m90_l_q3o, m90k, m90l3)
+
+            float m90y4 = array.get(m90_h_q4o, m90k)
+            int   m90x4 = array.get(m90_h_q4oTs, m90k)
+            line  m90l4 = array.get(m90_l_q4o, m90k)
+            if not na(m90y4) and not na(m90x4) and not na(m90EndTs)
+                m90l4 := f_set_or_make_hline(m90l4, m90x4, m90EndTs, m90y4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                m90l4 := f_kill(m90l4)
+            array.set(m90_l_q4o, m90k, m90l4)
+
+            m90k += 1
+
+if not showNanoTf
     // Clear everything
     vset_clear(nanoV)
     projQ2  := f_kill(projQ2)
