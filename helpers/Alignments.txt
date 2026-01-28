@@ -45,3 +45,11 @@ Monthly = H4 - H6
 Quarterly = H12 - D
 Yearly = W - 3W
 Quadrennial = M - 3M
+
+Default Colors (QTIndicator/QTEngineTest)
+Vertical divider opacity = 70 (30% opacity)
+Q1 (Cycle start / week start / end): #636363 @ 70
+Q2: #F23645 @ 70
+Q3: #4CAF50 @ 70
+Q4: #2962FF @ 70
+Q5 (Weekly Q5): #0C3299 @ 70

@@ -11,7 +11,7 @@ library("QTEngine", overlay=false)
 // - Step 2 (implemented): quarter OHLC aggregated on chart TF into QuarterRecords
 // - Step 3 (implemented): Micro/Nano H/L/C sourced from aligned TF quarters
 // - Step 3b (implemented): 90m O/C sourced from aligned TF quarters
-// - Weekly cycle intentionally excluded for now
+// - Weekly cycle implemented (intent/eff boundaries, Q1–Q5)
 //
 // NOTE: Chart-TF aggregation still drives Daily. Micro/Nano now use aligned-TF
 //       quarters for H/L/C, and 90m uses aligned-TF O/C, while Micro/Nano opens
@@ -96,6 +96,36 @@ export type CycleResult
     QuarterRecord q3
     QuarterRecord q4
 
+export type WeeklyQuarter
+    int   startIntent
+    int   startEff
+    int   endEff
+    float open
+    bool  hasData
+    bool  openDelayed
+
+export type WeeklyResult
+    int   wsIntent
+    int   wsEff
+    int   wsNextIntent
+    int   wsNextEff
+    WeeklyQuarter q1
+    WeeklyQuarter q2
+    WeeklyQuarter q3
+    WeeklyQuarter q4
+    WeeklyQuarter q5
+
+export type WeeklyState
+    int   wsIntent
+    int   wsEff
+    int   wsNextIntent
+    int   wsNextEff
+    WeeklyQuarter q1
+    WeeklyQuarter q2
+    WeeklyQuarter q3
+    WeeklyQuarter q4
+    WeeklyQuarter q5
+
 export type FixedCycleState
     // Printed-cycle retention (cycle starts)
     int[] starts
@@ -136,6 +166,7 @@ export type CycleState
     FixedCycleState m90
     FixedCycleState micro
     FixedCycleState nano
+    WeeklyState     weekly
 
 // ============================================================================
 // CONSTRUCTORS
@@ -176,7 +207,9 @@ export qt_state_new() =>
     FixedCycleState m = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
     FixedCycleState u = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
     FixedCycleState n = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
-    CycleState st = CycleState.new(d, m, u, n)
+    WeeklyQuarter nilW = WeeklyQuarter.new(int(na), int(na), int(na), float(na), false, false)
+    WeeklyState w = WeeklyState.new(int(na), int(na), int(na), int(na), nilW, nilW, nilW, nilW, nilW)
+    CycleState st = CycleState.new(d, m, u, n, w)
     st
 
 
@@ -221,6 +254,31 @@ f_make_empty_q(int qStart) =>
         false, true, false,
         false, false
     )
+
+f_weekly_q_new(int startIntent) =>
+    WeeklyQuarter.new(startIntent, int(na), int(na), float(na), false, false)
+
+f_week_start_intent(int tRef, QTConfig cfg) =>
+    int ds = f_qt_day_start(tRef, cfg)
+    int dsDow = dayofweek(ds, cfg.tz)
+    int offsetDays = dsDow - int(dayofweek.sunday)
+    ds - offsetDays * LEN_24H
+
+f_eff_from_intent(int intent, int effIn, int t, int tPrev) =>
+    int effOut = effIn
+    if na(effOut) and t >= intent and (na(tPrev) or tPrev < intent)
+        effOut := t
+    effOut
+
+f_weekly_apply_bar(WeeklyQuarter qIn, int t, float o) =>
+    WeeklyQuarter q = qIn
+    bool isStartBar = not na(q.startEff) and t == q.startEff
+    if not na(q.startEff)
+        q.openDelayed := q.startEff > q.startIntent
+    if isStartBar and not q.hasData
+        q.open := o
+        q.hasData := true
+    q
 
 // ============================================================================
 // NANO OPEN SOURCE (FORCED 5S) — First printed 5s bar on/after boundary
@@ -991,6 +1049,78 @@ f_fixed_cycle_update(
 
     [stOut, res]
 
+f_weekly_update(
+    WeeklyState stIn,
+    QTConfig cfg,
+    int t,
+    int tClose
+) =>
+    int tRef = tClose - 1
+    int wsIntent = f_week_start_intent(tRef, cfg)
+    int wsNextIntent = wsIntent + 7 * LEN_24H
+
+    int q1Intent = wsIntent
+    int q2Intent = wsIntent + 1 * LEN_24H
+    int q3Intent = wsIntent + 2 * LEN_24H
+    int q4Intent = wsIntent + 3 * LEN_24H
+    int q5Intent = wsIntent + 4 * LEN_24H
+
+    bool weekChanged = na(stIn.wsIntent) or wsIntent != stIn.wsIntent
+
+    WeeklyQuarter q1 = stIn.q1
+    WeeklyQuarter q2 = stIn.q2
+    WeeklyQuarter q3 = stIn.q3
+    WeeklyQuarter q4 = stIn.q4
+    WeeklyQuarter q5 = stIn.q5
+    int wsEff = stIn.wsEff
+    int wsNextEff = stIn.wsNextEff
+
+    if weekChanged
+        q1 := f_weekly_q_new(q1Intent)
+        q2 := f_weekly_q_new(q2Intent)
+        q3 := f_weekly_q_new(q3Intent)
+        q4 := f_weekly_q_new(q4Intent)
+        q5 := f_weekly_q_new(q5Intent)
+        wsEff := int(na)
+        wsNextEff := int(na)
+    else
+        if q1.startIntent != q1Intent
+            q1 := f_weekly_q_new(q1Intent)
+        if q2.startIntent != q2Intent
+            q2 := f_weekly_q_new(q2Intent)
+        if q3.startIntent != q3Intent
+            q3 := f_weekly_q_new(q3Intent)
+        if q4.startIntent != q4Intent
+            q4 := f_weekly_q_new(q4Intent)
+        if q5.startIntent != q5Intent
+            q5 := f_weekly_q_new(q5Intent)
+
+    int tPrev = time[1]
+    wsEff := f_eff_from_intent(wsIntent, wsEff, t, tPrev)
+    wsNextEff := f_eff_from_intent(wsNextIntent, wsNextEff, t, tPrev)
+
+    q1.startEff := f_eff_from_intent(q1Intent, q1.startEff, t, tPrev)
+    q2.startEff := f_eff_from_intent(q2Intent, q2.startEff, t, tPrev)
+    q3.startEff := f_eff_from_intent(q3Intent, q3.startEff, t, tPrev)
+    q4.startEff := f_eff_from_intent(q4Intent, q4.startEff, t, tPrev)
+    q5.startEff := f_eff_from_intent(q5Intent, q5.startEff, t, tPrev)
+
+    q1.endEff := q2.startEff
+    q2.endEff := q3.startEff
+    q3.endEff := q4.startEff
+    q4.endEff := q5.startEff
+    q5.endEff := wsNextEff
+
+    q1 := f_weekly_apply_bar(q1, t, open)
+    q2 := f_weekly_apply_bar(q2, t, open)
+    q3 := f_weekly_apply_bar(q3, t, open)
+    q4 := f_weekly_apply_bar(q4, t, open)
+    q5 := f_weekly_apply_bar(q5, t, open)
+
+    WeeklyState stOut = WeeklyState.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5)
+    WeeklyResult res = WeeklyResult.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5)
+    [stOut, res]
+
 
 // ============================================================================
 // EXPORTED API — Fixed cycles only (no Weekly)
@@ -998,22 +1128,27 @@ f_fixed_cycle_update(
 
 export qt_daily_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [d2, r] = f_fixed_cycle_update(st.daily, cfg, t, tClose, LEN_24H)
-    CycleState out = CycleState.new(d2, st.m90, st.micro, st.nano)
+    CycleState out = CycleState.new(d2, st.m90, st.micro, st.nano, st.weekly)
     [out, r]
 
 export qt_m90_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [m2, r] = f_fixed_cycle_update(st.m90, cfg, t, tClose, LEN_6H)
-    CycleState out = CycleState.new(st.daily, m2, st.micro, st.nano)
+    CycleState out = CycleState.new(st.daily, m2, st.micro, st.nano, st.weekly)
     [out, r]
 
 export qt_micro_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [u2, r] = f_fixed_cycle_update(st.micro, cfg, t, tClose, LEN_90M)
-    CycleState out = CycleState.new(st.daily, st.m90, u2, st.nano)
+    CycleState out = CycleState.new(st.daily, st.m90, u2, st.nano, st.weekly)
     [out, r]
 
 export qt_nano_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [n2, r] = f_fixed_cycle_update(st.nano, cfg, t, tClose, LEN_22M30S)
-    CycleState out = CycleState.new(st.daily, st.m90, st.micro, n2)
+    CycleState out = CycleState.new(st.daily, st.m90, st.micro, n2, st.weekly)
+    [out, r]
+
+export qt_weekly_update(CycleState st, QTConfig cfg, int t, int tClose) =>
+    [w2, r] = f_weekly_update(st.weekly, cfg, t, tClose)
+    CycleState out = CycleState.new(st.daily, st.m90, st.micro, st.nano, w2)
     [out, r]
 
 // ============================================================================
@@ -1037,3 +1172,6 @@ export qt_micro_aligned_qr_debug(CycleState st) =>
 
 export qt_nano_aligned_qr_debug(CycleState st) =>
     [st.nano.aq1, st.nano.aq2, st.nano.aq3, st.nano.aq4]
+
+export qt_weekly_debug(CycleState st) =>
+    st.weekly

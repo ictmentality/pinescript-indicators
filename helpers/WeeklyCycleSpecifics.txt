@@ -1,0 +1,229 @@
+WeeklyCycleSpecifics
+
+
+## QTEngine Weekly Cycle Rules
+
+### Scope
+
+* **Instrument/session model:** CME equity index futures (ES1!) using the **Globex “daily open” at 18:00 New York time**.
+* Goal: reproduce the week segmentation you showed: daily boundaries at **18:00**, with the last segment running **Thu 18:00 → Sun 18:00**.
+
+---
+
+## 1) Definitions
+
+### Timezone
+
+* All weekly-cycle timestamps are computed in **America/New_York**.
+
+### Two timestamps per boundary
+
+For each boundary you care about, track:
+
+* **Intent boundary (`ts_intent`)**: the scheduled boundary time (e.g., “18:00”)
+* **Effective boundary (`ts_eff`)**: the **first printed bar-open time on/after `ts_intent`**
+
+This is what makes “holiday/no-bars” weeks behave exactly like your screenshot.
+
+---
+
+## 2) Week start and quarter numbering (W.Q1–W.Q5)
+
+### Week Start (W.S)
+
+* **`W.S_intent` = Sunday 18:00 ET** (the normal Globex week open).
+* **`W.S_eff` = first printed bar with `bar_open_time >= W.S_intent`**.
+
+If Sunday’s 18:00 session **doesn’t print** (holiday schedule), `W.S_eff` will shift forward (e.g., to **Monday 18:00**). This is the key rule that matches your “bank-holiday Monday” behavior.
+
+### Quarters
+
+Quarters are **sequential sessions**, not “calendar weekdays”:
+
+* **W.Q1 starts at `W.S_eff`**
+* **W.Q2 starts at the next 18:00 boundary after W.Q1**
+* **W.Q3 starts at the next 18:00 boundary after W.Q2**
+* **W.Q4 starts at the next 18:00 boundary after W.Q3**
+* **W.Q5 starts at the next 18:00 boundary after W.Q4**
+* **Next Week Start (W.S_next)** = next Sunday 18:00 (intent) → shifted to first printed bar on/after (effective)
+
+**Windowing**
+
+* For x = 1..4: `W.Qx = [Qx_start_eff, Q(x+1)_start_eff)`
+* **W.Q5 = [Q5_start_eff, W.S_next_eff)`**
+  → This naturally produces the “Thu 18:00 → Sun 18:00” segment (Friday session + weekend closure).
+
+---
+
+## 3) Quarter Open price (what to store/draw)
+
+For each W.Qx:
+
+* `Qx_open` = **open of the first printed bar whose bar-open time is within that quarter window**
+* Flags:
+
+  * `hasData` (true if any bar exists in the window)
+  * `openDelayed` (true if `Qx_start_eff > Qx_start_intent`)
+
+**Do not backfill an open** if the window had no bars. Keep it `na`.
+
+---
+
+## 4) Edge-case examples (explicit)
+
+### A) Monday is a bank holiday (your screenshot case)
+
+* Normal intent week open would be **Sun 18:00**, but if **no bar prints** at/after that until **Mon 18:00**:
+
+  * `W.S_eff = Mon 2024-01-01 18:00`
+  * **W.Q1 = Mon 18:00 → Tue 18:00**
+  * **W.Q2 = Tue 18:00 → Wed 18:00 (True Week Open)**
+  * **W.Q3 = Wed 18:00 → Thu 18:00**
+  * **W.Q4 = Thu 18:00 → (next 18:00 boundary)**
+  * **W.Q5 = Thu 18:00 → Sun 2024-01-07 18:00** (matches your chart segmentation)
+
+### B) Missing midweek session open (rare, but handle)
+
+If a scheduled 18:00 boundary has **no printed bar** (holiday closure):
+
+* That quarter’s `start_eff` shifts forward to the first bar after the closure.
+* The quarter window becomes **longer**, and `openDelayed=true`.
+* **Quarter numbering does not change** (still Q1..Q5 sequential within the week).
+
+### C) Early close Friday
+
+* W.Q5 still begins at **Thu 18:00**.
+* If Friday closes early, bars stop printing; the remainder until Sunday is just **no-data time inside W.Q5**.
+* `hasData` stays true if at least one bar printed after Thu 18:00.
+
+---
+
+## 5) Minimal outputs QTEngine should expose for Weekly
+
+For each week:
+
+* `W.S_intent`, `W.S_eff`, `W.S_next_intent`, `W.S_next_eff`
+* For each quarter x=1..5:
+
+  * `Qx_start_intent`, `Qx_start_eff`, `Qx_end_eff`
+  * `Qx_open`, `hasData`, `openDelayed`
+
+That’s the smallest rule-set that reproduces your screenshot behavior and remains stable under holidays, weekend gaps, and early closes.
+
+[1]: https://chatgpt.com/c/6979ab0a-5578-8330-88d9-0321e7097135 "Trim Weekly Cycle Explanation"
+[2]: https://chatgpt.com/c/696e88ff-68b0-832a-8b08-3dda617d42dd "Quarterly Theory Indicator Fix"
+[3]: https://chatgpt.com/c/69740364-0b58-8326-8164-2c9e6e7ae448 "QT Monthly Cycle Spec (Save)"
+
+---
+
+## QTEngine Integration (concise implementation guide)
+
+Add a Weekly module to `QTEngine.txt` that mirrors the fixed-cycle update flow but uses **daily 18:00 boundaries + effective-first-printed bar rules**:
+
+1) **Types / State**
+   - Add a `WeeklyQuarter` or reuse `QuarterRecord` with extra fields for:
+     - `start_intent`, `start_eff`, `end_eff`
+     - `open`, `hasData`, `openDelayed`
+   - Add a `WeeklyState` to hold:
+     - `ws_intent`, `ws_eff`, `ws_next_intent`, `ws_next_eff`
+     - `q1..q5` records + last boundary tracking
+   - Add weekly state to `CycleState` or as a parallel exported state.
+
+2) **Intent timestamps**
+   - All in `America/New_York`.
+   - `ws_intent` = **Sunday 18:00** for the current week.
+   - `ws_next_intent` = next Sunday 18:00.
+   - `q2..q5_intent` = successive 18:00 daily boundaries after `ws_intent`.
+
+3) **Effective timestamps**
+   - For any intent boundary `ts_intent`, compute `ts_eff` as the **first printed bar-open time on/after** `ts_intent`.
+   - Use a `request.security()` sub-TF expression (like the Nano/Micro open capture) or a chart-TF gap-safe “first-on/after” detector.
+
+4) **Quarter windows**
+   - `Q1 = [q1_eff, q2_eff)`, `Q2 = [q2_eff, q3_eff)`, `Q3 = [q3_eff, q4_eff)`, `Q4 = [q4_eff, q5_eff)`,
+   - `Q5 = [q5_eff, ws_next_eff)`.
+
+5) **Open + flags**
+   - `Qx_open` = open of the **first printed bar within the quarter window**.
+   - `hasData` = true once any bar prints in that window.
+   - `openDelayed` = true if `start_eff > start_intent`.
+   - Do not backfill if no bars printed (keep `open` as `na`).
+
+6) **Exports**
+   - Export `qt_weekly_update()` returning a `WeeklyResult` with all fields above.
+   - Optional debug exports for `ws`/`q1..q5` timestamps and open flags.
+
+
+----------------------------------------------------------------------------------------
+
+([Past chat][1])([Past chat][2])([Past chat][1])([Past chat][3])([Past chat][2])
+
+## Quarterly Theory Weekly Cycle (W.Q1–W.Q5)
+
+### 1) Week structure
+
+Treat the trading week as **five “quarters”**:
+
+* **W.Q1 = Monday**
+* **W.Q2 = Tuesday** → **True Week Open**
+* **W.Q3 = Wednesday**
+* **W.Q4 = Thursday**
+* **W.Q5 = Friday** (included, but **different function** than W.Q1–W.Q4)
+
+### 2) Quarter windows and boundaries
+
+Each quarter is a **time window**:
+
+* `W.Qx = [qTs, next_qTs)` where `next_qTs` is the start of the next weekday quarter (e.g., Monday → Tuesday).
+* Boundaries are **timestamp-based** in **America/New_York** (or the symbol’s exchange TZ if you standardize on that).
+* “Active quarter” flips when `time_close > qTs` (state-trigger / early mode).
+
+**Important:** The “open” must be sourced **within the quarter window**, not “first bar after qTs” with no limits.
+
+### 3) Quarter open price (definition)
+
+For each quarter:
+
+* `qOpen` = **open of the first printed bar whose bar-open time is within** `[qTs, next_qTs)`.
+* If no bar prints inside the window → `qOpen = na` and `hasData = false`.
+* If the first bar prints late (gap/holiday reopen) but still inside the window → set `openDelayed = true`.
+
+---
+
+## Edge cases (with examples)
+
+### A) Monday is a bank holiday (no trading Monday)
+
+* `W.Q1` window still exists (Mon start → Tue start), but **no bars print**.
+* Result:
+
+  * `W.Q1.hasData = false`, `W.Q1.open = na`
+  * `W.Q2` begins normally at Tuesday start and becomes the **first actionable quarter** of the week.
+* **Do not relabel Tuesday as W.Q1.** Keep weekday labels fixed.
+
+### B) Partial holiday / late reopen (trading resumes mid-day)
+
+Example: market closed at Monday start, reopens Monday 1:00pm.
+
+* `W.Q1.open` = the first bar open **at/after reopen** (since it’s still within the Monday window)
+* `openDelayed = true`
+
+### C) Early close (common on Fridays)
+
+* `W.Q5` window is Friday start → next week’s Monday start.
+* If the market closes early, bars stop printing; `W.Q5` still exists but is **short-data**.
+* Same rule: if at least one bar prints inside the window, `W.Q5.open` is valid.
+
+### D) Weekend / session gaps
+
+* Gaps don’t shift `qTs`. They only affect whether `openDelayed` is set and whether `hasData` becomes false.
+
+### E) DST week
+
+* Compute `qTs` in a single consistent timezone (NY or exchange TZ). **Never hardcode UTC offsets.**
+
+If you tell me the instrument class you care about most (NYSE stocks vs CME futures), I’ll pin the exact “day start” time convention you should standardize on for `qTs` (e.g., 09:30 vs 18:00 ET).
+
+[1]: https://chatgpt.com/c/696e88ff-68b0-832a-8b08-3dda617d42dd "Quarterly Theory Indicator Fix"
+[2]: https://chatgpt.com/c/6971923b-43fc-832f-ada7-624d5c41b889 "QT Library Rules"
+[3]: https://chatgpt.com/c/69740364-0b58-8326-8164-2c9e6e7ae448 "QT Monthly Cycle Spec (Save)"

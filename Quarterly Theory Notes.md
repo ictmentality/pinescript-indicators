@@ -1,5 +1,7 @@
 Quarterly Theory Notes
 
+**DAYE VIDEO NOTES**
+
 DAYE — SUNDAY NOTES CHEAT SHEET (FOMC WEEK / CALENDAR + SEQUENTIAL SMT)
 ======================================================================
 

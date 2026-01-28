@@ -1,7 +1,7 @@
 //@version=6
 indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/14 as qt
+import Jaw1312/QTEngine/15 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -11,6 +11,7 @@ showDaily = input.bool(true, "Daily (24h cycle; q=6h)", group=groupCycles)
 show90m  = input.bool(true, "90m (6h cycle; q=90m)", group=groupCycles)
 showMicro = input.bool(true, "Micro (90m cycle; q=22m30s)", group=groupCycles)
 showNano  = input.bool(true, "Nano (22m30s cycle; q=5m37.5s)", group=groupCycles)
+showWeekly = input.bool(true, "Weekly (Sun 18:00; q=1d x5)", group=groupCycles)
 
 groupAll = "CYCLE SETTINGS"
 showOpens = input.bool(true, "Show Opens", group=groupAll)
@@ -32,15 +33,15 @@ dwMicroStep1 = input.bool(true, "Step 1 — Micro boundaryTs checks", group=grou
 dwMicroStep2 = input.bool(true, "Step 2 — Micro QuarterRecord (q1–q4) — minimal", group=groupDW)
 dwNanoStep1  = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
 dwNanoStep2  = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
+dwWeekly     = input.bool(false, "Weekly — intent/eff + q1–q5 (minimal)", group=groupDW)
 
 groupDbg = "ALIGNED TF DEBUG"
 showAlignedOhlc = input.bool(false, "Show aligned TF OHLC table", group=groupDbg)
 
-groupSSMT = "SSMT TEST (Daily Bearish)"
+groupSSMT = "SSMT TEST (Daily Bearish ES/NQ)"
 showDailyBearSSMT = input.bool(false, "Show Bearish Daily SSMT (Triad)", group=groupSSMT)
 ssmtSymES = input.symbol("MESH2026", "ES / MES", group=groupSSMT)
 ssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ", group=groupSSMT)
-ssmtSymYM = input.symbol("MYMH2026", "YM / MYM", group=groupSSMT)
 ssmtLineCol = input.color(color.new(color.red, 0), "SSMT Line Color", group=groupSSMT)
 ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
 ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
@@ -53,6 +54,7 @@ var color COL_Q1 = color.rgb(99, 99, 99)      // #636363
 var color COL_Q2 = color.rgb(242, 54, 69)     // #f23645
 var color COL_Q3 = color.rgb(76, 175, 80)     // #4caf50
 var color COL_Q4 = color.rgb(41, 98, 255)     // #2962ff
+var color COL_Q5 = color.rgb(12, 50, 153)     // #0c3299 (weekly Q5)
 
 var int V_TRANSP = 70
 f_vcol(color c) =>
@@ -73,6 +75,9 @@ f_fmt(float v) =>
 f_fmt_time(int ts, string tz) =>
     na(ts) ? "-" : str.tostring(f_hhmmss(ts, tz))
 
+f_fmt_ts(int ts, string tz) =>
+    na(ts) ? "-" : str.format_time(ts, "yyyy-MM-dd HH:mm", tz)
+
 f_ceil_5s(int ts) =>
     int step = 5 * 1000
     int rem = ts % step
@@ -90,10 +95,12 @@ bool visNanoTf = not na(tfSec) and tfSec >= 5 and tfSec <= 15
 bool visMicroTf = not na(tfSec) and tfSec >= 30 and tfSec <= 240
 bool vis90mTf = not na(tfSec) and tfSec >= 300 and tfSec <= 840
 bool visDailyTf = not na(tfSec) and tfSec >= 900 and tfSec <= 1800
+bool visWeeklyTf = timeframe.isminutes and timeframe.multiplier >= 60 and timeframe.multiplier <= 180
 bool showNanoTf = showNano and visNanoTf
 bool showMicroTf = showMicro and visMicroTf
 bool show90mTf = show90m and vis90mTf
 bool showDailyTf = showDaily and visDailyTf
+bool showWeeklyTf = showWeekly and visWeeklyTf
 
 // QTIndicator mapping (string → TradingView style)
 lineStyleFrom(string s) =>
@@ -115,6 +122,9 @@ f_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3
         out := q4
     out
 
+f_qr_ready(qt.QuarterRecord q) =>
+    q.has and not q.isEmpty and not na(q.h) and not na(q.hTs) and not na(q.boundaryTs) and q.hTs >= q.boundaryTs
+
 f_ssmt_daily_highs() =>
     var qt.QTConfig cfg = qt.qt_config_default()
     var qt.CycleState st = qt.qt_state_new()
@@ -124,10 +134,11 @@ f_ssmt_daily_highs() =>
     st := st0
 
     qt.QuarterRecord qcur = f_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
-    float hcur = qcur.h
-    int   hcurTs = qcur.hTs
-    float hprev = st.daily.prev1.h
-    int   hprevTs = st.daily.prev1.hTs
+    qt.QuarterRecord qprev = d.curQuarterIndex == 1 ? st.daily.prev1 : d.curQuarterIndex == 2 ? d.q1 : d.curQuarterIndex == 3 ? d.q2 : d.q3
+    float hcur = f_qr_ready(qcur) ? qcur.h : na
+    int   hcurTs = f_qr_ready(qcur) ? qcur.hTs : na
+    float hprev = f_qr_ready(qprev) ? qprev.h : na
+    int   hprevTs = f_qr_ready(qprev) ? qprev.hTs : na
 
     int qcurTs = d.q1Ts
     if d.curQuarterIndex == 2
@@ -354,7 +365,8 @@ int tc = time_close
 [st1, m90] = qt.qt_m90_update(st0, cfg, t, tc)
 [st2, m] = qt.qt_micro_update(st1, cfg, t, tc)
 [st3, n] = qt.qt_nano_update(st2, cfg, t, tc)
-st := st3
+[st4, w] = qt.qt_weekly_update(st3, cfg, t, tc)
+st := st4
 
 [m_aq1, m_aq2, m_aq3, m_aq4] = qt.qt_micro_aligned_qr_debug(st)
 [n_aq1, n_aq2, n_aq3, n_aq4] = qt.qt_nano_aligned_qr_debug(st)
@@ -544,43 +556,102 @@ plot(showNanoTf and dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.d
 plot(showNanoTf and dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
 
 // -----------------------------------------------------------------------------
-// Bearish Daily SSMT (Triad) — test-only
+// Weekly debug table (avoids plot limit)
+// -----------------------------------------------------------------------------
+var table weekly_tbl = na
+if dwWeekly and barstate.islast
+    if na(weekly_tbl)
+        weekly_tbl := table.new(position.top_right, 6, 13, border_width=1, border_color=color.gray)
+    table.cell(weekly_tbl, 0, 0, "Field", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(weekly_tbl, 1, 0, "Q1", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(weekly_tbl, 2, 0, "Q2", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(weekly_tbl, 3, 0, "Q3", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(weekly_tbl, 4, 0, "Q4", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(weekly_tbl, 5, 0, "Q5", text_color=color.black, bgcolor=color.new(color.black, 85))
+
+    table.cell(weekly_tbl, 0, 1, "wsIntent", text_color=color.black)
+    table.cell(weekly_tbl, 1, 1, f_fmt_ts(w.wsIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 0, 2, "wsEff", text_color=color.black)
+    table.cell(weekly_tbl, 1, 2, f_fmt_ts(w.wsEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 0, 3, "wsNextIntent", text_color=color.black)
+    table.cell(weekly_tbl, 1, 3, f_fmt_ts(w.wsNextIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 0, 4, "wsNextEff", text_color=color.black)
+    table.cell(weekly_tbl, 1, 4, f_fmt_ts(w.wsNextEff, cfg.tz), text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 5, "startIntent", text_color=color.black)
+    table.cell(weekly_tbl, 1, 5, f_fmt_ts(w.q1.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 2, 5, f_fmt_ts(w.q2.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 3, 5, f_fmt_ts(w.q3.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 4, 5, f_fmt_ts(w.q4.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 5, 5, f_fmt_ts(w.q5.startIntent, cfg.tz), text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 6, "startEff", text_color=color.black)
+    table.cell(weekly_tbl, 1, 6, f_fmt_ts(w.q1.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 2, 6, f_fmt_ts(w.q2.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 3, 6, f_fmt_ts(w.q3.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 4, 6, f_fmt_ts(w.q4.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 5, 6, f_fmt_ts(w.q5.startEff, cfg.tz), text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 7, "endEff", text_color=color.black)
+    table.cell(weekly_tbl, 1, 7, f_fmt_ts(w.q1.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 2, 7, f_fmt_ts(w.q2.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 3, 7, f_fmt_ts(w.q3.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 4, 7, f_fmt_ts(w.q4.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 5, 7, f_fmt_ts(w.q5.endEff, cfg.tz), text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 8, "open", text_color=color.black)
+    table.cell(weekly_tbl, 1, 8, f_fmt(w.q1.open), text_color=color.black)
+    table.cell(weekly_tbl, 2, 8, f_fmt(w.q2.open), text_color=color.black)
+    table.cell(weekly_tbl, 3, 8, f_fmt(w.q3.open), text_color=color.black)
+    table.cell(weekly_tbl, 4, 8, f_fmt(w.q4.open), text_color=color.black)
+    table.cell(weekly_tbl, 5, 8, f_fmt(w.q5.open), text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 9, "hasData", text_color=color.black)
+    table.cell(weekly_tbl, 1, 9, w.q1.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 2, 9, w.q2.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 3, 9, w.q3.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 4, 9, w.q4.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 5, 9, w.q5.hasData ? "Y" : "N", text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 10, "openDelayed", text_color=color.black)
+    table.cell(weekly_tbl, 1, 10, w.q1.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 2, 10, w.q2.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 3, 10, w.q3.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 4, 10, w.q4.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 5, 10, w.q5.openDelayed ? "Y" : "N", text_color=color.black)
+else if not dwWeekly and not na(weekly_tbl)
+    table.delete(weekly_tbl)
+    weekly_tbl := na
+
+// -----------------------------------------------------------------------------
+// Bearish Daily SSMT (ES/NQ) — test-only
+// Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
 // -----------------------------------------------------------------------------
 var table ssmtDbgTbl = na
 var line[] ssmtHistLines = array.new_line()
 var label[] ssmtHistLbls = array.new_label()
 var line ssmtLine = na
-var int  ssmtQStart = na
+var int  ssmtEventKey = na
 var label ssmtLbl = na
 int SSmtQLen = 6 * 60 * 60 * 1000
 
-if showDailyBearSSMT
+bool ssmtTfOk = visDailyTf
+if showDailyBearSSMT and ssmtTfOk
     string esSym = f_ssmt_norm_sym(ssmtSymES)
     string nqSym = f_ssmt_norm_sym(ssmtSymNQ)
-    string ymSym = f_ssmt_norm_sym(ssmtSymYM)
 
     [esHcur, esHcurTs, esHprev, esHprevTs, esQi, esQts] = request.security(esSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
     [nqHcur, nqHcurTs, nqHprev, nqHprevTs, nqQi, nqQts] = request.security(nqSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-    [ymHcur, ymHcurTs, ymHprev, ymHprevTs, ymQi, ymQts] = request.security(ymSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
 
-    string chartSym = syminfo.tickerid
-    bool isChartES = str.contains(chartSym, "ES") or str.contains(chartSym, "MES")
-    bool isChartNQ = str.contains(chartSym, "NQ") or str.contains(chartSym, "MNQ")
-    bool isChartYM = str.contains(chartSym, "YM") or str.contains(chartSym, "MYM")
-    bool isTriadChart = isChartES or isChartNQ or isChartYM
+    string chartTag = f_ssmt_tag(syminfo.tickerid)
+    bool isChartES = chartTag == "ES"
+    bool isChartNQ = chartTag == "NQ"
+    bool isPairChart = isChartES or isChartNQ
 
-    int qStartRef = isChartES ? esQts : isChartNQ ? nqQts : isChartYM ? ymQts : na
-    bool qstartChanged = not na(qStartRef) and (na(ssmtQStart) or qStartRef != ssmtQStart)
-    if qstartChanged
-        f_ssmt_hist_push(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtKeep)
-        ssmtLine := na
-        ssmtLbl := na
-        ssmtQStart := qStartRef
-
-    bool ssmtReady = not na(esHcur) and not na(esHprev) and not na(nqHcur) and not na(nqHprev) and not na(ymHcur) and not na(ymHprev)
+    bool ssmtReady = not na(esHcur) and not na(esHprev) and not na(nqHcur) and not na(nqHprev)
     if ssmtDebug and barstate.islast
         if na(ssmtDbgTbl)
-            ssmtDbgTbl := table.new(position.top_right, 4, 5, border_width=1, border_color=color.gray)
+            ssmtDbgTbl := table.new(position.top_right, 4, 4, border_width=1, border_color=color.gray)
         table.cell(ssmtDbgTbl, 0, 0, "Sym", text_color=color.black, bgcolor=color.new(color.black, 85))
         table.cell(ssmtDbgTbl, 1, 0, "Hprev", text_color=color.black, bgcolor=color.new(color.black, 85))
         table.cell(ssmtDbgTbl, 2, 0, "Hcur", text_color=color.black, bgcolor=color.new(color.black, 85))
@@ -593,32 +664,26 @@ if showDailyBearSSMT
         table.cell(ssmtDbgTbl, 1, 2, f_fmt(nqHprev), text_color=color.black)
         table.cell(ssmtDbgTbl, 2, 2, f_fmt(nqHcur), text_color=color.black)
         table.cell(ssmtDbgTbl, 3, 2, nqHcur > nqHprev ? "Y" : "N", text_color=color.black)
-        table.cell(ssmtDbgTbl, 0, 3, f_ssmt_tag(ssmtSymYM), text_color=color.black)
-        table.cell(ssmtDbgTbl, 1, 3, f_fmt(ymHprev), text_color=color.black)
-        table.cell(ssmtDbgTbl, 2, 3, f_fmt(ymHcur), text_color=color.black)
-        table.cell(ssmtDbgTbl, 3, 3, ymHcur > ymHprev ? "Y" : "N", text_color=color.black)
-        table.cell(ssmtDbgTbl, 0, 4, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtDbgTbl, 1, 4, f_fmt_time(esQts, cfg.tz), text_color=color.black)
-        table.cell(ssmtDbgTbl, 2, 4, f_fmt_time(nqQts, cfg.tz), text_color=color.black)
-        table.cell(ssmtDbgTbl, 3, 4, f_fmt_time(ymQts, cfg.tz), text_color=color.black)
+        table.cell(ssmtDbgTbl, 0, 3, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(ssmtDbgTbl, 1, 3, f_fmt_time(esQts, cfg.tz), text_color=color.black)
+        table.cell(ssmtDbgTbl, 2, 3, f_fmt_time(nqQts, cfg.tz), text_color=color.black)
+        table.cell(ssmtDbgTbl, 3, 3, "", text_color=color.black)
     else if not ssmtDebug and not na(ssmtDbgTbl)
         table.delete(ssmtDbgTbl)
         ssmtDbgTbl := na
+
     if ssmtReady
         bool esSweep = esHcur > esHprev
         bool nqSweep = nqHcur > nqHprev
-        bool ymSweep = ymHcur > ymHprev
-        int sweeps = (esSweep ? 1 : 0) + (nqSweep ? 1 : 0) + (ymSweep ? 1 : 0)
-        bool allSweep = sweeps == 3
-        bool split = sweeps >= 1 and sweeps <= 2
+        bool split = esSweep != nqSweep
 
+        bool crackedES = split and (not esSweep)
+        bool crackedNQ = split and (not nqSweep)
         string cracked = ""
-        if esSweep
-            cracked := cracked + (cracked == "" ? "" : ",") + f_ssmt_tag(ssmtSymES)
-        if nqSweep
-            cracked := cracked + (cracked == "" ? "" : ",") + f_ssmt_tag(ssmtSymNQ)
-        if ymSweep
-            cracked := cracked + (cracked == "" ? "" : ",") + f_ssmt_tag(ssmtSymYM)
+        if crackedES
+            cracked := "ES"
+        if crackedNQ
+            cracked := cracked == "" ? "NQ" : cracked + ",NQ"
 
         float curH = na
         int   curHTs = na
@@ -640,15 +705,16 @@ if showDailyBearSSMT
             prevHTs := nqHprevTs
             curQTs := nqQts
             curSweep := nqSweep
-        else if isChartYM
-            curH := ymHcur
-            curHTs := ymHcurTs
-            prevH := ymHprev
-            prevHTs := ymHprevTs
-            curQTs := ymQts
-            curSweep := ymSweep
 
-        if allSweep or not split or not isTriadChart
+        int eventKey = prevHTs
+        bool eventChanged = not na(eventKey) and (na(ssmtEventKey) or eventKey != ssmtEventKey)
+        if eventChanged
+            f_ssmt_hist_push(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtKeep)
+            ssmtLine := na
+            ssmtLbl := na
+            ssmtEventKey := eventKey
+
+        if not split or not isPairChart
             if not na(ssmtLine)
                 line.delete(ssmtLine)
                 ssmtLine := na
@@ -663,7 +729,8 @@ if showDailyBearSSMT
             else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
                 ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtLineCol, 50), ssmtLineWidth)
 
-            if hasPoints and cracked != ""
+            bool showLabel = (isChartES and crackedES) or (isChartNQ and crackedNQ)
+            if hasPoints and cracked != "" and showLabel
                 string lblText = "D.SSMT " + cracked
                 if na(ssmtLbl)
                     ssmtLbl := label.new(prevHTs, prevH, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
@@ -672,6 +739,9 @@ if showDailyBearSSMT
                     label.set_text(ssmtLbl, lblText)
                     label.set_textcolor(ssmtLbl, color.black)
                     label.set_color(ssmtLbl, color.new(color.black, 100))
+            else if not showLabel and not na(ssmtLbl)
+                label.delete(ssmtLbl)
+                ssmtLbl := na
     f_ssmt_hist_trim(ssmtHistLines, ssmtHistLbls, ssmtKeep)
 else
     if not na(ssmtLine)
@@ -684,7 +754,7 @@ else
     if not na(ssmtDbgTbl)
         table.delete(ssmtDbgTbl)
         ssmtDbgTbl := na
-    ssmtQStart := na
+    ssmtEventKey := na
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)
@@ -1062,6 +1132,131 @@ var line projQ4  = na
 var line projEnd = na
 
 // -----------------------------------------------------------------------------
+// Weekly cycle storage (dividers only)
+// -----------------------------------------------------------------------------
+var int[] weeklyStarts = array.new_int()
+var vset  weeklyV = vset_new()
+var line weekProjQ2  = na
+var line weekProjQ3  = na
+var line weekProjQ4  = na
+var line weekProjQ5  = na
+var line weekProjEnd = na
+
+// Weekly open-line history
+var int[]   weeklyHistStart = array.new_int()
+var int[]   weeklyHistEnd   = array.new_int()
+
+var float[] weekly_h_q1o    = array.new_float()
+var int[]   weekly_h_q1oTs  = array.new_int()
+var float[] weekly_h_q2o    = array.new_float()
+var int[]   weekly_h_q2oTs  = array.new_int()
+var float[] weekly_h_q3o    = array.new_float()
+var int[]   weekly_h_q3oTs  = array.new_int()
+var float[] weekly_h_q4o    = array.new_float()
+var int[]   weekly_h_q4oTs  = array.new_int()
+var float[] weekly_h_q5o    = array.new_float()
+var int[]   weekly_h_q5oTs  = array.new_int()
+
+var line[]  weekly_l_q1o    = array.new_line()
+var line[]  weekly_l_q2o    = array.new_line()
+var line[]  weekly_l_q3o    = array.new_line()
+var line[]  weekly_l_q4o    = array.new_line()
+var line[]  weekly_l_q5o    = array.new_line()
+
+f_whist_kill_at(int idx) =>
+    line a = array.get(weekly_l_q1o, idx)
+    line b = array.get(weekly_l_q2o, idx)
+    line c = array.get(weekly_l_q3o, idx)
+    line wl4 = array.get(weekly_l_q4o, idx)
+    line e = array.get(weekly_l_q5o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(wl4)
+        line.delete(wl4)
+    if not na(e)
+        line.delete(e)
+    array.set(weekly_l_q1o, idx, na)
+    array.set(weekly_l_q2o, idx, na)
+    array.set(weekly_l_q3o, idx, na)
+    array.set(weekly_l_q4o, idx, na)
+    array.set(weekly_l_q5o, idx, na)
+    0
+
+f_whist_shift_front() =>
+    if array.size(weeklyHistStart) > 0
+        f_whist_kill_at(0)
+        array.shift(weeklyHistStart)
+        array.shift(weeklyHistEnd)
+
+        array.shift(weekly_h_q1o),  array.shift(weekly_h_q1oTs)
+        array.shift(weekly_h_q2o),  array.shift(weekly_h_q2oTs)
+        array.shift(weekly_h_q3o),  array.shift(weekly_h_q3oTs)
+        array.shift(weekly_h_q4o),  array.shift(weekly_h_q4oTs)
+        array.shift(weekly_h_q5o),  array.shift(weekly_h_q5oTs)
+
+        array.shift(weekly_l_q1o)
+        array.shift(weekly_l_q2o)
+        array.shift(weekly_l_q3o)
+        array.shift(weekly_l_q4o)
+        array.shift(weekly_l_q5o)
+    0
+
+f_whist_trim_cutoff(int cutoffTs) =>
+    while array.size(weeklyHistStart) > 0 and array.get(weeklyHistStart, 0) < cutoffTs
+        f_whist_shift_front()
+    0
+
+f_whist_ensure_current() =>
+    if not na(w.wsEff)
+        int key = w.wsEff
+        int idx = f_find_int(weeklyHistStart, key)
+        if idx == -1
+            array.push(weeklyHistStart, key)
+            int wEnd = not na(w.wsNextEff) ? w.wsNextEff : w.wsNextIntent
+            array.push(weeklyHistEnd, wEnd)
+
+            array.push(weekly_h_q1o, na), array.push(weekly_h_q1oTs, na)
+            array.push(weekly_h_q2o, na), array.push(weekly_h_q2oTs, na)
+            array.push(weekly_h_q3o, na), array.push(weekly_h_q3oTs, na)
+            array.push(weekly_h_q4o, na), array.push(weekly_h_q4oTs, na)
+            array.push(weekly_h_q5o, na), array.push(weekly_h_q5oTs, na)
+
+            line naL = na
+            array.push(weekly_l_q1o, naL)
+            array.push(weekly_l_q2o, naL)
+            array.push(weekly_l_q3o, naL)
+            array.push(weekly_l_q4o, naL)
+            array.push(weekly_l_q5o, naL)
+            idx := array.size(weeklyHistStart) - 1
+
+        int wEnd2 = not na(w.wsNextEff) ? w.wsNextEff : w.wsNextIntent
+        array.set(weeklyHistEnd, idx, wEnd2)
+
+        if not na(w.q1.open) and not na(w.q1.startEff)
+            array.set(weekly_h_q1o, idx, w.q1.open)
+            array.set(weekly_h_q1oTs, idx, w.q1.startEff)
+        if not na(w.q2.open) and not na(w.q2.startEff)
+            array.set(weekly_h_q2o, idx, w.q2.open)
+            array.set(weekly_h_q2oTs, idx, w.q2.startEff)
+        if not na(w.q3.open) and not na(w.q3.startEff)
+            array.set(weekly_h_q3o, idx, w.q3.open)
+            array.set(weekly_h_q3oTs, idx, w.q3.startEff)
+        if not na(w.q4.open) and not na(w.q4.startEff)
+            array.set(weekly_h_q4o, idx, w.q4.open)
+            array.set(weekly_h_q4oTs, idx, w.q4.startEff)
+        if not na(w.q5.open) and not na(w.q5.startEff)
+            array.set(weekly_h_q5o, idx, w.q5.open)
+            array.set(weekly_h_q5oTs, idx, w.q5.startEff)
+
+        while array.size(weeklyHistStart) > STORE_MAX
+            f_whist_shift_front()
+    0
+
+// -----------------------------------------------------------------------------
 // Open-line history (per displayed cycle) — values captured from QTCore during
 // the cycle, then retained + drawn as long as the cycle is inside keepCycles.
 // -----------------------------------------------------------------------------
@@ -1180,7 +1375,7 @@ f_hist_ensure_current() =>
 // -----------------------------------------------------------------------------
 // Main draw logic
 // -----------------------------------------------------------------------------
-int enabledCycles = (showDailyTf ? 1 : 0) + (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
+int enabledCycles = (showDailyTf ? 1 : 0) + (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0) + (showWeeklyTf ? 1 : 0)
 if enabledCycles < 1
     enabledCycles := 1
 int perCycle = showOpens ? 9 : 5
@@ -1625,3 +1820,132 @@ else
             array.set(l_q4o, k, l4)
 
             k += 1
+
+if not showWeeklyTf
+    vset_clear(weeklyV)
+    weekProjQ2  := f_kill(weekProjQ2)
+    weekProjQ3  := f_kill(weekProjQ3)
+    weekProjQ4  := f_kill(weekProjQ4)
+    weekProjQ5  := f_kill(weekProjQ5)
+    weekProjEnd := f_kill(weekProjEnd)
+    int wi = array.size(weeklyHistStart) - 1
+    while wi >= 0
+        f_whist_kill_at(wi)
+        wi -= 1
+    array.clear(weeklyHistStart), array.clear(weeklyHistEnd)
+    array.clear(weekly_h_q1o), array.clear(weekly_h_q1oTs)
+    array.clear(weekly_h_q2o), array.clear(weekly_h_q2oTs)
+    array.clear(weekly_h_q3o), array.clear(weekly_h_q3oTs)
+    array.clear(weekly_h_q4o), array.clear(weekly_h_q4oTs)
+    array.clear(weekly_h_q5o), array.clear(weekly_h_q5oTs)
+    array.clear(weekly_l_q1o), array.clear(weekly_l_q2o), array.clear(weekly_l_q3o), array.clear(weekly_l_q4o), array.clear(weekly_l_q5o)
+    array.clear(weeklyStarts)
+else
+    if not na(w.wsEff)
+        f_push_unique_int(weeklyStarts, w.wsEff, STORE_MAX)
+
+    int wCutoff = na(w.wsEff) ? 0 : w.wsEff
+    int wAvail = array.size(weeklyStarts)
+    int wUse   = math.min(keepEff, wAvail)
+    int wFirst = wAvail - wUse
+    if wUse > 0
+        wCutoff := array.get(weeklyStarts, wFirst)
+
+    vset_trim_since(weeklyV, wCutoff)
+    f_whist_ensure_current()
+    f_whist_trim_cutoff(wCutoff)
+
+    if not na(w.wsEff) and tc > w.wsEff
+        vset_add(weeklyV, w.wsEff, COL_Q1)
+    if not na(w.q2.startEff) and tc > w.q2.startEff
+        vset_add(weeklyV, w.q2.startEff, COL_Q2)
+    if not na(w.q3.startEff) and tc > w.q3.startEff
+        vset_add(weeklyV, w.q3.startEff, COL_Q3)
+    if not na(w.q4.startEff) and tc > w.q4.startEff
+        vset_add(weeklyV, w.q4.startEff, COL_Q4)
+    if not na(w.q5.startEff) and tc > w.q5.startEff
+        vset_add(weeklyV, w.q5.startEff, COL_Q5)
+    if not na(w.wsNextEff) and tc > w.wsNextEff
+        vset_add(weeklyV, w.wsNextEff, COL_Q1)
+
+    // Weekly projections (intent-based; kill once passed)
+    if not na(w.q2.startIntent) and tc <= w.q2.startIntent
+        weekProjQ2 := f_set_or_make_vline(weekProjQ2, w.q2.startIntent, COL_Q2)
+    else
+        weekProjQ2 := f_kill(weekProjQ2)
+
+    if not na(w.q3.startIntent) and tc <= w.q3.startIntent
+        weekProjQ3 := f_set_or_make_vline(weekProjQ3, w.q3.startIntent, COL_Q3)
+    else
+        weekProjQ3 := f_kill(weekProjQ3)
+
+    if not na(w.q4.startIntent) and tc <= w.q4.startIntent
+        weekProjQ4 := f_set_or_make_vline(weekProjQ4, w.q4.startIntent, COL_Q4)
+    else
+        weekProjQ4 := f_kill(weekProjQ4)
+
+    if not na(w.q5.startIntent) and tc <= w.q5.startIntent
+        weekProjQ5 := f_set_or_make_vline(weekProjQ5, w.q5.startIntent, COL_Q5)
+    else
+        weekProjQ5 := f_kill(weekProjQ5)
+
+    if not na(w.wsNextIntent)
+        weekProjEnd := f_set_or_make_vline(weekProjEnd, w.wsNextIntent, COL_Q1)
+
+    if not showOpens
+        int wj = array.size(weeklyHistStart) - 1
+        while wj >= 0
+            f_whist_kill_at(wj)
+            wj -= 1
+    else
+        int wsz = array.size(weeklyHistStart)
+        int wk = 0
+        while wk < wsz
+            int wEndTs = array.get(weeklyHistEnd, wk)
+
+            float wy1 = array.get(weekly_h_q1o, wk)
+            int   wx1 = array.get(weekly_h_q1oTs, wk)
+            line  wl1 = array.get(weekly_l_q1o, wk)
+            if not na(wy1) and not na(wx1) and not na(wEndTs)
+                wl1 := f_set_or_make_hline(wl1, wx1, wEndTs, wy1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                wl1 := f_kill(wl1)
+            array.set(weekly_l_q1o, wk, wl1)
+
+            float wy2 = array.get(weekly_h_q2o, wk)
+            int   wx2 = array.get(weekly_h_q2oTs, wk)
+            line  wl2 = array.get(weekly_l_q2o, wk)
+            if not na(wy2) and not na(wx2) and not na(wEndTs)
+                wl2 := f_set_or_make_hline(wl2, wx2, wEndTs, wy2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                wl2 := f_kill(wl2)
+            array.set(weekly_l_q2o, wk, wl2)
+
+            float wy3 = array.get(weekly_h_q3o, wk)
+            int   wx3 = array.get(weekly_h_q3oTs, wk)
+            line  wl3 = array.get(weekly_l_q3o, wk)
+            if not na(wy3) and not na(wx3) and not na(wEndTs)
+                wl3 := f_set_or_make_hline(wl3, wx3, wEndTs, wy3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                wl3 := f_kill(wl3)
+            array.set(weekly_l_q3o, wk, wl3)
+
+            float wy4 = array.get(weekly_h_q4o, wk)
+            int   wx4 = array.get(weekly_h_q4oTs, wk)
+            line  wl4 = array.get(weekly_l_q4o, wk)
+            if not na(wy4) and not na(wx4) and not na(wEndTs)
+                wl4 := f_set_or_make_hline(wl4, wx4, wEndTs, wy4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                wl4 := f_kill(wl4)
+            array.set(weekly_l_q4o, wk, wl4)
+
+            float wy5 = array.get(weekly_h_q5o, wk)
+            int   wx5 = array.get(weekly_h_q5oTs, wk)
+            line  wl5 = array.get(weekly_l_q5o, wk)
+            if not na(wy5) and not na(wx5) and not na(wEndTs)
+                wl5 := f_set_or_make_hline(wl5, wx5, wEndTs, wy5, f_vcol(COL_Q5), lineStyleFrom(q4OpenStyleStr))
+            else
+                wl5 := f_kill(wl5)
+            array.set(weekly_l_q5o, wk, wl5)
+
+            wk += 1

@@ -1,9 +1,5 @@
 QTEngine TODO
 
-- SSMT on D, m90, Micro, Nano
-- HSSMT on D, m90, Micro, Nano
-- tCISD on D, m90, Micro, Nano
-
 - Weekly Cycle functionality (boundaries then OHLC)
 - Monthly Cycle functionality 
 - Quarterly Cycle functionality
@@ -11,4 +7,20 @@ QTEngine TODO
 - Quandrennial Cycle functionality
 
 - Forex Time Handling
+
+QTEngine Modules
+- SSMT
+- HSSMT
+- tCISD
+- 1st P FVG after SSMT
+
+
+
+
+Testing TODO
+- DFR toggle (Projections and highlight)
 - Better Asset Selector (already have helper file)
+- Add toggle for "Display Parent Cycle Opens" (Maybe a list: All Opens, Q1 + Q2, None)
+- Add option SSMT Label color
+
+

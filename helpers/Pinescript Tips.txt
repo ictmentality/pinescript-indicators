@@ -56,3 +56,5 @@ Pinescript Tips
 Instead: declare variables first, then destructure: [a, b] = fn().
 
 28. Plot limit: scripts can create at most 64 plots. If you exceed this, reduce data-window plots or guard them behind inputs.
+29. input.* defaults must be compile-time constants. Don’t call functions like f_vcol() or use non-const variables inside input.color/defaults; use literal color.new(color.rgb(...), transp) instead.
+30. If Pine says “Could not find function or function reference 'f_x'”, it often means you’re calling a helper before it’s declared (or in an input default). Move the helper above the call site, or inline the constant.
