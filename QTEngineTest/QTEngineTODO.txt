@@ -13,6 +13,8 @@ QTEngine Modules
 - HSSMT
 - tCISD
 - 1st P FVG after SSMT
+- PSP/TPD
+
 
 
 
@@ -21,6 +23,6 @@ Testing TODO
 - DFR toggle (Projections and highlight)
 - Better Asset Selector (already have helper file)
 - Add toggle for "Display Parent Cycle Opens" (Maybe a list: All Opens, Q1 + Q2, None)
-- Add option SSMT Label color
+- Help with SSMT drawings (if PQH get swept in the first 1/3 of the Quarter, only draw the SSMT line to extend to the 1/3 of the Quarter. If it later retrades above PQH in the 2/3 then redraw the line to extend 2/3 of the Quarter. Same for if it retrades above PQH during the 3/3, the extend the drawing to the end of the Quarter)
 
 
