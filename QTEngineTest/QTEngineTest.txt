@@ -56,7 +56,6 @@ var color COL_Q2 = color.rgb(242, 54, 69)     // #f23645
 var color COL_Q3 = color.rgb(76, 175, 80)     // #4caf50
 var color COL_Q4 = color.rgb(41, 98, 255)     // #2962ff
 var color COL_Q5 = color.rgb(12, 50, 153)     // #0c3299 (weekly Q5)
-
 var int V_TRANSP = 70
 f_vcol(color c) =>
     color.new(c, V_TRANSP)
@@ -662,6 +661,7 @@ var label[] ssmtHistLbls = array.new_label()
 var line ssmtLine = na
 var int  ssmtEventKey = na
 var label ssmtLbl = na
+var int  ssmtExtendTier = 0
 int SSmtQLen = 6 * 60 * 60 * 1000
 
 bool ssmtTfOk = visDailyTf
@@ -741,6 +741,7 @@ if showDailyBearSSMT and ssmtTfOk
             f_ssmt_hist_push(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtKeep)
             ssmtLine := na
             ssmtLbl := na
+            ssmtExtendTier := 0
             ssmtEventKey := eventKey
 
         if not split or not isPairChart
@@ -750,10 +751,39 @@ if showDailyBearSSMT and ssmtTfOk
             if not na(ssmtLbl)
                 label.delete(ssmtLbl)
                 ssmtLbl := na
+            ssmtExtendTier := 0
         else
             bool hasPoints = not na(prevH) and not na(prevHTs) and not na(curQTs)
             if hasPoints and curSweep
-                int x2 = curQTs + SSmtQLen
+                int thirdLen = int(SSmtQLen / 3)
+                int q1End = curQTs + thirdLen
+                int q2End = curQTs + (thirdLen * 2)
+                int q3End = curQTs + SSmtQLen
+
+                int sweepTier = 1
+                if not na(curHTs)
+                    if curHTs >= q2End
+                        sweepTier := 3
+                    else if curHTs >= q1End
+                        sweepTier := 2
+
+                int barTier = 1
+                if time_close >= q2End
+                    barTier := 3
+                else if time_close >= q1End
+                    barTier := 2
+
+                ssmtExtendTier := ssmtExtendTier < sweepTier ? sweepTier : ssmtExtendTier
+                bool touch = high >= prevH
+                if touch
+                    ssmtExtendTier := ssmtExtendTier < barTier ? barTier : ssmtExtendTier
+
+                int x2 = q1End
+                if ssmtExtendTier >= 3
+                    x2 := q3End
+                else if ssmtExtendTier == 2
+                    x2 := q2End
+
                 ssmtLine := f_set_or_make_hline_w(ssmtLine, prevHTs, x2, prevH, color.new(ssmtLineCol, 50), line.style_solid, ssmtLineWidth)
             else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
                 ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtLineCol, 50), ssmtLineWidth)
@@ -784,6 +814,7 @@ else
         table.delete(ssmtDbgTbl)
         ssmtDbgTbl := na
     ssmtEventKey := na
+    ssmtExtendTier := 0
 
 // -----------------------------------------------------------------------------
 // Bullish Daily SSMT (ES/NQ) — test-only
@@ -795,6 +826,7 @@ var label[] ssmtBHistLbls = array.new_label()
 var line ssmtBLine = na
 var int  ssmtBEventKey = na
 var label ssmtBLbl = na
+var int  ssmtBExtendTier = 0
 
 bool ssmtBullTfOk = visDailyTf
 if showDailyBullSSMT and ssmtBullTfOk
@@ -873,6 +905,7 @@ if showDailyBullSSMT and ssmtBullTfOk
             f_ssmt_hist_push(ssmtBLine, ssmtBLbl, ssmtBHistLines, ssmtBHistLbls, ssmtKeep)
             ssmtBLine := na
             ssmtBLbl := na
+            ssmtBExtendTier := 0
             ssmtBEventKey := eventKeyB
 
         if not splitB or not isPairChartB
@@ -882,10 +915,39 @@ if showDailyBullSSMT and ssmtBullTfOk
             if not na(ssmtBLbl)
                 label.delete(ssmtBLbl)
                 ssmtBLbl := na
+            ssmtBExtendTier := 0
         else
             bool hasPointsB = not na(prevL) and not na(prevLTs) and not na(curQTs)
             if hasPointsB and curSweep
-                int x2B = curQTs + SSmtQLen
+                int thirdLenB = int(SSmtQLen / 3)
+                int q1EndB = curQTs + thirdLenB
+                int q2EndB = curQTs + (thirdLenB * 2)
+                int q3EndB = curQTs + SSmtQLen
+
+                int sweepTierB = 1
+                if not na(curLTs)
+                    if curLTs >= q2EndB
+                        sweepTierB := 3
+                    else if curLTs >= q1EndB
+                        sweepTierB := 2
+
+                int barTierB = 1
+                if time_close >= q2EndB
+                    barTierB := 3
+                else if time_close >= q1EndB
+                    barTierB := 2
+
+                ssmtBExtendTier := ssmtBExtendTier < sweepTierB ? sweepTierB : ssmtBExtendTier
+                bool touchB = low <= prevL
+                if touchB
+                    ssmtBExtendTier := ssmtBExtendTier < barTierB ? barTierB : ssmtBExtendTier
+
+                int x2B = q1EndB
+                if ssmtBExtendTier >= 3
+                    x2B := q3EndB
+                else if ssmtBExtendTier == 2
+                    x2B := q2EndB
+
                 ssmtBLine := f_set_or_make_hline_w(ssmtBLine, prevLTs, x2B, prevL, color.new(ssmtLineCol, 50), line.style_solid, ssmtLineWidth)
             else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
                 ssmtBLine := f_set_or_make_line(ssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtLineCol, 50), ssmtLineWidth)
@@ -916,6 +978,7 @@ else
         table.delete(ssmtBDbgTbl)
         ssmtBDbgTbl := na
     ssmtBEventKey := na
+    ssmtBExtendTier := 0
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)
