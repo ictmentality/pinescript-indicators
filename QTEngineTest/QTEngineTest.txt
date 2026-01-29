@@ -43,7 +43,8 @@ showDailyBearSSMT = input.bool(false, "Show Bearish Daily SSMT (Triad)", group=g
 showDailyBullSSMT = input.bool(false, "Show Bullish Daily SSMT (Triad)", group=groupSSMT)
 ssmtSymES = input.symbol("MESH2026", "ES / MES", group=groupSSMT)
 ssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ", group=groupSSMT)
-ssmtLineCol = input.color(color.new(color.red, 0), "SSMT Line Color", group=groupSSMT)
+ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)  // #F23645
+ssmtBullLineCol = input.color(color.rgb(41, 98, 255), "Bullish SSMT Color", group=groupSSMT)  // #2962FF
 ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
 ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
 ssmtDebug = input.bool(false, "Debug SSMT values", group=groupSSMT)
@@ -784,9 +785,9 @@ if showDailyBearSSMT and ssmtTfOk
                 else if ssmtExtendTier == 2
                     x2 := q2End
 
-                ssmtLine := f_set_or_make_hline_w(ssmtLine, prevHTs, x2, prevH, color.new(ssmtLineCol, 50), line.style_solid, ssmtLineWidth)
+                ssmtLine := f_set_or_make_hline_w(ssmtLine, prevHTs, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
             else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
-                ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtLineCol, 50), ssmtLineWidth)
+                ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
 
             bool showLabel = (isChartES and crackedES) or (isChartNQ and crackedNQ)
             if hasPoints and cracked != "" and showLabel
@@ -948,9 +949,9 @@ if showDailyBullSSMT and ssmtBullTfOk
                 else if ssmtBExtendTier == 2
                     x2B := q2EndB
 
-                ssmtBLine := f_set_or_make_hline_w(ssmtBLine, prevLTs, x2B, prevL, color.new(ssmtLineCol, 50), line.style_solid, ssmtLineWidth)
+                ssmtBLine := f_set_or_make_hline_w(ssmtBLine, prevLTs, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
             else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
-                ssmtBLine := f_set_or_make_line(ssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtLineCol, 50), ssmtLineWidth)
+                ssmtBLine := f_set_or_make_line(ssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
 
             bool showLabelB = (isChartESB and crackedESB) or (isChartNQB and crackedNQB)
             if hasPointsB and crackedB != "" and showLabelB
