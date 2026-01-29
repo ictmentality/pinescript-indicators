@@ -42,6 +42,7 @@ groupSSMT = "SSMT TEST (Daily/Weekly ES/NQ)"
 showDailyBearSSMT = input.bool(false, "Show Bearish Daily SSMT (Dyad)", group=groupSSMT)
 showDailyBullSSMT = input.bool(false, "Show Bullish Daily SSMT (Dyad)", group=groupSSMT)
 showWeeklyBearSSMT = input.bool(false, "Show Bearish Weekly SSMT (Dyad)", group=groupSSMT)
+showWeeklyBullSSMT = input.bool(false, "Show Bullish Weekly SSMT (Dyad)", group=groupSSMT)
 ssmtSymES = input.symbol("MESH2026", "ES / MES", group=groupSSMT)
 ssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ", group=groupSSMT)
 ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)  // #F23645
@@ -230,6 +231,58 @@ f_ssmt_weekly_highs() =>
                 wCurHTs := time
 
     [wCurH, wCurHTs, wPrevH, wPrevHTs, qi, qts]
+
+
+f_ssmt_weekly_lows() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+
+    // Local running Low tracking for Weekly quarters (q=1d x5), per-symbol inside request.security()
+    var int   wLastQStart = na
+    var float wCurL = na
+    var int   wCurLTs = na
+    var float wPrevL = na
+    var int   wPrevLTs = na
+
+    int t = time
+    int tc = time_close
+    [st0, w] = qt.qt_weekly_update(st, cfg, t, tc)
+    st := st0
+
+    // Determine the active Weekly quarter by startIntent thresholds (use time_close for boundary attribution)
+    int qi = na
+    int qts = na
+    if not na(w.q1.startIntent) and tc >= w.q1.startIntent
+        qi := 1
+        qts := w.q1.startIntent
+    if not na(w.q2.startIntent) and tc >= w.q2.startIntent
+        qi := 2
+        qts := w.q2.startIntent
+    if not na(w.q3.startIntent) and tc >= w.q3.startIntent
+        qi := 3
+        qts := w.q3.startIntent
+    if not na(w.q4.startIntent) and tc >= w.q4.startIntent
+        qi := 4
+        qts := w.q4.startIntent
+    if not na(w.q5.startIntent) and tc >= w.q5.startIntent
+        qi := 5
+        qts := w.q5.startIntent
+
+    bool inQ = not na(qi) and not na(qts)
+    if inQ
+        bool qChanged = na(wLastQStart) or qts != wLastQStart
+        if qChanged
+            wPrevL := wCurL
+            wPrevLTs := wCurLTs
+            wCurL := na
+            wCurLTs := na
+            wLastQStart := qts
+
+        if na(wCurL) or low < wCurL
+            wCurL := low
+            wCurLTs := time
+
+    [wCurL, wCurLTs, wPrevL, wPrevLTs, qi, qts]
 
 f_ssmt_sym_ticker(string sym) =>
     string s = str.upper(sym)
@@ -1182,6 +1235,143 @@ else
     f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
     wSsmtEventKey := na
     wSsmtExtendTier := 0
+
+// -----------------------------------------------------------------------------
+// Bullish Weekly SSMT (ES/NQ) — test-only
+// Visibility: Only show on Weekly-aligned TFs (H1–H3 per helpers/Alignments.txt)
+// -----------------------------------------------------------------------------
+var line[] wSsmtBHistLines = array.new_line()
+var label[] wSsmtBHistLbls = array.new_label()
+var line wSsmtBLine = na
+var int  wSsmtBEventKey = na
+var label wSsmtBLbl = na
+var int  wSsmtBExtendTier = 0
+
+bool wSsmtBullTfOk = visWeeklyTf
+if showWeeklyBullSSMT and wSsmtBullTfOk
+    string esSymWB = f_ssmt_norm_sym(ssmtSymES)
+    string nqSymWB = f_ssmt_norm_sym(ssmtSymNQ)
+
+    [esLcurWB, esLcurTsWB, esLprevWB, esLprevTsWB, esQiWB, esQtsWB] = request.security(esSymWB, timeframe.period, f_ssmt_weekly_lows(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    [nqLcurWB, nqLcurTsWB, nqLprevWB, nqLprevTsWB, nqQiWB, nqQtsWB] = request.security(nqSymWB, timeframe.period, f_ssmt_weekly_lows(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+    string chartTagWB = f_ssmt_tag(syminfo.tickerid)
+    bool isChartESWB = chartTagWB == "ES"
+    bool isChartNQWB = chartTagWB == "NQ"
+    bool isPairChartWB = isChartESWB or isChartNQWB
+
+    bool ssmtWBReady = not na(esLcurWB) and not na(esLprevWB) and not na(nqLcurWB) and not na(nqLprevWB)
+    if ssmtWBReady
+        bool esSweepWB = esLcurWB < esLprevWB
+        bool nqSweepWB = nqLcurWB < nqLprevWB
+        bool splitWB = esSweepWB != nqSweepWB
+
+        bool crackedESWB = splitWB and (not esSweepWB)
+        bool crackedNQWB = splitWB and (not nqSweepWB)
+        string crackedWB = ""
+        if crackedESWB
+            crackedWB := "ES"
+        if crackedNQWB
+            crackedWB := crackedWB == "" ? "NQ" : crackedWB + ",NQ"
+
+        float curL = na
+        int   curLTs = na
+        float prevL = na
+        int   prevLTs = na
+        int   curQTs = na
+        bool  curSweep = false
+        if isChartESWB
+            curL := esLcurWB
+            curLTs := esLcurTsWB
+            prevL := esLprevWB
+            prevLTs := esLprevTsWB
+            curQTs := esQtsWB
+            curSweep := esSweepWB
+        else if isChartNQWB
+            curL := nqLcurWB
+            curLTs := nqLcurTsWB
+            prevL := nqLprevWB
+            prevLTs := nqLprevTsWB
+            curQTs := nqQtsWB
+            curSweep := nqSweepWB
+
+        int eventKeyWB = prevLTs
+        bool eventChangedWB = not na(eventKeyWB) and (na(wSsmtBEventKey) or eventKeyWB != wSsmtBEventKey)
+        if eventChangedWB
+            f_ssmt_hist_push(wSsmtBLine, wSsmtBLbl, wSsmtBHistLines, wSsmtBHistLbls, ssmtKeep)
+            wSsmtBLine := na
+            wSsmtBLbl := na
+            wSsmtBExtendTier := 0
+            wSsmtBEventKey := eventKeyWB
+
+        if not splitWB or not isPairChartWB
+            if not na(wSsmtBLine)
+                line.delete(wSsmtBLine)
+                wSsmtBLine := na
+            if not na(wSsmtBLbl)
+                label.delete(wSsmtBLbl)
+                wSsmtBLbl := na
+            wSsmtBExtendTier := 0
+        else
+            bool hasPointsWB = not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if hasPointsWB and curSweep
+                int thirdLenWB = int(WSSmtQLen / 3)
+                int q1EndWB = curQTs + thirdLenWB
+                int q2EndWB = curQTs + (thirdLenWB * 2)
+                int q3EndWB = curQTs + WSSmtQLen
+
+                int sweepTierWB = 1
+                if not na(curLTs)
+                    if curLTs >= q2EndWB
+                        sweepTierWB := 3
+                    else if curLTs >= q1EndWB
+                        sweepTierWB := 2
+
+                int barTierWB = 1
+                if time_close >= q2EndWB
+                    barTierWB := 3
+                else if time_close >= q1EndWB
+                    barTierWB := 2
+
+                wSsmtBExtendTier := wSsmtBExtendTier < sweepTierWB ? sweepTierWB : wSsmtBExtendTier
+                bool touchWB = low <= prevL
+                if touchWB
+                    wSsmtBExtendTier := wSsmtBExtendTier < barTierWB ? barTierWB : wSsmtBExtendTier
+
+                int x2WB = q1EndWB
+                if wSsmtBExtendTier >= 3
+                    x2WB := q3EndWB
+                else if wSsmtBExtendTier == 2
+                    x2WB := q2EndWB
+
+                wSsmtBLine := f_set_or_make_hline_w(wSsmtBLine, prevLTs, x2WB, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+            else if hasPointsWB and not curSweep and not na(curL) and not na(curLTs)
+                wSsmtBLine := f_set_or_make_line(wSsmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+
+            bool showLabelWB = (isChartESWB and crackedESWB) or (isChartNQWB and crackedNQWB)
+            if hasPointsWB and crackedWB != "" and showLabelWB
+                string lblTextWB = "W.SSMT " + crackedWB
+                if na(wSsmtBLbl)
+                    wSsmtBLbl := label.new(prevLTs, prevL, lblTextWB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                else
+                    label.set_xy(wSsmtBLbl, prevLTs, prevL)
+                    label.set_text(wSsmtBLbl, lblTextWB)
+                    label.set_textcolor(wSsmtBLbl, color.black)
+                    label.set_color(wSsmtBLbl, color.new(color.black, 100))
+            else if not showLabelWB and not na(wSsmtBLbl)
+                label.delete(wSsmtBLbl)
+                wSsmtBLbl := na
+    f_ssmt_hist_trim(wSsmtBHistLines, wSsmtBHistLbls, ssmtKeep)
+else
+    if not na(wSsmtBLine)
+        line.delete(wSsmtBLine)
+        wSsmtBLine := na
+    if not na(wSsmtBLbl)
+        label.delete(wSsmtBLbl)
+        wSsmtBLbl := na
+    f_ssmt_hist_clear(wSsmtBHistLines, wSsmtBHistLbls)
+    wSsmtBEventKey := na
+    wSsmtBExtendTier := 0
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)
