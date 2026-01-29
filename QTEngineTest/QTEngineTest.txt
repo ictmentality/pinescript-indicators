@@ -38,9 +38,10 @@ dwWeekly     = input.bool(false, "Weekly — intent/eff + q1–q5 (minimal)", gr
 groupDbg = "ALIGNED TF DEBUG"
 showAlignedOhlc = input.bool(false, "Show aligned TF OHLC table", group=groupDbg)
 
-groupSSMT = "SSMT TEST (Daily ES/NQ)"
-showDailyBearSSMT = input.bool(false, "Show Bearish Daily SSMT (Triad)", group=groupSSMT)
-showDailyBullSSMT = input.bool(false, "Show Bullish Daily SSMT (Triad)", group=groupSSMT)
+groupSSMT = "SSMT TEST (Daily/Weekly ES/NQ)"
+showDailyBearSSMT = input.bool(false, "Show Bearish Daily SSMT (Dyad)", group=groupSSMT)
+showDailyBullSSMT = input.bool(false, "Show Bullish Daily SSMT (Dyad)", group=groupSSMT)
+showWeeklyBearSSMT = input.bool(false, "Show Bearish Weekly SSMT (Dyad)", group=groupSSMT)
 ssmtSymES = input.symbol("MESH2026", "ES / MES", group=groupSSMT)
 ssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ", group=groupSSMT)
 ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)  // #F23645
@@ -178,6 +179,57 @@ f_ssmt_daily_lows() =>
         qcurTs := d.q4Ts
 
     [lcur, lcurTs, lprev, lprevTs, d.curQuarterIndex, qcurTs]
+
+f_ssmt_weekly_highs() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+
+    // Local running High tracking for Weekly quarters (q=1d x5), per-symbol inside request.security()
+    var int   wLastQStart = na
+    var float wCurH = na
+    var int   wCurHTs = na
+    var float wPrevH = na
+    var int   wPrevHTs = na
+
+    int t = time
+    int tc = time_close
+    [st0, w] = qt.qt_weekly_update(st, cfg, t, tc)
+    st := st0
+
+    // Determine the active Weekly quarter by startIntent thresholds (use time_close for boundary attribution)
+    int qi = na
+    int qts = na
+    if not na(w.q1.startIntent) and tc >= w.q1.startIntent
+        qi := 1
+        qts := w.q1.startIntent
+    if not na(w.q2.startIntent) and tc >= w.q2.startIntent
+        qi := 2
+        qts := w.q2.startIntent
+    if not na(w.q3.startIntent) and tc >= w.q3.startIntent
+        qi := 3
+        qts := w.q3.startIntent
+    if not na(w.q4.startIntent) and tc >= w.q4.startIntent
+        qi := 4
+        qts := w.q4.startIntent
+    if not na(w.q5.startIntent) and tc >= w.q5.startIntent
+        qi := 5
+        qts := w.q5.startIntent
+
+    bool inQ = not na(qi) and not na(qts)
+    if inQ
+        bool qChanged = na(wLastQStart) or qts != wLastQStart
+        if qChanged
+            wPrevH := wCurH
+            wPrevHTs := wCurHTs
+            wCurH := high
+            wCurHTs := time
+            wLastQStart := qts
+        else
+            if na(wCurH) or high > wCurH
+                wCurH := high
+                wCurHTs := time
+
+    [wCurH, wCurHTs, wPrevH, wPrevHTs, qi, qts]
 
 f_ssmt_sym_ticker(string sym) =>
     string s = str.upper(sym)
@@ -980,6 +1032,156 @@ else
         ssmtBDbgTbl := na
     ssmtBEventKey := na
     ssmtBExtendTier := 0
+
+// -----------------------------------------------------------------------------
+// Bearish Weekly SSMT (ES/NQ) — test-only
+// Visibility: Only show on Weekly-aligned TFs (H1–H3 per helpers/Alignments.txt)
+// -----------------------------------------------------------------------------
+var line[] wSsmtHistLines = array.new_line()
+var label[] wSsmtHistLbls = array.new_label()
+var line wSsmtLine = na
+var int  wSsmtEventKey = na
+var label wSsmtLbl = na
+var int  wSsmtExtendTier = 0
+int WSSmtQLen = 24 * 60 * 60 * 1000
+
+bool wSsmtTfOk = visWeeklyTf
+if showWeeklyBearSSMT and wSsmtTfOk
+    string esSymW = f_ssmt_norm_sym(ssmtSymES)
+    string nqSymW = f_ssmt_norm_sym(ssmtSymNQ)
+
+    [esHcurW, esHcurTsW, esHprevW, esHprevTsW, esQiW, esQtsW] = request.security(esSymW, timeframe.period, f_ssmt_weekly_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    [nqHcurW, nqHcurTsW, nqHprevW, nqHprevTsW, nqQiW, nqQtsW] = request.security(nqSymW, timeframe.period, f_ssmt_weekly_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+    string chartTagW = f_ssmt_tag(syminfo.tickerid)
+    bool isChartESW = chartTagW == "ES"
+    bool isChartNQW = chartTagW == "NQ"
+    bool isPairChartW = isChartESW or isChartNQW
+
+    bool ssmtReadyW = not na(esHcurW) and not na(esHprevW) and not na(nqHcurW) and not na(nqHprevW)
+
+    if ssmtReadyW and isPairChartW
+        bool esSweepW = esHcurW > esHprevW
+        bool nqSweepW = nqHcurW > nqHprevW
+        bool splitW = esSweepW != nqSweepW
+
+        bool crackedESW = not esSweepW
+        bool crackedNQW = not nqSweepW
+        string crackedW = ""
+        if crackedESW
+            crackedW += "ES"
+        if crackedNQW
+            crackedW += (crackedW == "" ? "" : "/") + "NQ"
+
+        // Select chart-local series (for this symbol) for drawing
+        float curH = na
+        int   curHTs = na
+        float prevH = na
+        int   prevHTs = na
+        int   curQTs = na
+        bool  curSweep = false
+        if isChartESW
+            curH := esHcurW
+            curHTs := esHcurTsW
+            prevH := esHprevW
+            prevHTs := esHprevTsW
+            curQTs := esQtsW
+            curSweep := esSweepW
+        else if isChartNQW
+            curH := nqHcurW
+            curHTs := nqHcurTsW
+            prevH := nqHprevW
+            prevHTs := nqHprevTsW
+            curQTs := nqQtsW
+            curSweep := nqSweepW
+
+        int eventKey = prevHTs
+        bool eventChanged = not na(eventKey) and (na(wSsmtEventKey) or eventKey != wSsmtEventKey)
+        if eventChanged
+            f_ssmt_hist_push(wSsmtLine, wSsmtLbl, wSsmtHistLines, wSsmtHistLbls, ssmtKeep)
+            wSsmtLine := na
+            wSsmtLbl := na
+            wSsmtExtendTier := 0
+            wSsmtEventKey := eventKey
+
+        if not splitW or not isPairChartW
+            if not na(wSsmtLine)
+                line.delete(wSsmtLine)
+                wSsmtLine := na
+            if not na(wSsmtLbl)
+                label.delete(wSsmtLbl)
+                wSsmtLbl := na
+            wSsmtEventKey := na
+            wSsmtExtendTier := 0
+        else
+            bool hasPoints = not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if hasPoints and curSweep and not na(prevH)
+                int thirdLen = int(WSSmtQLen / 3)
+                int q1End = curQTs + thirdLen
+                int q2End = curQTs + (thirdLen * 2)
+                int q3End = curQTs + WSSmtQLen
+
+                int sweepTier = 1
+                if not na(curHTs)
+                    if curHTs >= q2End
+                        sweepTier := 3
+                    else if curHTs >= q1End
+                        sweepTier := 2
+
+                int barTier = 1
+                if time_close >= q2End
+                    barTier := 3
+                else if time_close >= q1End
+                    barTier := 2
+
+                wSsmtExtendTier := wSsmtExtendTier < sweepTier ? sweepTier : wSsmtExtendTier
+
+                // Auto-extend when price is still through the swept PQH level as later thirds begin
+                bool touch = high >= prevH
+                if touch
+                    wSsmtExtendTier := wSsmtExtendTier < barTier ? barTier : wSsmtExtendTier
+
+                int x2 = q1End
+                if wSsmtExtendTier >= 3
+                    x2 := q3End
+                else if wSsmtExtendTier == 2
+                    x2 := q2End
+
+                wSsmtLine := f_set_or_make_hline_w(wSsmtLine, prevHTs, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+            else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                wSsmtLine := f_set_or_make_line(wSsmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+
+            bool showLabel = (isChartESW and crackedESW) or (isChartNQW and crackedNQW)
+            if hasPoints and crackedW != "" and showLabel
+                string lblText = "W.SSMT " + crackedW
+                if na(wSsmtLbl)
+                    wSsmtLbl := label.new(prevHTs, prevH, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                else
+                    label.set_x(wSsmtLbl, prevHTs)
+                    label.set_y(wSsmtLbl, prevH)
+                    label.set_text(wSsmtLbl, lblText)
+
+            f_ssmt_hist_trim(wSsmtHistLines, wSsmtHistLbls, ssmtKeep)
+    else
+        if not na(wSsmtLine)
+            line.delete(wSsmtLine)
+            wSsmtLine := na
+        if not na(wSsmtLbl)
+            label.delete(wSsmtLbl)
+            wSsmtLbl := na
+        f_ssmt_hist_trim(wSsmtHistLines, wSsmtHistLbls, ssmtKeep)
+        wSsmtEventKey := na
+        wSsmtExtendTier := 0
+else
+    if not na(wSsmtLine)
+        line.delete(wSsmtLine)
+        wSsmtLine := na
+    if not na(wSsmtLbl)
+        label.delete(wSsmtLbl)
+        wSsmtLbl := na
+    f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
+    wSsmtEventKey := na
+    wSsmtExtendTier := 0
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)
