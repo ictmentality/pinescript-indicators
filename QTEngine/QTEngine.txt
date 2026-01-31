@@ -100,6 +100,23 @@ export type WeeklyQuarter
     int   startIntent
     int   startEff
     int   endEff
+
+    // OHLC + timestamps (chart-TF aggregated; gap-safe)
+    float o
+    float h
+    float l
+    float c
+    int   oTs
+    int   hTs
+    int   lTs
+    int   cTs
+    bool  has
+    bool  isEmpty
+    bool  isFinal
+    bool  evtStart
+    bool  evtFinalize
+
+    // Back-compat fields (kept in sync with o/has)
     float open
     bool  hasData
     bool  openDelayed
@@ -120,6 +137,7 @@ export type WeeklyState
     int   wsEff
     int   wsNextIntent
     int   wsNextEff
+    int   lastBoundaryIntent
     WeeklyQuarter q1
     WeeklyQuarter q2
     WeeklyQuarter q3
@@ -207,8 +225,8 @@ export qt_state_new() =>
     FixedCycleState m = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
     FixedCycleState u = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
     FixedCycleState n = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
-    WeeklyQuarter nilW = WeeklyQuarter.new(int(na), int(na), int(na), float(na), false, false)
-    WeeklyState w = WeeklyState.new(int(na), int(na), int(na), int(na), nilW, nilW, nilW, nilW, nilW)
+    WeeklyQuarter nilW = WeeklyQuarter.new(int(na), int(na), int(na), float(na), float(na), float(na), float(na), int(na), int(na), int(na), int(na), false, true, false, false, false, float(na), false, false)
+    WeeklyState w = WeeklyState.new(int(na), int(na), int(na), int(na), int(na), nilW, nilW, nilW, nilW, nilW)
     CycleState st = CycleState.new(d, m, u, n, w)
     st
 
@@ -256,7 +274,7 @@ f_make_empty_q(int qStart) =>
     )
 
 f_weekly_q_new(int startIntent) =>
-    WeeklyQuarter.new(startIntent, int(na), int(na), float(na), false, false)
+    WeeklyQuarter.new(startIntent, int(na), int(na), float(na), float(na), float(na), float(na), int(na), int(na), int(na), int(na), false, true, false, false, false, float(na), false, false)
 
 f_week_start_intent(int tRef, QTConfig cfg) =>
     int ds = f_qt_day_start(tRef, cfg)
@@ -270,15 +288,78 @@ f_eff_from_intent(int intent, int effIn, int t, int tPrev) =>
         effOut := t
     effOut
 
-f_weekly_apply_bar(WeeklyQuarter qIn, int t, float o) =>
+f_wq_clear_evts(WeeklyQuarter qIn) =>
     WeeklyQuarter q = qIn
-    bool isStartBar = not na(q.startEff) and t == q.startEff
+    q.evtStart := false
+    q.evtFinalize := false
+    q
+
+f_wq_finalize(WeeklyQuarter qIn) =>
+    WeeklyQuarter q = qIn
+    if not q.isFinal and not na(q.startIntent)
+        q.isFinal := true
+        q.evtFinalize := true
+        if not q.has
+            q.isEmpty := true
+    // Back-compat sync
+    q.open := q.o
+    q.hasData := q.has
+    q
+
+f_wq_apply_bar(WeeklyQuarter qIn, int t, float o, float h, float l, float c, bool isStartBar) =>
+    WeeklyQuarter q = qIn
+
     if not na(q.startEff)
         q.openDelayed := q.startEff > q.startIntent
-    if isStartBar and not q.hasData
-        q.open := o
-        q.hasData := true
+
+    if not q.has
+        q.o := o
+        q.oTs := t
+        q.h := h
+        q.hTs := t
+        q.l := l
+        q.lTs := t
+        q.c := c
+        q.cTs := t
+        q.has := true
+        q.isEmpty := false
+        q.isFinal := false
+        q.evtStart := isStartBar
+    else
+        bool newHigh = na(q.h) or h > q.h
+        bool newLow  = na(q.l) or l < q.l
+        if newHigh
+            q.h := h
+            q.hTs := t
+        if newLow
+            q.l := l
+            q.lTs := t
+        q.c := c
+        q.cTs := t
+        if isStartBar
+            q.evtStart := true
+
+    // Back-compat sync
+    q.open := q.o
+    q.hasData := q.has
+
     q
+
+f_wq_idx_from_boundary(int boundaryIntent, int q1Intent, int q2Intent, int q3Intent, int q4Intent, int q5Intent) =>
+    int idx = 0
+    if not na(boundaryIntent)
+        if boundaryIntent == q1Intent
+            idx := 1
+        else if boundaryIntent == q2Intent
+            idx := 2
+        else if boundaryIntent == q3Intent
+            idx := 3
+        else if boundaryIntent == q4Intent
+            idx := 4
+        else if boundaryIntent == q5Intent
+            idx := 5
+    idx
+
 
 // ============================================================================
 // NANO OPEN SOURCE (FORCED 5S) — First printed 5s bar on/after boundary
@@ -1055,6 +1136,10 @@ f_weekly_update(
     int t,
     int tClose
 ) =>
+    // Weekly is treated as a 5-quarter structure (Q1–Q5).
+    // - Boundaries are computed from the configured day-start (e.g., 18:00 NY).
+    // - Quarter membership is assigned by bar start time `t` (bar-time anchoring).
+    // - OHLC is chart-TF aggregated into each WeeklyQuarter (timestamps use bar start time).
     int tRef = tClose - 1
     int wsIntent = f_week_start_intent(tRef, cfg)
     int wsNextIntent = wsIntent + 7 * LEN_24H
@@ -1067,14 +1152,17 @@ f_weekly_update(
 
     bool weekChanged = na(stIn.wsIntent) or wsIntent != stIn.wsIntent
 
-    WeeklyQuarter q1 = stIn.q1
-    WeeklyQuarter q2 = stIn.q2
-    WeeklyQuarter q3 = stIn.q3
-    WeeklyQuarter q4 = stIn.q4
-    WeeklyQuarter q5 = stIn.q5
+    // Local copies (clear pulse events each bar)
+    WeeklyQuarter q1 = f_wq_clear_evts(stIn.q1)
+    WeeklyQuarter q2 = f_wq_clear_evts(stIn.q2)
+    WeeklyQuarter q3 = f_wq_clear_evts(stIn.q3)
+    WeeklyQuarter q4 = f_wq_clear_evts(stIn.q4)
+    WeeklyQuarter q5 = f_wq_clear_evts(stIn.q5)
     int wsEff = stIn.wsEff
     int wsNextEff = stIn.wsNextEff
+    int lastBoundaryIntent = stIn.lastBoundaryIntent
 
+    // Rebuild quarters on week rollover (no cross-week carry-forward in this step)
     if weekChanged
         q1 := f_weekly_q_new(q1Intent)
         q2 := f_weekly_q_new(q2Intent)
@@ -1083,7 +1171,9 @@ f_weekly_update(
         q5 := f_weekly_q_new(q5Intent)
         wsEff := int(na)
         wsNextEff := int(na)
+        lastBoundaryIntent := int(na)
     else
+        // Guard against intent drift if the script is reloaded mid-week.
         if q1.startIntent != q1Intent
             q1 := f_weekly_q_new(q1Intent)
         if q2.startIntent != q2Intent
@@ -1096,30 +1186,101 @@ f_weekly_update(
             q5 := f_weekly_q_new(q5Intent)
 
     int tPrev = time[1]
+
+    // Week effective boundary (first printed bar on/after wsIntent)
     wsEff := f_eff_from_intent(wsIntent, wsEff, t, tPrev)
     wsNextEff := f_eff_from_intent(wsNextIntent, wsNextEff, t, tPrev)
 
-    q1.startEff := f_eff_from_intent(q1Intent, q1.startEff, t, tPrev)
-    q2.startEff := f_eff_from_intent(q2Intent, q2.startEff, t, tPrev)
-    q3.startEff := f_eff_from_intent(q3Intent, q3.startEff, t, tPrev)
-    q4.startEff := f_eff_from_intent(q4Intent, q4.startEff, t, tPrev)
-    q5.startEff := f_eff_from_intent(q5Intent, q5.startEff, t, tPrev)
+    // Quarter index from bar start time (clamp to 1..5; Fri/Sat/Sun roll into Q5 by design)
+    int dayOff = int(math.floor((tRef - wsIntent) / LEN_24H))
+    int qi = dayOff + 1
+    if qi < 1
+        qi := 1
+    else if qi > 5
+        qi := 5
 
+    int qCurIntent = q1Intent
+    if qi == 2
+        qCurIntent := q2Intent
+    else if qi == 3
+        qCurIntent := q3Intent
+    else if qi == 4
+        qCurIntent := q4Intent
+    else if qi == 5
+        qCurIntent := q5Intent
+
+    // Start edge: first printed bar on/after the intended boundary (gap-safe).
+    bool startEdge = (tClose > qCurIntent) and (na(lastBoundaryIntent) or qCurIntent != lastBoundaryIntent)
+
+    // Finalize the previous quarter (and any skipped quarters) on the first bar of the new quarter.
+    if startEdge and not weekChanged
+        int lastIdx = f_wq_idx_from_boundary(lastBoundaryIntent, q1Intent, q2Intent, q3Intent, q4Intent, q5Intent)
+        int newIdx  = qi
+
+        if lastIdx == 1
+            q1 := f_wq_finalize(q1)
+            if newIdx >= 3
+                q2 := f_wq_finalize(q2)
+            if newIdx >= 4
+                q3 := f_wq_finalize(q3)
+            if newIdx >= 5
+                q4 := f_wq_finalize(q4)
+
+        else if lastIdx == 2
+            q2 := f_wq_finalize(q2)
+            if newIdx >= 4
+                q3 := f_wq_finalize(q3)
+            if newIdx >= 5
+                q4 := f_wq_finalize(q4)
+
+        else if lastIdx == 3
+            q3 := f_wq_finalize(q3)
+            if newIdx >= 5
+                q4 := f_wq_finalize(q4)
+
+        else if lastIdx == 4
+            q4 := f_wq_finalize(q4)
+
+    if startEdge
+        lastBoundaryIntent := qCurIntent
+
+    // Capture effective starts on the first bar classified into the quarter (gap-safe).
+    // NOTE: Weekly OHLC here is chart-TF aggregated (same limitation as other chart-TF quarters).
+    if startEdge
+        if qi == 1 and na(q1.startEff)
+            q1.startEff := t
+        else if qi == 2 and na(q2.startEff)
+            q2.startEff := t
+        else if qi == 3 and na(q3.startEff)
+            q3.startEff := t
+        else if qi == 4 and na(q4.startEff)
+            q4.startEff := t
+        else if qi == 5 and na(q5.startEff)
+            q5.startEff := t
+
+    // Effective ends: next quarter's effective start (if/when it prints)
     q1.endEff := q2.startEff
     q2.endEff := q3.startEff
     q3.endEff := q4.startEff
     q4.endEff := q5.startEff
     q5.endEff := wsNextEff
 
-    q1 := f_weekly_apply_bar(q1, t, open)
-    q2 := f_weekly_apply_bar(q2, t, open)
-    q3 := f_weekly_apply_bar(q3, t, open)
-    q4 := f_weekly_apply_bar(q4, t, open)
-    q5 := f_weekly_apply_bar(q5, t, open)
+    // Update active quarter OHLC on chart TF
+    if qi == 1 and not q1.isFinal
+        q1 := f_wq_apply_bar(q1, t, open, high, low, close, startEdge)
+    else if qi == 2 and not q2.isFinal
+        q2 := f_wq_apply_bar(q2, t, open, high, low, close, startEdge)
+    else if qi == 3 and not q3.isFinal
+        q3 := f_wq_apply_bar(q3, t, open, high, low, close, startEdge)
+    else if qi == 4 and not q4.isFinal
+        q4 := f_wq_apply_bar(q4, t, open, high, low, close, startEdge)
+    else if qi == 5 and not q5.isFinal
+        q5 := f_wq_apply_bar(q5, t, open, high, low, close, startEdge)
 
-    WeeklyState stOut = WeeklyState.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5)
-    WeeklyResult res = WeeklyResult.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5)
+    WeeklyState stOut = WeeklyState.new(wsIntent, wsEff, wsNextIntent, wsNextEff, lastBoundaryIntent, q1, q2, q3, q4, q5)
+    WeeklyResult res  = WeeklyResult.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5)
     [stOut, res]
+
 
 
 // ============================================================================
