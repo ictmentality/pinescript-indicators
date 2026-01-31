@@ -6,7 +6,7 @@ Key Level Detector (Swing H/L, FVG, need to add NDOG, NWOG, and PD)
 
 QT Visuals (Dividers, Opens, DFR, SSMT, HSSMT, tCISD, NWOG, NDOG)
 
-QT Alerts (Sequencer + State Machine with Invalidations, Entries, Stop, and Targets)
+QT Trade Alerts (Sequencer + State Machine with Invalidations, Entries, Stop, and Targets)
 
 QT Fractal Model (Visual Representation of my favorite QT Model, W.SSMT (H1) -> m90.SSMT (m5) -> m5 tCISD or 1st P FVG after SSMT)
 

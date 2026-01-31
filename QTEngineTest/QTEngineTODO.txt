@@ -1,14 +1,14 @@
 QTEngine TODO
 
-- Weekly Cycle functionality (boundaries then OHLC)
+- Weekly Cycle functionality (OHLC) 
 - Monthly Cycle functionality 
 - Quarterly Cycle functionality
 - Yearly Cycle functionality
 - Quandrennial Cycle functionality
 
-- Forex Time Handling
+- Forex Time Handling (Maybe we already handle these, need to confirm and test)
 
-QTEngine Modules
+QTEngine Modules (Should these be modules or should my indicator's implement them by themselves. Library vs Indicator function)
 - SSMT
 - HSSMT
 - tCISD
@@ -23,6 +23,6 @@ Testing TODO
 - DFR toggle (Projections and highlight)
 - Better Asset Selector (already have helper file)
 - Add toggle for "Display Parent Cycle Opens" (Maybe a list: All Opens, Q1 + Q2, None)
-- Help with SSMT drawings (if PQH get swept in the first 1/3 of the Quarter, only draw the SSMT line to extend to the 1/3 of the Quarter. If it later retrades above PQH in the 2/3 then redraw the line to extend 2/3 of the Quarter. Same for if it retrades above PQH during the 3/3, the extend the drawing to the end of the Quarter)
+- Help with SSMT drawings
 
 
