@@ -1,7 +1,7 @@
 //@version=6
 indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/17 as qt
+import Jaw1312/QTEngine/19 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -33,7 +33,7 @@ dwMicroStep1 = input.bool(true, "Step 1 — Micro boundaryTs checks", group=grou
 dwMicroStep2 = input.bool(true, "Step 2 — Micro QuarterRecord (q1–q4) — minimal", group=groupDW)
 dwNanoStep1  = input.bool(true, "Step 1 — Nano boundaryTs checks", group=groupDW)
 dwNanoStep2  = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — minimal", group=groupDW)
-dwWeekly     = input.bool(false, "Weekly — intent/eff + q1–q5 (minimal)", group=groupDW)
+dwWeekly     = input.bool(false, "Weekly — effective (packed) q1–q5", group=groupDW)
 
 groupDbg = "ALIGNED TF DEBUG"
 showAlignedOhlc = input.bool(false, "Show aligned TF OHLC table", group=groupDbg)
@@ -253,21 +253,21 @@ f_ssmt_weekly_highs() =>
     // Determine the active Weekly quarter by startIntent thresholds (use time_close for boundary attribution)
     int qi = na
     int qts = na
-    if not na(w.q1.startIntent) and tc >= w.q1.startIntent
+    if not na(w.e1.startIntent) and tc >= w.e1.startIntent
         qi := 1
-        qts := w.q1.startIntent
-    if not na(w.q2.startIntent) and tc >= w.q2.startIntent
+        qts := w.e1.startIntent
+    if not na(w.e2.startIntent) and tc >= w.e2.startIntent
         qi := 2
-        qts := w.q2.startIntent
-    if not na(w.q3.startIntent) and tc >= w.q3.startIntent
+        qts := w.e2.startIntent
+    if not na(w.e3.startIntent) and tc >= w.e3.startIntent
         qi := 3
-        qts := w.q3.startIntent
-    if not na(w.q4.startIntent) and tc >= w.q4.startIntent
+        qts := w.e3.startIntent
+    if not na(w.e4.startIntent) and tc >= w.e4.startIntent
         qi := 4
-        qts := w.q4.startIntent
-    if not na(w.q5.startIntent) and tc >= w.q5.startIntent
+        qts := w.e4.startIntent
+    if not na(w.e5.startIntent) and tc >= w.e5.startIntent
         qi := 5
-        qts := w.q5.startIntent
+        qts := w.e5.startIntent
 
     bool inQ = not na(qi) and not na(qts)
     if inQ
@@ -305,21 +305,21 @@ f_ssmt_weekly_lows() =>
     // Determine the active Weekly quarter by startIntent thresholds (use time_close for boundary attribution)
     int qi = na
     int qts = na
-    if not na(w.q1.startIntent) and tc >= w.q1.startIntent
+    if not na(w.e1.startIntent) and tc >= w.e1.startIntent
         qi := 1
-        qts := w.q1.startIntent
-    if not na(w.q2.startIntent) and tc >= w.q2.startIntent
+        qts := w.e1.startIntent
+    if not na(w.e2.startIntent) and tc >= w.e2.startIntent
         qi := 2
-        qts := w.q2.startIntent
-    if not na(w.q3.startIntent) and tc >= w.q3.startIntent
+        qts := w.e2.startIntent
+    if not na(w.e3.startIntent) and tc >= w.e3.startIntent
         qi := 3
-        qts := w.q3.startIntent
-    if not na(w.q4.startIntent) and tc >= w.q4.startIntent
+        qts := w.e3.startIntent
+    if not na(w.e4.startIntent) and tc >= w.e4.startIntent
         qi := 4
-        qts := w.q4.startIntent
-    if not na(w.q5.startIntent) and tc >= w.q5.startIntent
+        qts := w.e4.startIntent
+    if not na(w.e5.startIntent) and tc >= w.e5.startIntent
         qi := 5
-        qts := w.q5.startIntent
+        qts := w.e5.startIntent
 
     bool inQ = not na(qi) and not na(qts)
     if inQ
@@ -756,6 +756,7 @@ if dwWeekly and barstate.islast
     table.cell(weekly_tbl, 4, 0, "Q4", text_color=color.black, bgcolor=color.new(color.black, 85))
     table.cell(weekly_tbl, 5, 0, "Q5", text_color=color.black, bgcolor=color.new(color.black, 85))
 
+    // Week start (intent/eff)
     table.cell(weekly_tbl, 0, 1, "wsIntent", text_color=color.black)
     table.cell(weekly_tbl, 1, 1, f_fmt_ts(w.wsIntent, cfg.tz), text_color=color.black)
     table.cell(weekly_tbl, 0, 2, "wsEff", text_color=color.black)
@@ -765,47 +766,58 @@ if dwWeekly and barstate.islast
     table.cell(weekly_tbl, 0, 4, "wsNextEff", text_color=color.black)
     table.cell(weekly_tbl, 1, 4, f_fmt_ts(w.wsNextEff, cfg.tz), text_color=color.black)
 
-    table.cell(weekly_tbl, 0, 5, "startIntent", text_color=color.black)
-    table.cell(weekly_tbl, 1, 5, f_fmt_ts(w.q1.startIntent, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 2, 5, f_fmt_ts(w.q2.startIntent, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 3, 5, f_fmt_ts(w.q3.startIntent, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 4, 5, f_fmt_ts(w.q4.startIntent, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 5, 5, f_fmt_ts(w.q5.startIntent, cfg.tz), text_color=color.black)
+    // Effective (packed) quarter view: when a slot quarter is finalized empty, we compress left.
+    table.cell(weekly_tbl, 0, 5, "effCount", text_color=color.black)
+    table.cell(weekly_tbl, 1, 5, str.tostring(w.effCount), text_color=color.black)
 
-    table.cell(weekly_tbl, 0, 6, "startEff", text_color=color.black)
-    table.cell(weekly_tbl, 1, 6, f_fmt_ts(w.q1.startEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 2, 6, f_fmt_ts(w.q2.startEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 3, 6, f_fmt_ts(w.q3.startEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 4, 6, f_fmt_ts(w.q4.startEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 5, 6, f_fmt_ts(w.q5.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 0, 6, "slotSrc", text_color=color.black)
+    table.cell(weekly_tbl, 1, 6, w.effSrc1 == 0 ? "-" : str.tostring(w.effSrc1), text_color=color.black)
+    table.cell(weekly_tbl, 2, 6, w.effSrc2 == 0 ? "-" : str.tostring(w.effSrc2), text_color=color.black)
+    table.cell(weekly_tbl, 3, 6, w.effSrc3 == 0 ? "-" : str.tostring(w.effSrc3), text_color=color.black)
+    table.cell(weekly_tbl, 4, 6, w.effSrc4 == 0 ? "-" : str.tostring(w.effSrc4), text_color=color.black)
+    table.cell(weekly_tbl, 5, 6, w.effSrc5 == 0 ? "-" : str.tostring(w.effSrc5), text_color=color.black)
 
-    table.cell(weekly_tbl, 0, 7, "endEff", text_color=color.black)
-    table.cell(weekly_tbl, 1, 7, f_fmt_ts(w.q1.endEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 2, 7, f_fmt_ts(w.q2.endEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 3, 7, f_fmt_ts(w.q3.endEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 4, 7, f_fmt_ts(w.q4.endEff, cfg.tz), text_color=color.black)
-    table.cell(weekly_tbl, 5, 7, f_fmt_ts(w.q5.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 0, 7, "startIntent", text_color=color.black)
+    table.cell(weekly_tbl, 1, 7, f_fmt_ts(w.e1.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 2, 7, f_fmt_ts(w.e2.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 3, 7, f_fmt_ts(w.e3.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 4, 7, f_fmt_ts(w.e4.startIntent, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 5, 7, f_fmt_ts(w.e5.startIntent, cfg.tz), text_color=color.black)
 
-    table.cell(weekly_tbl, 0, 8, "open", text_color=color.black)
-    table.cell(weekly_tbl, 1, 8, f_fmt(w.q1.open), text_color=color.black)
-    table.cell(weekly_tbl, 2, 8, f_fmt(w.q2.open), text_color=color.black)
-    table.cell(weekly_tbl, 3, 8, f_fmt(w.q3.open), text_color=color.black)
-    table.cell(weekly_tbl, 4, 8, f_fmt(w.q4.open), text_color=color.black)
-    table.cell(weekly_tbl, 5, 8, f_fmt(w.q5.open), text_color=color.black)
+    table.cell(weekly_tbl, 0, 8, "startEff", text_color=color.black)
+    table.cell(weekly_tbl, 1, 8, f_fmt_ts(w.e1.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 2, 8, f_fmt_ts(w.e2.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 3, 8, f_fmt_ts(w.e3.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 4, 8, f_fmt_ts(w.e4.startEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 5, 8, f_fmt_ts(w.e5.startEff, cfg.tz), text_color=color.black)
 
-    table.cell(weekly_tbl, 0, 9, "hasData", text_color=color.black)
-    table.cell(weekly_tbl, 1, 9, w.q1.hasData ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 2, 9, w.q2.hasData ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 3, 9, w.q3.hasData ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 4, 9, w.q4.hasData ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 5, 9, w.q5.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 0, 9, "endEff", text_color=color.black)
+    table.cell(weekly_tbl, 1, 9, f_fmt_ts(w.e1.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 2, 9, f_fmt_ts(w.e2.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 3, 9, f_fmt_ts(w.e3.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 4, 9, f_fmt_ts(w.e4.endEff, cfg.tz), text_color=color.black)
+    table.cell(weekly_tbl, 5, 9, f_fmt_ts(w.e5.endEff, cfg.tz), text_color=color.black)
 
-    table.cell(weekly_tbl, 0, 10, "openDelayed", text_color=color.black)
-    table.cell(weekly_tbl, 1, 10, w.q1.openDelayed ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 2, 10, w.q2.openDelayed ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 3, 10, w.q3.openDelayed ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 4, 10, w.q4.openDelayed ? "Y" : "N", text_color=color.black)
-    table.cell(weekly_tbl, 5, 10, w.q5.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 0, 10, "open", text_color=color.black)
+    table.cell(weekly_tbl, 1, 10, f_fmt(w.e1.open), text_color=color.black)
+    table.cell(weekly_tbl, 2, 10, f_fmt(w.e2.open), text_color=color.black)
+    table.cell(weekly_tbl, 3, 10, f_fmt(w.e3.open), text_color=color.black)
+    table.cell(weekly_tbl, 4, 10, f_fmt(w.e4.open), text_color=color.black)
+    table.cell(weekly_tbl, 5, 10, f_fmt(w.e5.open), text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 11, "hasData", text_color=color.black)
+    table.cell(weekly_tbl, 1, 11, w.e1.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 2, 11, w.e2.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 3, 11, w.e3.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 4, 11, w.e4.hasData ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 5, 11, w.e5.hasData ? "Y" : "N", text_color=color.black)
+
+    table.cell(weekly_tbl, 0, 12, "openDelayed", text_color=color.black)
+    table.cell(weekly_tbl, 1, 12, w.e1.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 2, 12, w.e2.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 3, 12, w.e3.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 4, 12, w.e4.openDelayed ? "Y" : "N", text_color=color.black)
+    table.cell(weekly_tbl, 5, 12, w.e5.openDelayed ? "Y" : "N", text_color=color.black)
 else if not dwWeekly and not na(weekly_tbl)
     table.delete(weekly_tbl)
     weekly_tbl := na
@@ -2248,21 +2260,21 @@ f_whist_ensure_current() =>
         int wEnd2 = not na(w.wsNextEff) ? w.wsNextEff : w.wsNextIntent
         array.set(weeklyHistEnd, idx, wEnd2)
 
-        if not na(w.q1.open) and not na(w.q1.startEff)
-            array.set(weekly_h_q1o, idx, w.q1.open)
-            array.set(weekly_h_q1oTs, idx, w.q1.startEff)
-        if not na(w.q2.open) and not na(w.q2.startEff)
-            array.set(weekly_h_q2o, idx, w.q2.open)
-            array.set(weekly_h_q2oTs, idx, w.q2.startEff)
-        if not na(w.q3.open) and not na(w.q3.startEff)
-            array.set(weekly_h_q3o, idx, w.q3.open)
-            array.set(weekly_h_q3oTs, idx, w.q3.startEff)
-        if not na(w.q4.open) and not na(w.q4.startEff)
-            array.set(weekly_h_q4o, idx, w.q4.open)
-            array.set(weekly_h_q4oTs, idx, w.q4.startEff)
-        if not na(w.q5.open) and not na(w.q5.startEff)
-            array.set(weekly_h_q5o, idx, w.q5.open)
-            array.set(weekly_h_q5oTs, idx, w.q5.startEff)
+        if not na(w.e1.open) and not na(w.e1.startEff)
+            array.set(weekly_h_q1o, idx, w.e1.open)
+            array.set(weekly_h_q1oTs, idx, w.e1.startEff)
+        if not na(w.e2.open) and not na(w.e2.startEff)
+            array.set(weekly_h_q2o, idx, w.e2.open)
+            array.set(weekly_h_q2oTs, idx, w.e2.startEff)
+        if not na(w.e3.open) and not na(w.e3.startEff)
+            array.set(weekly_h_q3o, idx, w.e3.open)
+            array.set(weekly_h_q3oTs, idx, w.e3.startEff)
+        if not na(w.e4.open) and not na(w.e4.startEff)
+            array.set(weekly_h_q4o, idx, w.e4.open)
+            array.set(weekly_h_q4oTs, idx, w.e4.startEff)
+        if not na(w.e5.open) and not na(w.e5.startEff)
+            array.set(weekly_h_q5o, idx, w.e5.open)
+            array.set(weekly_h_q5oTs, idx, w.e5.startEff)
 
         while array.size(weeklyHistStart) > STORE_MAX
             f_whist_shift_front()
@@ -2869,35 +2881,35 @@ else
 
     if not na(w.wsEff) and tc > w.wsEff
         vset_add(weeklyV, w.wsEff, COL_Q1)
-    if not na(w.q2.startEff) and tc > w.q2.startEff
-        vset_add(weeklyV, w.q2.startEff, COL_Q2)
-    if not na(w.q3.startEff) and tc > w.q3.startEff
-        vset_add(weeklyV, w.q3.startEff, COL_Q3)
-    if not na(w.q4.startEff) and tc > w.q4.startEff
-        vset_add(weeklyV, w.q4.startEff, COL_Q4)
-    if not na(w.q5.startEff) and tc > w.q5.startEff
-        vset_add(weeklyV, w.q5.startEff, COL_Q5)
+    if not na(w.e2.startEff) and tc > w.e2.startEff
+        vset_add(weeklyV, w.e2.startEff, COL_Q2)
+    if not na(w.e3.startEff) and tc > w.e3.startEff
+        vset_add(weeklyV, w.e3.startEff, COL_Q3)
+    if not na(w.e4.startEff) and tc > w.e4.startEff
+        vset_add(weeklyV, w.e4.startEff, COL_Q4)
+    if not na(w.e5.startEff) and tc > w.e5.startEff
+        vset_add(weeklyV, w.e5.startEff, COL_Q5)
     if not na(w.wsNextEff) and tc > w.wsNextEff
         vset_add(weeklyV, w.wsNextEff, COL_Q1)
 
     // Weekly projections (intent-based; kill once passed)
-    if not na(w.q2.startIntent) and tc <= w.q2.startIntent
-        weekProjQ2 := f_set_or_make_vline(weekProjQ2, w.q2.startIntent, COL_Q2)
+    if not na(w.e2.startIntent) and tc <= w.e2.startIntent
+        weekProjQ2 := f_set_or_make_vline(weekProjQ2, w.e2.startIntent, COL_Q2)
     else
         weekProjQ2 := f_kill(weekProjQ2)
 
-    if not na(w.q3.startIntent) and tc <= w.q3.startIntent
-        weekProjQ3 := f_set_or_make_vline(weekProjQ3, w.q3.startIntent, COL_Q3)
+    if not na(w.e3.startIntent) and tc <= w.e3.startIntent
+        weekProjQ3 := f_set_or_make_vline(weekProjQ3, w.e3.startIntent, COL_Q3)
     else
         weekProjQ3 := f_kill(weekProjQ3)
 
-    if not na(w.q4.startIntent) and tc <= w.q4.startIntent
-        weekProjQ4 := f_set_or_make_vline(weekProjQ4, w.q4.startIntent, COL_Q4)
+    if not na(w.e4.startIntent) and tc <= w.e4.startIntent
+        weekProjQ4 := f_set_or_make_vline(weekProjQ4, w.e4.startIntent, COL_Q4)
     else
         weekProjQ4 := f_kill(weekProjQ4)
 
-    if not na(w.q5.startIntent) and tc <= w.q5.startIntent
-        weekProjQ5 := f_set_or_make_vline(weekProjQ5, w.q5.startIntent, COL_Q5)
+    if not na(w.e5.startIntent) and tc <= w.e5.startIntent
+        weekProjQ5 := f_set_or_make_vline(weekProjQ5, w.e5.startIntent, COL_Q5)
     else
         weekProjQ5 := f_kill(weekProjQ5)
 

@@ -122,7 +122,7 @@ For consistency (and to make m90 HSSMT meaningful), also copy:
 
 ---
 
-## 6) What this enables immediately
+6) What this enables immediately
 
 Once this is in the engine:
 

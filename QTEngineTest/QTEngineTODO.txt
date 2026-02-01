@@ -7,6 +7,8 @@ QTEngine TODO
 - Quandrennial Cycle functionality
 
 - Forex Time Handling (Maybe we already handle these, need to confirm and test)
+- calc_bars_count caps on seconds feeds
+- Add in error handling for sub minute charts (higher TradingView plan, should be small warning and open values align to m1)
 
 QTEngine Modules (Should these be modules or should my indicator's implement them by themselves. Library vs Indicator function)
 - SSMT
