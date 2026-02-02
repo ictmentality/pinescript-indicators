@@ -1,5 +1,15 @@
 QTEngine TODO
 
+1) Public Surface
+2) Core Module
+3) Fixed-Cycle Module
+4) Calendar/Session Modules
+5) Ingestion/caching module
+6) Divider collision module
+7) Debug/telemetry module
+8) Minimal rework plan inside QTEngine
+
+
 - Weekly Cycle functionality (OHLC) 
 - Monthly Cycle functionality 
 - Quarterly Cycle functionality
@@ -28,3 +38,209 @@ Testing TODO
 - Help with SSMT drawings
 
 
+1) Public surface (keep stable)
+   Goal: do not break downstream indicators.
+
+   Public types (UDTs)
+   - QtEngineState
+     Holds all per-cycle states + shared caches + collision bookkeeping.
+
+   - QtCycleState (one per cycle)
+     Current quarter window + last realized boundary + current/prev records +
+     debug counters.
+
+   - QtBoundaryEvent
+     "A boundary happened" payload (realized only; never "predicted-as-final").
+
+   Public functions (wrappers)
+   - f_qt_init(...) -> QtEngineState
+     Initializes states, caches, and collision buffers.
+
+   - f_qt_step(engine, inputs...) -> QtEngineState
+     One call per bar that updates all enabled cycles internally.
+
+   Optional convenience wrappers (keep them)
+   - f_daily_update(...)
+   - f_weekly_update(...)
+   - etc.
+
+   Notes / direction
+   - These wrappers should become thin and only call into Core + module.
+   - Change vs now: stop having cycle-specific update functions each doing their
+     own roll/draw/timestamp logic. They should only supply a CycleConfig and
+     call shared internals.
+
+
+2) Core module (Core.*): the only place that rolls quarters
+   This is the engine heart. Every cycle—fixed or calendar—must pass through this.
+
+   Responsibilities
+   - Boundary realization (time-gated)
+     Canonical gate: time_close > boundary_ts (early mode).
+     Prevent "future knowledge" by forbidding final events before realized.
+
+   - Quarter roll
+     Finalize previous record, start new record, reset per-quarter fields.
+
+   - Record update
+     Update current quarter OHLC each bar.
+
+   - Event stamping
+     Record realized bar index/time for drawing alignment.
+
+   Functions (conceptual boundaries)
+   - Core.f_make_event_if_realized(
+         cycleState,
+         candidateBoundaryTs,
+         time_close,
+         bar_index
+     ) -> QtBoundaryEvent / na
+
+   - Core.f_roll_quarter(
+         cycleState,
+         event,
+         curBarOHLC
+     ) -> QtCycleState
+
+   - Core.f_update_ohlc(
+         cycleState,
+         curBarOHLC
+     ) -> QtCycleState
+
+   State location
+   - State lives inside QtCycleState (not scattered across globals).
+
+
+3) Fixed-cycle module (FixedCycle.*): Nano / Micro / m90 / Daily
+   These cycles are defined by duration + anchor. They should be mechanically deterministic.
+
+   Responsibilities
+   - Compute the candidate next boundary timestamp for the cycle
+     - Duration-based stepping
+     - Anchored to a known "cycle start" reference
+
+   - Define quarter-id sequencing for the cycle (Q1–Q4, etc.)
+
+   Functions
+   - FixedCycle.f_next_boundary_ts(cycleState, now_ts) -> int
+   - FixedCycle.f_quarter_id(cycleState, boundary_ts) -> int
+   - FixedCycle.f_reason_code(...) -> int    // usually "normal"
+
+   Output contract
+   - Outputs only a candidate boundary timestamp + metadata.
+   - Does NOT roll quarters.
+   - Does NOT draw.
+
+
+4) Calendar/session module (CalendarCycle.*): Weekly / Monthly / Quarterly / Yearly
+   These are "skip-prone." Treat skips as a boundary placement problem, not a roll/update
+   problem.
+
+   Responsibilities
+   - Compute the intended boundary timestamp
+     Examples: "second Monday open", "April first Monday open", etc.
+
+   - Convert intended boundary into a realizable boundary
+     - If intended boundary is during non-trading time / holiday / missing session:
+       shift to the next valid session timestamp
+     - Emit a reason code that explains any shift/compression
+
+   Functions
+   - CalendarCycle.f_intended_boundary_ts(
+         cycleState,
+         calendar_context
+     ) -> int
+
+   - CalendarCycle.f_realizable_boundary_ts(intended_ts) -> int
+     This is where "bank holiday Monday" / "no session printed" handling lives.
+     In Pine terms: find the first bar whose session-time is >= intended_ts
+     (bounded scan).
+
+   - CalendarCycle.f_reason_code(intended_ts, realized_ts) -> int
+
+   Output contract
+   - Outputs a candidate boundary timestamp (already shifted to realizable),
+     plus a reason code.
+
+5) Ingestion/caching module (Ingest.*): one request per (symbol, aligned TF)
+   This is where you enforce your performance rule and stop duplicating
+   request.security() all over the place.
+
+   Responsibilities
+   - Provide aligned series bundles keyed by TF
+   - Cache results so multiple cycles reuse the same aligned stream
+
+   UDT
+   - QtSeriesPack
+     - o, h, l, c
+     - time, time_close
+     - Any additional standardized fields (e.g., "effective session open" series)
+
+   Functions
+   - Ingest.f_get_series(tf) -> QtSeriesPack
+     Internally cached per TF.
+
+   State location
+   - Cache state lives in QtEngineState (cache fields).
+
+
+6) Divider collision module (Collide.*): "never overlap a divider line"
+   This should be engine-level, not per-cycle drawing code, otherwise overlap bugs
+   come back.
+
+   Responsibilities
+   - Maintain a lightweight occupancy structure of "used divider x-slots"
+   - When a cycle emits a realized boundary event, compute a non-overlapping x:
+     - Start at bar_index (or chosen base)
+     - If occupied -> shift forward until free
+   - Return x_draw and mark it as occupied
+
+   Functions
+   - Collide.f_reserve_x(engineState, proposed_x, divider_group_id)
+       -> (engineState, x_draw, shiftCount)
+
+   - Collide.f_reset_if_needed(engineState)
+       // bounded size / rolling window
+
+   Important design choice
+   - divider_group_id should be configurable:
+     - Global: never overlap any divider across any cycle (matches current goal)
+     - Optional later: per-layer grouping if overlaps become acceptable
+
+
+7) Debug/telemetry module (Debug.*): small, deterministic signals
+   Responsibilities
+   - Track "why did this boundary move"
+   - Track collision shift counts
+   - Track last realized boundary per cycle
+
+   Suggested fields in QtCycleState
+   - last_candidate_ts
+   - last_realized_ts
+   - last_reason_code
+   - last_collision_shift
+   - collision_count_total
+
+
+8) Minimal rework plan inside QTEngine v19 (no test changes implied)
+   - Introduce UDTs:
+     - QtEngineState
+     - QtCycleState
+     - QtBoundaryEvent
+     - QtSeriesPack
+
+   - Move all roll/update logic into Core.*.
+
+   - Any existing f_*_cycle_update(...) becomes:
+     - Ask the cycle module for candidate_ts (+ metadata)
+     - event = Core.f_make_event_if_realized(...)
+     - If event -> Core.f_roll_quarter(...)
+     - Always -> Core.f_update_ohlc(...)
+
+   - Centralize collision avoidance in Collide.* and stamp event with x_draw.
+   - Centralize security ingestion in Ingest.* and reuse everywhere.
+
+
+The one rule that prevents replay/prediction headaches
+- A boundary can be computed anytime, but it can only be realized (and thus
+  drawn/finalized) when time_close > boundary_ts.
