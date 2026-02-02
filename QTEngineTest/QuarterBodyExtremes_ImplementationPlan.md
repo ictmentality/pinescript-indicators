@@ -1,7 +1,7 @@
 # Quarter Body Extremes (BH/BL) — Implementation Plan (Codex)
 
 ## Goal
-Add **quarter body extremes** (and first-occurrence timestamps) to fixed cycles:
+Add **quarter body extremes** (and timestamps) to fixed cycles:
 
 - **Daily**
 - **m90**

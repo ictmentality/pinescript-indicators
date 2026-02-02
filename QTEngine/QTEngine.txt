@@ -2,20 +2,16 @@
 library("QTEngine", overlay=false)
 
 // ============================================================================
-// QT CORE — Fixed cycles (Daily / m90 / Micro / Nano) + Weekly
+// QT Engine — Fixed cycles (Daily / m90 / Micro / Nano)
 // - Data-first: timestamps + OHLC + state flags
 // - No drawings, no styling opinions
 // - Timestamp anchoring only (bar_time), never bar_index
 // - State-trigger correctness everywhere: realized = (time_close > ts)
 // - Non-repaint: any request.security(..., lookahead_off) only
-// - Step 2 (implemented): base quarter OHLC aggregated on chart TF into QuarterRecords
-// - Step 3 (implemented): Micro/Nano H/L/C sourced from aligned TF quarters
-// - Step 3b (implemented): 90m/Daily OHLC sourced from aligned TF quarters
-// - Weekly cycle implemented (intent/eff boundaries, Q1–Q5)
+// - Elastic cycles (weekly/monthly/etc) are not implemented yet
 //
 // NOTE: Micro/Nano use aligned-TF quarters for H/L/C with aligned actual-open.
-//       90m/Daily use aligned-TF quarter OHLC. Weekly remains chart-TF aggregated
-//       (intent/eff model).
+//       90m/Daily use aligned-TF quarter OHLC.
 // ============================================================================
 
 // ============================================================================
@@ -108,66 +104,6 @@ export type CycleResult
     QuarterRecord q3
     QuarterRecord q4
 
-export type WeeklyQuarter
-    int   startIntent
-    int   startEff
-    int   endEff
-
-    // OHLC + timestamps (chart-TF aggregated; gap-safe)
-    float o
-    float h
-    float l
-    float c
-    int   oTs
-    int   hTs
-    int   lTs
-    int   cTs
-    bool  has
-    bool  isEmpty
-    bool  isFinal
-    bool  evtStart
-    bool  evtFinalize
-
-    // Back-compat fields (kept in sync with o/has)
-    float open
-    bool  hasData
-    bool  openDelayed
-
-export type WeeklyResult
-    int   wsIntent
-    int   wsEff
-    int   wsNextIntent
-    int   wsNextEff
-    WeeklyQuarter q1
-    WeeklyQuarter q2
-    WeeklyQuarter q3
-    WeeklyQuarter q4
-    WeeklyQuarter q5
-    // Packed effective quarters (omit finalized empty slots; supports short-week shifts)
-    int   effCount
-    int   effSrc1
-    int   effSrc2
-    int   effSrc3
-    int   effSrc4
-    int   effSrc5
-    WeeklyQuarter e1
-    WeeklyQuarter e2
-    WeeklyQuarter e3
-    WeeklyQuarter e4
-    WeeklyQuarter e5
-
-export type WeeklyState
-    int   wsIntent
-    int   wsEff
-    int   wsNextIntent
-    int   wsNextEff
-    int   lastBoundaryIntent
-    WeeklyQuarter q1
-    WeeklyQuarter q2
-    WeeklyQuarter q3
-    WeeklyQuarter q4
-    WeeklyQuarter q5
-
 export type FixedCycleState
     // Printed-cycle retention (cycle starts)
     int[] starts
@@ -192,7 +128,7 @@ export type FixedCycleState
     int   pendingOpenTs
     bool  pendingHas
 
-    // Aligned-TF quarter records (Micro/Nano/90m; read-only path for now)
+    // Aligned-TF quarter records (Micro/Nano/90m/Daily; read-only path for now)
     QuarterRecord aq1
     QuarterRecord aq2
     QuarterRecord aq3
@@ -208,7 +144,42 @@ export type CycleState
     FixedCycleState m90
     FixedCycleState micro
     FixedCycleState nano
-    WeeklyState     weekly
+
+export type QtBoundaryEvent
+    bool happened
+    int  boundaryTs
+    int  quarterIndex
+
+export type QtCycleState
+    int  cycleStartTs
+    int  cycleEndTs
+    bool startRealized
+    bool endRealized
+    int  lastBoundaryTs
+    int  curQuarterIndex
+    bool inWindow
+    bool q2Realized
+    bool q3Realized
+    bool q4Realized
+    QuarterRecord q1
+    QuarterRecord q2
+    QuarterRecord q3
+    QuarterRecord q4
+    QuarterRecord prev1
+    QuarterRecord prev2
+    QtBoundaryEvent evt
+    int  dbg1
+    int  dbg2
+
+export type QtEngineState
+    QTConfig cfg
+    CycleState raw
+    QtCycleState daily
+    QtCycleState m90
+    QtCycleState micro
+    QtCycleState nano
+    int cacheVersion
+    int collideVersion
 
 // ============================================================================
 // CONSTRUCTORS
@@ -249,10 +220,93 @@ export qt_state_new() =>
     FixedCycleState m = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
     FixedCycleState u = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
     FixedCycleState n = FixedCycleState.new(array.new_int(), int(na), int(na), nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), float(na), int(na), false, nilQ, nilQ, nilQ, nilQ, nilQ, nilQ, int(na), int(na), int(na))
-    WeeklyQuarter nilW = WeeklyQuarter.new(int(na), int(na), int(na), float(na), float(na), float(na), float(na), int(na), int(na), int(na), int(na), false, true, false, false, false, float(na), false, false)
-    WeeklyState w = WeeklyState.new(int(na), int(na), int(na), int(na), int(na), nilW, nilW, nilW, nilW, nilW)
-    CycleState st = CycleState.new(d, m, u, n, w)
+    CycleState st = CycleState.new(d, m, u, n)
     st
+
+f_q_idx_from_boundary(int boundaryTs, int q1Ts, int q2Ts, int q3Ts, int q4Ts) =>
+    int idx = 0
+    if not na(boundaryTs)
+        if boundaryTs == q1Ts
+            idx := 1
+        else if boundaryTs == q2Ts
+            idx := 2
+        else if boundaryTs == q3Ts
+            idx := 3
+        else if boundaryTs == q4Ts
+            idx := 4
+    idx
+
+f_qt_event_none() =>
+    QtBoundaryEvent.new(false, int(na), int(na))
+
+f_qt_boundary_event(FixedCycleState prev, FixedCycleState cur, CycleResult res) =>
+    bool happened = not na(cur.lastBoundaryTs) and (na(prev.lastBoundaryTs) or cur.lastBoundaryTs != prev.lastBoundaryTs)
+    int boundaryTs = happened ? cur.lastBoundaryTs : int(na)
+    int qi = happened ? f_q_idx_from_boundary(boundaryTs, res.q1Ts, res.q2Ts, res.q3Ts, res.q4Ts) : int(na)
+    QtBoundaryEvent.new(happened, boundaryTs, qi)
+
+f_qt_cycle_state_empty(FixedCycleState st) =>
+    QtCycleState.new(
+        int(na),
+        int(na),
+        false,
+        false,
+        st.lastBoundaryTs,
+        int(na),
+        false,
+        false,
+        false,
+        false,
+        st.q1,
+        st.q2,
+        st.q3,
+        st.q4,
+        st.prev1,
+        st.prev2,
+        f_qt_event_none(),
+        0,
+        0
+    )
+
+f_qt_cycle_state_from(FixedCycleState prev, FixedCycleState cur, CycleResult res) =>
+    QtCycleState.new(
+        res.startTs,
+        res.endTs,
+        res.startRealized,
+        res.endRealized,
+        cur.lastBoundaryTs,
+        res.curQuarterIndex,
+        res.inWindow,
+        res.q2Realized,
+        res.q3Realized,
+        res.q4Realized,
+        res.q1,
+        res.q2,
+        res.q3,
+        res.q4,
+        cur.prev1,
+        cur.prev2,
+        f_qt_boundary_event(prev, cur, res),
+        0,
+        0
+    )
+
+export f_qt_init_with_cfg(QTConfig cfg) =>
+    CycleState st = qt_state_new()
+    QtCycleState d = f_qt_cycle_state_empty(st.daily)
+    QtCycleState m = f_qt_cycle_state_empty(st.m90)
+    QtCycleState u = f_qt_cycle_state_empty(st.micro)
+    QtCycleState n = f_qt_cycle_state_empty(st.nano)
+    QtEngineState.new(cfg, st, d, m, u, n, 0, 0)
+
+export f_qt_init() =>
+    QTConfig cfg = qt_config_default()
+    CycleState st = qt_state_new()
+    QtCycleState d = f_qt_cycle_state_empty(st.daily)
+    QtCycleState m = f_qt_cycle_state_empty(st.m90)
+    QtCycleState u = f_qt_cycle_state_empty(st.micro)
+    QtCycleState n = f_qt_cycle_state_empty(st.nano)
+    QtEngineState.new(cfg, st, d, m, u, n, 0, 0)
 
 
 // ============================================================================
@@ -296,93 +350,6 @@ f_make_empty_q(int qStart) =>
         false, true, false,
         false, false
     )
-
-f_weekly_q_new(int startIntent) =>
-    WeeklyQuarter.new(startIntent, int(na), int(na), float(na), float(na), float(na), float(na), int(na), int(na), int(na), int(na), false, true, false, false, false, float(na), false, false)
-
-f_week_start_intent(int tRef, QTConfig cfg) =>
-    int ds = f_qt_day_start(tRef, cfg)
-    int dsDow = dayofweek(ds, cfg.tz)
-    int offsetDays = dsDow - int(dayofweek.sunday)
-    ds - offsetDays * LEN_24H
-
-f_eff_from_intent(int intent, int effIn, int t, int tPrev) =>
-    int effOut = effIn
-    if na(effOut) and t >= intent and (na(tPrev) or tPrev < intent)
-        effOut := t
-    effOut
-
-f_wq_clear_evts(WeeklyQuarter qIn) =>
-    WeeklyQuarter q = qIn
-    q.evtStart := false
-    q.evtFinalize := false
-    q
-
-f_wq_finalize(WeeklyQuarter qIn) =>
-    WeeklyQuarter q = qIn
-    if not q.isFinal and not na(q.startIntent)
-        q.isFinal := true
-        q.evtFinalize := true
-        if not q.has
-            q.isEmpty := true
-    // Back-compat sync
-    q.open := q.o
-    q.hasData := q.has
-    q
-
-f_wq_apply_bar(WeeklyQuarter qIn, int t, float o, float h, float l, float c, bool isStartBar) =>
-    WeeklyQuarter q = qIn
-
-    if not na(q.startEff)
-        q.openDelayed := q.startEff > q.startIntent
-
-    if not q.has
-        q.o := o
-        q.oTs := t
-        q.h := h
-        q.hTs := t
-        q.l := l
-        q.lTs := t
-        q.c := c
-        q.cTs := t
-        q.has := true
-        q.isEmpty := false
-        q.isFinal := false
-        q.evtStart := isStartBar
-    else
-        bool newHigh = na(q.h) or h > q.h
-        bool newLow  = na(q.l) or l < q.l
-        if newHigh
-            q.h := h
-            q.hTs := t
-        if newLow
-            q.l := l
-            q.lTs := t
-        q.c := c
-        q.cTs := t
-        if isStartBar
-            q.evtStart := true
-
-    // Back-compat sync
-    q.open := q.o
-    q.hasData := q.has
-
-    q
-
-f_wq_idx_from_boundary(int boundaryIntent, int q1Intent, int q2Intent, int q3Intent, int q4Intent, int q5Intent) =>
-    int idx = 0
-    if not na(boundaryIntent)
-        if boundaryIntent == q1Intent
-            idx := 1
-        else if boundaryIntent == q2Intent
-            idx := 2
-        else if boundaryIntent == q3Intent
-            idx := 3
-        else if boundaryIntent == q4Intent
-            idx := 4
-        else if boundaryIntent == q5Intent
-            idx := 5
-    idx
 
 
 // ============================================================================
@@ -651,18 +618,83 @@ f_q_apply_bar(QuarterRecord qIn, int t, float o, float h, float l, float c, bool
 
     q
 
-f_q_idx_from_boundary(int boundaryTs, int q1Ts, int q2Ts, int q3Ts, int q4Ts) =>
-    int idx = 0
-    if not na(boundaryTs)
-        if boundaryTs == q1Ts
-            idx := 1
-        else if boundaryTs == q2Ts
-            idx := 2
-        else if boundaryTs == q3Ts
-            idx := 3
-        else if boundaryTs == q4Ts
-            idx := 4
-    idx
+// ============================================================================
+// CORE HELPERS (initial implementation; used by refactor steps 1–3)
+// ============================================================================
+
+f_core_make_event_if_realized(QtCycleState cs, int candidateBoundaryTs, int tClose) =>
+    bool realized = not na(candidateBoundaryTs) and tClose > candidateBoundaryTs
+    bool happened = realized and (na(cs.lastBoundaryTs) or candidateBoundaryTs != cs.lastBoundaryTs)
+    int qi = happened ? f_q_idx_from_boundary(candidateBoundaryTs, cs.q1.boundaryTs, cs.q2.boundaryTs, cs.q3.boundaryTs, cs.q4.boundaryTs) : int(na)
+    QtBoundaryEvent.new(happened, happened ? candidateBoundaryTs : int(na), qi)
+
+f_core_roll_quarter(QtCycleState cs, QtBoundaryEvent evt) =>
+    QtCycleState out = cs
+    if evt.happened
+        int lastIdx = f_q_idx_from_boundary(cs.lastBoundaryTs, cs.q1.boundaryTs, cs.q2.boundaryTs, cs.q3.boundaryTs, cs.q4.boundaryTs)
+        int newIdx = evt.quarterIndex
+
+        QuarterRecord q1 = cs.q1
+        QuarterRecord q2 = cs.q2
+        QuarterRecord q3 = cs.q3
+        QuarterRecord q4 = cs.q4
+        QuarterRecord p1 = cs.prev1
+        QuarterRecord p2 = cs.prev2
+
+        if lastIdx == 1
+            [tq1, tp1, tp2] = f_finalize_and_roll(q1, p1, p2)
+            q1 := tq1
+            p1 := tp1
+            p2 := tp2
+            if newIdx >= 3
+                [tq2, tp1b, tp2b] = f_finalize_and_roll(q2, p1, p2)
+                q2 := tq2
+                p1 := tp1b
+                p2 := tp2b
+            if newIdx >= 4
+                [tq3, tp1c, tp2c] = f_finalize_and_roll(q3, p1, p2)
+                q3 := tq3
+                p1 := tp1c
+                p2 := tp2c
+        else if lastIdx == 2
+            [tq2, tp1d, tp2d] = f_finalize_and_roll(q2, p1, p2)
+            q2 := tq2
+            p1 := tp1d
+            p2 := tp2d
+            if newIdx >= 4
+                [tq3, tp1e, tp2e] = f_finalize_and_roll(q3, p1, p2)
+                q3 := tq3
+                p1 := tp1e
+                p2 := tp2e
+        else if lastIdx == 3
+            [tq3, tp1f, tp2f] = f_finalize_and_roll(q3, p1, p2)
+            q3 := tq3
+            p1 := tp1f
+            p2 := tp2f
+
+        out.q1 := q1
+        out.q2 := q2
+        out.q3 := q3
+        out.q4 := q4
+        out.prev1 := p1
+        out.prev2 := p2
+        out.lastBoundaryTs := evt.boundaryTs
+        out.evt := evt
+    else
+        out.evt := f_qt_event_none()
+    out
+
+f_core_update_ohlc(QtCycleState cs, int t, float o, float h, float l, float c, bool isStartBar) =>
+    QtCycleState out = cs
+    if cs.curQuarterIndex == 1 and not cs.q1.isFinal
+        out.q1 := f_q_apply_bar(cs.q1, t, o, h, l, c, isStartBar)
+    else if cs.curQuarterIndex == 2 and not cs.q2.isFinal
+        out.q2 := f_q_apply_bar(cs.q2, t, o, h, l, c, isStartBar)
+    else if cs.curQuarterIndex == 3 and not cs.q3.isFinal
+        out.q3 := f_q_apply_bar(cs.q3, t, o, h, l, c, isStartBar)
+    else if cs.curQuarterIndex == 4 and not cs.q4.isFinal
+        out.q4 := f_q_apply_bar(cs.q4, t, o, h, l, c, isStartBar)
+    out
 
 
 f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
@@ -1170,301 +1202,47 @@ f_fixed_cycle_update(
 
     [stOut, res]
 
-f_weekly_update(
-    WeeklyState stIn,
-    QTConfig cfg,
-    int t,
-    int tClose
-) =>
-    // Weekly is treated as a 5-quarter structure (Q1–Q5).
-    // - Boundaries are computed from the configured day-start (e.g., 18:00 NY).
-    // - Quarter membership is assigned by bar start time `t` (bar-time anchoring).
-    // - OHLC is chart-TF aggregated into each WeeklyQuarter (timestamps use bar start time).
-    int tRef = tClose - 1
-    int wsIntent = f_week_start_intent(tRef, cfg)
-    int wsNextIntent = wsIntent + 7 * LEN_24H
-
-    int q1Intent = wsIntent
-    int q2Intent = wsIntent + 1 * LEN_24H
-    int q3Intent = wsIntent + 2 * LEN_24H
-    int q4Intent = wsIntent + 3 * LEN_24H
-    int q5Intent = wsIntent + 4 * LEN_24H
-
-    bool weekChanged = na(stIn.wsIntent) or wsIntent != stIn.wsIntent
-
-    // Local copies (clear pulse events each bar)
-    WeeklyQuarter q1 = f_wq_clear_evts(stIn.q1)
-    WeeklyQuarter q2 = f_wq_clear_evts(stIn.q2)
-    WeeklyQuarter q3 = f_wq_clear_evts(stIn.q3)
-    WeeklyQuarter q4 = f_wq_clear_evts(stIn.q4)
-    WeeklyQuarter q5 = f_wq_clear_evts(stIn.q5)
-    int wsEff = stIn.wsEff
-    int wsNextEff = stIn.wsNextEff
-    int lastBoundaryIntent = stIn.lastBoundaryIntent
-
-    // Rebuild quarters on week rollover (no cross-week carry-forward in this step)
-    if weekChanged
-        q1 := f_weekly_q_new(q1Intent)
-        q2 := f_weekly_q_new(q2Intent)
-        q3 := f_weekly_q_new(q3Intent)
-        q4 := f_weekly_q_new(q4Intent)
-        q5 := f_weekly_q_new(q5Intent)
-        wsEff := int(na)
-        wsNextEff := int(na)
-        lastBoundaryIntent := int(na)
-    else
-        // Guard against intent drift if the script is reloaded mid-week.
-        if q1.startIntent != q1Intent
-            q1 := f_weekly_q_new(q1Intent)
-        if q2.startIntent != q2Intent
-            q2 := f_weekly_q_new(q2Intent)
-        if q3.startIntent != q3Intent
-            q3 := f_weekly_q_new(q3Intent)
-        if q4.startIntent != q4Intent
-            q4 := f_weekly_q_new(q4Intent)
-        if q5.startIntent != q5Intent
-            q5 := f_weekly_q_new(q5Intent)
-
-    int tPrev = time[1]
-
-    // Week effective boundary (first printed bar on/after wsIntent)
-    wsEff := f_eff_from_intent(wsIntent, wsEff, t, tPrev)
-    wsNextEff := f_eff_from_intent(wsNextIntent, wsNextEff, t, tPrev)
-
-    // Quarter index from bar start time (clamp to 1..5; Fri/Sat/Sun roll into Q5 by design)
-    int dayOff = int(math.floor((tRef - wsIntent) / LEN_24H))
-    int qi = dayOff + 1
-    if qi < 1
-        qi := 1
-    else if qi > 5
-        qi := 5
-
-    int qCurIntent = q1Intent
-    if qi == 2
-        qCurIntent := q2Intent
-    else if qi == 3
-        qCurIntent := q3Intent
-    else if qi == 4
-        qCurIntent := q4Intent
-    else if qi == 5
-        qCurIntent := q5Intent
-
-    // Start edge: first printed bar on/after the intended boundary (gap-safe).
-    bool startEdge = (tClose > qCurIntent) and (na(lastBoundaryIntent) or qCurIntent != lastBoundaryIntent)
-
-    // Finalize the previous quarter (and any skipped quarters) on the first bar of the new quarter.
-    if startEdge and not weekChanged
-        int lastIdx = f_wq_idx_from_boundary(lastBoundaryIntent, q1Intent, q2Intent, q3Intent, q4Intent, q5Intent)
-        int newIdx  = qi
-
-        if lastIdx == 1
-            q1 := f_wq_finalize(q1)
-            if newIdx >= 3
-                q2 := f_wq_finalize(q2)
-            if newIdx >= 4
-                q3 := f_wq_finalize(q3)
-            if newIdx >= 5
-                q4 := f_wq_finalize(q4)
-
-        else if lastIdx == 2
-            q2 := f_wq_finalize(q2)
-            if newIdx >= 4
-                q3 := f_wq_finalize(q3)
-            if newIdx >= 5
-                q4 := f_wq_finalize(q4)
-
-        else if lastIdx == 3
-            q3 := f_wq_finalize(q3)
-            if newIdx >= 5
-                q4 := f_wq_finalize(q4)
-
-        else if lastIdx == 4
-            q4 := f_wq_finalize(q4)
-
-    if startEdge
-        lastBoundaryIntent := qCurIntent
-
-    // Capture effective starts on the first bar classified into the quarter (gap-safe).
-    // TODO: Weekly OHLC here is chart-TF aggregated, we need to switch to aligned-TF aggregated (like the other cycles).
-    if startEdge
-        if qi == 1 and na(q1.startEff)
-            q1.startEff := t
-        else if qi == 2 and na(q2.startEff)
-            q2.startEff := t
-        else if qi == 3 and na(q3.startEff)
-            q3.startEff := t
-        else if qi == 4 and na(q4.startEff)
-            q4.startEff := t
-        else if qi == 5 and na(q5.startEff)
-            q5.startEff := t
-
-    // Effective ends: next quarter's effective start (if/when it prints)
-    q1.endEff := q2.startEff
-    q2.endEff := q3.startEff
-    q3.endEff := q4.startEff
-    q4.endEff := q5.startEff
-    q5.endEff := wsNextEff
-
-    // Update active quarter OHLC on chart TF
-    if qi == 1 and not q1.isFinal
-        q1 := f_wq_apply_bar(q1, t, open, high, low, close, startEdge)
-    else if qi == 2 and not q2.isFinal
-        q2 := f_wq_apply_bar(q2, t, open, high, low, close, startEdge)
-    else if qi == 3 and not q3.isFinal
-        q3 := f_wq_apply_bar(q3, t, open, high, low, close, startEdge)
-    else if qi == 4 and not q4.isFinal
-        q4 := f_wq_apply_bar(q4, t, open, high, low, close, startEdge)
-    else if qi == 5 and not q5.isFinal
-        q5 := f_wq_apply_bar(q5, t, open, high, low, close, startEdge)
-
-
-    // Short-week: if the first printed bar of the week occurs N full days after wsIntent,
-    // treat the first N slot-quarters as skipped and finalize them immediately (enables early packing).
-    int missingDays = 0
-    if not na(wsEff)
-        missingDays := int(math.floor((wsEff - wsIntent) / LEN_24H))
-        missingDays := missingDays < 0 ? 0 : missingDays > 4 ? 4 : missingDays
-
-    if missingDays >= 1 and not q1.isFinal and not q1.has
-        q1 := f_wq_finalize(q1)
-    if missingDays >= 2 and not q2.isFinal and not q2.has
-        q2 := f_wq_finalize(q2)
-    if missingDays >= 3 and not q3.isFinal and not q3.has
-        q3 := f_wq_finalize(q3)
-    if missingDays >= 4 and not q4.isFinal and not q4.has
-        q4 := f_wq_finalize(q4)
-
-    WeeklyState stOut = WeeklyState.new(wsIntent, wsEff, wsNextIntent, wsNextEff, lastBoundaryIntent, q1, q2, q3, q4, q5)
-
-    // Pack effective quarters (omit finalized empty slot-quarters).
-    WeeklyQuarter nilW = f_weekly_q_new(int(na))
-    WeeklyQuarter e1 = nilW
-    WeeklyQuarter e2 = nilW
-    WeeklyQuarter e3 = nilW
-    WeeklyQuarter e4 = nilW
-    WeeklyQuarter e5 = nilW
-    int effCount = 0
-    int effSrc1  = int(na)
-    int effSrc2  = int(na)
-    int effSrc3  = int(na)
-    int effSrc4  = int(na)
-    int effSrc5  = int(na)
-
-    int[] packSrc = array.new_int()
-
-    if not (q1.isFinal and q1.isEmpty)
-        array.push(packSrc, 1)
-    if not (q2.isFinal and q2.isEmpty)
-        array.push(packSrc, 2)
-    if not (q3.isFinal and q3.isEmpty)
-        array.push(packSrc, 3)
-    if not (q4.isFinal and q4.isEmpty)
-        array.push(packSrc, 4)
-    if not (q5.isFinal and q5.isEmpty)
-        array.push(packSrc, 5)
-
-    effCount := array.size(packSrc)
-
-    if effCount >= 1
-        effSrc1 := array.get(packSrc, 0)
-    if effCount >= 2
-        effSrc2 := array.get(packSrc, 1)
-    if effCount >= 3
-        effSrc3 := array.get(packSrc, 2)
-    if effCount >= 4
-        effSrc4 := array.get(packSrc, 3)
-    if effCount >= 5
-        effSrc5 := array.get(packSrc, 4)
-
-    if effSrc1 == 1
-        e1 := q1
-    else if effSrc1 == 2
-        e1 := q2
-    else if effSrc1 == 3
-        e1 := q3
-    else if effSrc1 == 4
-        e1 := q4
-    else if effSrc1 == 5
-        e1 := q5
-
-    if effSrc2 == 1
-        e2 := q1
-    else if effSrc2 == 2
-        e2 := q2
-    else if effSrc2 == 3
-        e2 := q3
-    else if effSrc2 == 4
-        e2 := q4
-    else if effSrc2 == 5
-        e2 := q5
-
-    if effSrc3 == 1
-        e3 := q1
-    else if effSrc3 == 2
-        e3 := q2
-    else if effSrc3 == 3
-        e3 := q3
-    else if effSrc3 == 4
-        e3 := q4
-    else if effSrc3 == 5
-        e3 := q5
-
-    if effSrc4 == 1
-        e4 := q1
-    else if effSrc4 == 2
-        e4 := q2
-    else if effSrc4 == 3
-        e4 := q3
-    else if effSrc4 == 4
-        e4 := q4
-    else if effSrc4 == 5
-        e4 := q5
-
-    if effSrc5 == 1
-        e5 := q1
-    else if effSrc5 == 2
-        e5 := q2
-    else if effSrc5 == 3
-        e5 := q3
-    else if effSrc5 == 4
-        e5 := q4
-    else if effSrc5 == 5
-        e5 := q5
-
-    WeeklyResult res  = WeeklyResult.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5, effCount, effSrc1, effSrc2, effSrc3, effSrc4, effSrc5, e1, e2, e3, e4, e5)
-    [stOut, res]
-
-
-
 
 // ============================================================================
-// EXPORTED API — Fixed cycles only (no Weekly)
+// EXPORTED API — Fixed cycles only
 // ============================================================================
 
 export qt_daily_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [d2, r] = f_fixed_cycle_update(st.daily, cfg, t, tClose, LEN_24H)
-    CycleState out = CycleState.new(d2, st.m90, st.micro, st.nano, st.weekly)
+    CycleState out = CycleState.new(d2, st.m90, st.micro, st.nano)
     [out, r]
 
 export qt_m90_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [m2, r] = f_fixed_cycle_update(st.m90, cfg, t, tClose, LEN_6H)
-    CycleState out = CycleState.new(st.daily, m2, st.micro, st.nano, st.weekly)
+    CycleState out = CycleState.new(st.daily, m2, st.micro, st.nano)
     [out, r]
 
 export qt_micro_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [u2, r] = f_fixed_cycle_update(st.micro, cfg, t, tClose, LEN_90M)
-    CycleState out = CycleState.new(st.daily, st.m90, u2, st.nano, st.weekly)
+    CycleState out = CycleState.new(st.daily, st.m90, u2, st.nano)
     [out, r]
 
 export qt_nano_update(CycleState st, QTConfig cfg, int t, int tClose) =>
     [n2, r] = f_fixed_cycle_update(st.nano, cfg, t, tClose, LEN_22M30S)
-    CycleState out = CycleState.new(st.daily, st.m90, st.micro, n2, st.weekly)
+    CycleState out = CycleState.new(st.daily, st.m90, st.micro, n2)
     [out, r]
 
-export qt_weekly_update(CycleState st, QTConfig cfg, int t, int tClose) =>
-    [w2, r] = f_weekly_update(st.weekly, cfg, t, tClose)
-    CycleState out = CycleState.new(st.daily, st.m90, st.micro, st.nano, w2)
-    [out, r]
+export f_qt_step(QtEngineState eng, int t, int tClose) =>
+    QTConfig cfg = eng.cfg
+    CycleState st0 = eng.raw
+
+    [st1, dRes] = qt_daily_update(st0, cfg, t, tClose)
+    [st2, mRes] = qt_m90_update(st1, cfg, t, tClose)
+    [st3, uRes] = qt_micro_update(st2, cfg, t, tClose)
+    [st4, nRes] = qt_nano_update(st3, cfg, t, tClose)
+    CycleState st5 = CycleState.new(st4.daily, st4.m90, st4.micro, st4.nano)
+
+    QtCycleState d = f_qt_cycle_state_from(st0.daily, st1.daily, dRes)
+    QtCycleState m = f_qt_cycle_state_from(st0.m90, st2.m90, mRes)
+    QtCycleState u = f_qt_cycle_state_from(st0.micro, st3.micro, uRes)
+    QtCycleState n = f_qt_cycle_state_from(st0.nano, st4.nano, nRes)
+
+    QtEngineState.new(cfg, st5, d, m, u, n, eng.cacheVersion, eng.collideVersion)
 
 // ============================================================================
 // DEBUG EXPORTS (read-only)
@@ -1484,6 +1262,3 @@ export qt_micro_aligned_qr_debug(CycleState st) =>
 
 export qt_nano_aligned_qr_debug(CycleState st) =>
     [st.nano.aq1, st.nano.aq2, st.nano.aq3, st.nano.aq4]
-
-export qt_weekly_debug(CycleState st) =>
-    st.weekly
