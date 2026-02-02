@@ -131,6 +131,18 @@ export type WeeklyResult
     WeeklyQuarter q3
     WeeklyQuarter q4
     WeeklyQuarter q5
+    // Packed effective quarters (omit finalized empty slots; supports short-week shifts)
+    int   effCount
+    int   effSrc1
+    int   effSrc2
+    int   effSrc3
+    int   effSrc4
+    int   effSrc5
+    WeeklyQuarter e1
+    WeeklyQuarter e2
+    WeeklyQuarter e3
+    WeeklyQuarter e4
+    WeeklyQuarter e5
 
 export type WeeklyState
     int   wsIntent
@@ -1277,9 +1289,123 @@ f_weekly_update(
     else if qi == 5 and not q5.isFinal
         q5 := f_wq_apply_bar(q5, t, open, high, low, close, startEdge)
 
+
+    // Short-week: if the first printed bar of the week occurs N full days after wsIntent,
+    // treat the first N slot-quarters as skipped and finalize them immediately (enables early packing).
+    int missingDays = 0
+    if not na(wsEff)
+        missingDays := int(math.floor((wsEff - wsIntent) / LEN_24H))
+        missingDays := missingDays < 0 ? 0 : missingDays > 4 ? 4 : missingDays
+
+    if missingDays >= 1 and not q1.isFinal and not q1.has
+        q1 := f_wq_finalize(q1)
+    if missingDays >= 2 and not q2.isFinal and not q2.has
+        q2 := f_wq_finalize(q2)
+    if missingDays >= 3 and not q3.isFinal and not q3.has
+        q3 := f_wq_finalize(q3)
+    if missingDays >= 4 and not q4.isFinal and not q4.has
+        q4 := f_wq_finalize(q4)
+
     WeeklyState stOut = WeeklyState.new(wsIntent, wsEff, wsNextIntent, wsNextEff, lastBoundaryIntent, q1, q2, q3, q4, q5)
-    WeeklyResult res  = WeeklyResult.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5)
+
+    // Pack effective quarters (omit finalized empty slot-quarters).
+    WeeklyQuarter nilW = f_weekly_q_new(int(na))
+    WeeklyQuarter e1 = nilW
+    WeeklyQuarter e2 = nilW
+    WeeklyQuarter e3 = nilW
+    WeeklyQuarter e4 = nilW
+    WeeklyQuarter e5 = nilW
+    int effCount = 0
+    int effSrc1  = int(na)
+    int effSrc2  = int(na)
+    int effSrc3  = int(na)
+    int effSrc4  = int(na)
+    int effSrc5  = int(na)
+
+    int[] packSrc = array.new_int()
+
+    if not (q1.isFinal and q1.isEmpty)
+        array.push(packSrc, 1)
+    if not (q2.isFinal and q2.isEmpty)
+        array.push(packSrc, 2)
+    if not (q3.isFinal and q3.isEmpty)
+        array.push(packSrc, 3)
+    if not (q4.isFinal and q4.isEmpty)
+        array.push(packSrc, 4)
+    if not (q5.isFinal and q5.isEmpty)
+        array.push(packSrc, 5)
+
+    effCount := array.size(packSrc)
+
+    if effCount >= 1
+        effSrc1 := array.get(packSrc, 0)
+    if effCount >= 2
+        effSrc2 := array.get(packSrc, 1)
+    if effCount >= 3
+        effSrc3 := array.get(packSrc, 2)
+    if effCount >= 4
+        effSrc4 := array.get(packSrc, 3)
+    if effCount >= 5
+        effSrc5 := array.get(packSrc, 4)
+
+    if effSrc1 == 1
+        e1 := q1
+    else if effSrc1 == 2
+        e1 := q2
+    else if effSrc1 == 3
+        e1 := q3
+    else if effSrc1 == 4
+        e1 := q4
+    else if effSrc1 == 5
+        e1 := q5
+
+    if effSrc2 == 1
+        e2 := q1
+    else if effSrc2 == 2
+        e2 := q2
+    else if effSrc2 == 3
+        e2 := q3
+    else if effSrc2 == 4
+        e2 := q4
+    else if effSrc2 == 5
+        e2 := q5
+
+    if effSrc3 == 1
+        e3 := q1
+    else if effSrc3 == 2
+        e3 := q2
+    else if effSrc3 == 3
+        e3 := q3
+    else if effSrc3 == 4
+        e3 := q4
+    else if effSrc3 == 5
+        e3 := q5
+
+    if effSrc4 == 1
+        e4 := q1
+    else if effSrc4 == 2
+        e4 := q2
+    else if effSrc4 == 3
+        e4 := q3
+    else if effSrc4 == 4
+        e4 := q4
+    else if effSrc4 == 5
+        e4 := q5
+
+    if effSrc5 == 1
+        e5 := q1
+    else if effSrc5 == 2
+        e5 := q2
+    else if effSrc5 == 3
+        e5 := q3
+    else if effSrc5 == 4
+        e5 := q4
+    else if effSrc5 == 5
+        e5 := q5
+
+    WeeklyResult res  = WeeklyResult.new(wsIntent, wsEff, wsNextIntent, wsNextEff, q1, q2, q3, q4, q5, effCount, effSrc1, effSrc2, effSrc3, effSrc4, effSrc5, e1, e2, e3, e4, e5)
     [stOut, res]
+
 
 
 
