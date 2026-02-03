@@ -11,7 +11,7 @@ library("QTEngine", overlay=false)
 // - Elastic cycles (weekly/monthly/etc) are not implemented yet
 //
 // NOTE: Micro/Nano use aligned-TF quarters for H/L/C with aligned actual-open.
-//       90m/Daily use aligned-TF quarter OHLC.
+//       90m/Daily use aligned-TF quarter OHLC with aligned actual-open.
 // ============================================================================
 
 // ============================================================================
@@ -76,6 +76,18 @@ export type QuarterRecord
     bool  evtStart
     bool  evtFinalize
 
+export type QtSeriesPack
+    float o
+    float h
+    float l
+    float c
+    int   t
+    int   tClose
+    float actualOpen
+    int   actualOpenTs
+    int   actualBoundaryTs
+    int   actualQi
+
 export type CycleResult
     // Cycle window
     int  startTs
@@ -122,7 +134,7 @@ export type FixedCycleState
     QuarterRecord prev1
     QuarterRecord prev2
 
-    // Micro/Nano: pending true-open capture (applied when quarter becomes active)
+    // Fixed-cycle: pending true-open capture (applied when quarter becomes active)
     int   pendingBoundaryTs
     float pendingOpen
     int   pendingOpenTs
@@ -180,6 +192,9 @@ export type QtEngineState
     QtCycleState nano
     int cacheVersion
     int collideVersion
+
+f_pack_empty() =>
+    QtSeriesPack.new(na, na, na, na, int(na), int(na), float(na), int(na), int(na), int(na))
 
 // ============================================================================
 // CONSTRUCTORS
@@ -351,6 +366,40 @@ f_make_empty_q(int qStart) =>
         false, false
     )
 
+// ============================================================================
+// FIXED-CYCLE MODULE (timestamp math only)
+// ============================================================================
+
+f_fixed_cycle_window(int tRef, QTConfig cfg, int lenMs) =>
+    int ds = f_qt_day_start(tRef, cfg)
+    int cStart = f_cycle_start(tRef, ds, lenMs)
+    int cEnd = cStart + lenMs
+    int qLen = int(lenMs / 4)
+    int q1Ts = cStart
+    int q2Ts = cStart + 1 * qLen
+    int q3Ts = cStart + 2 * qLen
+    int q4Ts = cStart + 3 * qLen
+    int qi = f_quarter_index(tRef, cStart, lenMs)
+    bool inW = tRef >= cStart and tRef < cEnd
+    [cStart, cEnd, q1Ts, q2Ts, q3Ts, q4Ts, qi, inW]
+
+f_fixed_cycle_boundary_ts(int q1Ts, int q2Ts, int q3Ts, int q4Ts, int qi) =>
+    int qCurTs = q1Ts
+    if qi == 2
+        qCurTs := q2Ts
+    else if qi == 3
+        qCurTs := q3Ts
+    else if qi == 4
+        qCurTs := q4Ts
+    qCurTs
+
+f_fixed_cycle_next_boundary_ts(int q1Ts, int q2Ts, int q3Ts, int q4Ts, int qi, bool inW) =>
+    int qCurTs = f_fixed_cycle_boundary_ts(q1Ts, q2Ts, q3Ts, q4Ts, qi)
+    inW ? qCurTs : int(na)
+
+f_fixed_cycle_quarter_id(int boundaryTs, int q1Ts, int q2Ts, int q3Ts, int q4Ts) =>
+    f_q_idx_from_boundary(boundaryTs, q1Ts, q2Ts, q3Ts, q4Ts)
+
 
 // ============================================================================
 // NANO ALIGNMENT HELPERS
@@ -363,6 +412,16 @@ f_ceil_to_5s(int ts) =>
 
 f_ceil_to_30s(int ts) =>
     int step = 30 * MS_SEC
+    int rem  = ts % step
+    rem == 0 ? ts : ts + (step - rem)
+
+f_ceil_to_5m(int ts) =>
+    int step = 5 * MS_MIN
+    int rem  = ts % step
+    rem == 0 ? ts : ts + (step - rem)
+
+f_ceil_to_15m(int ts) =>
+    int step = 15 * MS_MIN
     int rem  = ts % step
     rem == 0 ? ts : ts + (step - rem)
 
@@ -410,7 +469,7 @@ f_micro_aligned_ohlc_expr() =>
         actualBoundaryTs := qCurTs
         actualQi := qi
 
-    [open, high, low, close, time, actualOpen, actualOpenTs, actualBoundaryTs, actualQi]
+    [open, high, low, close, time, time_close, actualOpen, actualOpenTs, actualBoundaryTs, actualQi]
 
 f_micro_aligned_ohlc_current() =>
     request.security(
@@ -464,7 +523,7 @@ f_nano_aligned_ohlc_expr() =>
         actualBoundaryTs := qCurTs
         actualQi := qi
 
-    [open, high, low, close, time, actualOpen, actualOpenTs, actualBoundaryTs, actualQi]
+    [open, high, low, close, time, time_close, actualOpen, actualOpenTs, actualBoundaryTs, actualQi]
 
 f_nano_aligned_ohlc_current() =>
     request.security(
@@ -475,7 +534,50 @@ f_nano_aligned_ohlc_current() =>
     )
 
 f_m90_aligned_ohlc_expr() =>
-    [open, high, low, close, time, float(na), int(na), int(na), int(na)]
+    int tRef = time
+    int ds = f_qt_day_start_raw(tRef, NANO_TZ, NANO_DAY_START_HOUR, NANO_DAY_START_MIN)
+
+    int cStart = f_cycle_start(tRef, ds, LEN_6H)
+    int qLen   = int(LEN_6H / 4)
+
+    int q1Ts = cStart
+    int q2Ts = cStart + 1 * qLen
+    int q3Ts = cStart + 2 * qLen
+    int q4Ts = cStart + 3 * qLen
+
+    int qi = f_quarter_index(tRef, cStart, LEN_6H)
+
+    int qCurTs = q1Ts
+    if qi == 2
+        qCurTs := q2Ts
+    else if qi == 3
+        qCurTs := q3Ts
+    else if qi == 4
+        qCurTs := q4Ts
+
+    int targetTs = f_ceil_to_5m(qCurTs)
+
+    var int   lastTarget = int(na)
+    var float actualOpen = float(na)
+    var int   actualOpenTs = int(na)
+    var int   actualBoundaryTs = int(na)
+    var int   actualQi = int(na)
+
+    if na(lastTarget) or targetTs != lastTarget
+        lastTarget := targetTs
+        actualOpen := float(na)
+        actualOpenTs := int(na)
+        actualBoundaryTs := int(na)
+        actualQi := int(na)
+
+    bool hit = (time >= targetTs) and (na(time[1]) or time[1] < targetTs)
+    if hit and na(actualOpen)
+        actualOpen := open
+        actualOpenTs := time
+        actualBoundaryTs := qCurTs
+        actualQi := qi
+
+    [open, high, low, close, time, time_close, actualOpen, actualOpenTs, actualBoundaryTs, actualQi]
 
 f_m90_aligned_ohlc_current() =>
     request.security(
@@ -486,7 +588,50 @@ f_m90_aligned_ohlc_current() =>
     )
 
 f_daily_aligned_ohlc_expr() =>
-    [open, high, low, close, time, float(na), int(na), int(na), int(na)]
+    int tRef = time
+    int ds = f_qt_day_start_raw(tRef, NANO_TZ, NANO_DAY_START_HOUR, NANO_DAY_START_MIN)
+
+    int cStart = f_cycle_start(tRef, ds, LEN_24H)
+    int qLen   = int(LEN_24H / 4)
+
+    int q1Ts = cStart
+    int q2Ts = cStart + 1 * qLen
+    int q3Ts = cStart + 2 * qLen
+    int q4Ts = cStart + 3 * qLen
+
+    int qi = f_quarter_index(tRef, cStart, LEN_24H)
+
+    int qCurTs = q1Ts
+    if qi == 2
+        qCurTs := q2Ts
+    else if qi == 3
+        qCurTs := q3Ts
+    else if qi == 4
+        qCurTs := q4Ts
+
+    int targetTs = f_ceil_to_15m(qCurTs)
+
+    var int   lastTarget = int(na)
+    var float actualOpen = float(na)
+    var int   actualOpenTs = int(na)
+    var int   actualBoundaryTs = int(na)
+    var int   actualQi = int(na)
+
+    if na(lastTarget) or targetTs != lastTarget
+        lastTarget := targetTs
+        actualOpen := float(na)
+        actualOpenTs := int(na)
+        actualBoundaryTs := int(na)
+        actualQi := int(na)
+
+    bool hit = (time >= targetTs) and (na(time[1]) or time[1] < targetTs)
+    if hit and na(actualOpen)
+        actualOpen := open
+        actualOpenTs := time
+        actualBoundaryTs := qCurTs
+        actualQi := qi
+
+    [open, high, low, close, time, time_close, actualOpen, actualOpenTs, actualBoundaryTs, actualQi]
 
 f_daily_aligned_ohlc_current() =>
     request.security(
@@ -496,67 +641,92 @@ f_daily_aligned_ohlc_current() =>
         lookahead=barmerge.lookahead_off
     )
 
+// ============================================================================
+// INGEST (aligned series packs + per-TF cache)
+// ============================================================================
+
+f_pack_to_tuple(QtSeriesPack p) =>
+    [p.o, p.h, p.l, p.c, p.t, p.actualOpen, p.actualOpenTs, p.actualBoundaryTs, p.actualQi]
+
+f_ingest_cache_key() =>
+    barstate.isrealtime ? timenow : time
+
+f_ingest_pack_nano() =>
+    var int lastBar = int(na)
+    var QtSeriesPack pack = f_pack_empty()
+    int key = f_ingest_cache_key()
+    if na(lastBar) or lastBar != key
+        [o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi] = f_nano_aligned_ohlc_current()
+        pack := QtSeriesPack.new(o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi)
+        lastBar := key
+    pack
+
+f_ingest_pack_micro() =>
+    var int lastBar = int(na)
+    var QtSeriesPack pack = f_pack_empty()
+    int key = f_ingest_cache_key()
+    if na(lastBar) or lastBar != key
+        [o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi] = f_micro_aligned_ohlc_current()
+        pack := QtSeriesPack.new(o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi)
+        lastBar := key
+    pack
+
+f_ingest_pack_m90() =>
+    var int lastBar = int(na)
+    var QtSeriesPack pack = f_pack_empty()
+    int key = f_ingest_cache_key()
+    if na(lastBar) or lastBar != key
+        [o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi] = f_m90_aligned_ohlc_current()
+        pack := QtSeriesPack.new(o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi)
+        lastBar := key
+    pack
+
+f_ingest_pack_daily() =>
+    var int lastBar = int(na)
+    var QtSeriesPack pack = f_pack_empty()
+    int key = f_ingest_cache_key()
+    if na(lastBar) or lastBar != key
+        [o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi] = f_daily_aligned_ohlc_current()
+        pack := QtSeriesPack.new(o, h, l, c, t, tClose, actO, actOTs, actBTs, actQi)
+        lastBar := key
+    pack
+
 f_aligned_ohlc_pick(bool isNano, bool isMicro, bool isM90, bool isDaily) =>
     float pickO = float(na)
     float pickH = float(na)
     float pickL = float(na)
     float pickC = float(na)
     int   pickT = int(na)
+    int   pickTClose = int(na)
     float pickActualOpen = float(na)
     int   pickActualOpenTs = int(na)
     int   pickActualBoundaryTs = int(na)
     int   pickActualQi = int(na)
+    QtSeriesPack pack = f_pack_empty()
     if isNano
-        [tmpO, tmpH, tmpL, tmpC, tmpT, tmpActualOpen, tmpActualOpenTs, tmpActualBoundaryTs, tmpActualQi] = f_nano_aligned_ohlc_current()
-        pickO := tmpO
-        pickH := tmpH
-        pickL := tmpL
-        pickC := tmpC
-        pickT := tmpT
-        pickActualOpen := tmpActualOpen
-        pickActualOpenTs := tmpActualOpenTs
-        pickActualBoundaryTs := tmpActualBoundaryTs
-        pickActualQi := tmpActualQi
+        pack := f_ingest_pack_nano()
     else if isMicro
-        [tmpO, tmpH, tmpL, tmpC, tmpT, tmpActualOpen, tmpActualOpenTs, tmpActualBoundaryTs, tmpActualQi] = f_micro_aligned_ohlc_current()
-        pickO := tmpO
-        pickH := tmpH
-        pickL := tmpL
-        pickC := tmpC
-        pickT := tmpT
-        pickActualOpen := tmpActualOpen
-        pickActualOpenTs := tmpActualOpenTs
-        pickActualBoundaryTs := tmpActualBoundaryTs
-        pickActualQi := tmpActualQi
+        pack := f_ingest_pack_micro()
     else if isM90
-        [tmpO, tmpH, tmpL, tmpC, tmpT, tmpActualOpen, tmpActualOpenTs, tmpActualBoundaryTs, tmpActualQi] = f_m90_aligned_ohlc_current()
-        pickO := tmpO
-        pickH := tmpH
-        pickL := tmpL
-        pickC := tmpC
-        pickT := tmpT
-        pickActualOpen := tmpActualOpen
-        pickActualOpenTs := tmpActualOpenTs
-        pickActualBoundaryTs := tmpActualBoundaryTs
-        pickActualQi := tmpActualQi
+        pack := f_ingest_pack_m90()
     else if isDaily
-        [tmpO, tmpH, tmpL, tmpC, tmpT, tmpActualOpen, tmpActualOpenTs, tmpActualBoundaryTs, tmpActualQi] = f_daily_aligned_ohlc_current()
-        pickO := tmpO
-        pickH := tmpH
-        pickL := tmpL
-        pickC := tmpC
-        pickT := tmpT
-        pickActualOpen := tmpActualOpen
-        pickActualOpenTs := tmpActualOpenTs
-        pickActualBoundaryTs := tmpActualBoundaryTs
-        pickActualQi := tmpActualQi
-    [pickO, pickH, pickL, pickC, pickT, pickActualOpen, pickActualOpenTs, pickActualBoundaryTs, pickActualQi]
+        pack := f_ingest_pack_daily()
+    pickO := pack.o
+    pickH := pack.h
+    pickL := pack.l
+    pickC := pack.c
+    pickT := pack.t
+    pickTClose := pack.tClose
+    pickActualOpen := pack.actualOpen
+    pickActualOpenTs := pack.actualOpenTs
+    pickActualBoundaryTs := pack.actualBoundaryTs
+    pickActualQi := pack.actualQi
+    [pickO, pickH, pickL, pickC, pickT, pickTClose, pickActualOpen, pickActualOpenTs, pickActualBoundaryTs, pickActualQi]
 
-f_aligned_bar_timing(bool isNano, bool isMicro, bool isM90, bool isDaily, int aT) =>
+f_aligned_bar_timing(bool isNano, bool isMicro, bool isM90, bool isDaily, int aT, int aTClose) =>
     int aLen = isNano ? 5 * MS_SEC : isMicro ? 30 * MS_SEC : isM90 ? 5 * MS_MIN : isDaily ? 15 * MS_MIN : int(na)
-    int aRef = isNano ? aT : (aT + aLen - 1)
-    int aClose = aT + aLen
-    [aLen, aRef, aClose]
+    int aRef = aTClose - 1
+    [aLen, aRef]
 
 // ============================================================================
 // STEP 2 HELPERS — Chart-TF quarter OHLC aggregation (minimal, gap-safe)
@@ -696,6 +866,80 @@ f_core_update_ohlc(QtCycleState cs, int t, float o, float h, float l, float c, b
         out.q4 := f_q_apply_bar(cs.q4, t, o, h, l, c, isStartBar)
     out
 
+f_core_finalize_old_cycle(
+    QuarterRecord q1In,
+    QuarterRecord q2In,
+    QuarterRecord q3In,
+    QuarterRecord q4In,
+    QuarterRecord prev1In,
+    QuarterRecord prev2In,
+    int lastBoundaryTs
+) =>
+    QuarterRecord q1 = q1In
+    QuarterRecord q2 = q2In
+    QuarterRecord q3 = q3In
+    QuarterRecord q4 = q4In
+    QuarterRecord p1 = prev1In
+    QuarterRecord p2 = prev2In
+
+    int lastIdxOld = f_q_idx_from_boundary(lastBoundaryTs, q1.boundaryTs, q2.boundaryTs, q3.boundaryTs, q4.boundaryTs)
+
+    if lastIdxOld == 0 or lastIdxOld == 1
+        [tmpQ1_1, tmpP1_1, tmpP2_1] = f_finalize_and_roll(q1, p1, p2)
+        q1 := tmpQ1_1
+        p1 := tmpP1_1
+        p2 := tmpP2_1
+
+        [tmpQ2_2, tmpP1_2, tmpP2_2] = f_finalize_and_roll(q2, p1, p2)
+        q2 := tmpQ2_2
+        p1 := tmpP1_2
+        p2 := tmpP2_2
+
+        [tmpQ3_3, tmpP1_3, tmpP2_3] = f_finalize_and_roll(q3, p1, p2)
+        q3 := tmpQ3_3
+        p1 := tmpP1_3
+        p2 := tmpP2_3
+
+        [tmpQ4_4, tmpP1_4, tmpP2_4] = f_finalize_and_roll(q4, p1, p2)
+        q4 := tmpQ4_4
+        p1 := tmpP1_4
+        p2 := tmpP2_4
+
+    else if lastIdxOld == 2
+        [tmpQ2_5, tmpP1_5, tmpP2_5] = f_finalize_and_roll(q2, p1, p2)
+        q2 := tmpQ2_5
+        p1 := tmpP1_5
+        p2 := tmpP2_5
+
+        [tmpQ3_6, tmpP1_6, tmpP2_6] = f_finalize_and_roll(q3, p1, p2)
+        q3 := tmpQ3_6
+        p1 := tmpP1_6
+        p2 := tmpP2_6
+
+        [tmpQ4_7, tmpP1_7, tmpP2_7] = f_finalize_and_roll(q4, p1, p2)
+        q4 := tmpQ4_7
+        p1 := tmpP1_7
+        p2 := tmpP2_7
+
+    else if lastIdxOld == 3
+        [tmpQ3_8, tmpP1_8, tmpP2_8] = f_finalize_and_roll(q3, p1, p2)
+        q3 := tmpQ3_8
+        p1 := tmpP1_8
+        p2 := tmpP2_8
+
+        [tmpQ4_9, tmpP1_9, tmpP2_9] = f_finalize_and_roll(q4, p1, p2)
+        q4 := tmpQ4_9
+        p1 := tmpP1_9
+        p2 := tmpP2_9
+
+    else if lastIdxOld == 4
+        [tmpQ4_10, tmpP1_10, tmpP2_10] = f_finalize_and_roll(q4, p1, p2)
+        q4 := tmpQ4_10
+        p1 := tmpP1_10
+        p2 := tmpP2_10
+
+    [q1, q2, q3, q4, p1, p2]
+
 
 f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
     // No mutation of input param: copy first, return the new array.
@@ -732,16 +976,8 @@ f_fixed_cycle_update(
     bool isM90 = (lenMs == LEN_6H)
     bool isDaily = (lenMs == LEN_24H)
     int tRef = isNano ? t : (tClose - 1)
-    int ds = f_qt_day_start(tRef, cfg)
 
-    int cStart = f_cycle_start(tRef, ds, lenMs)
-    int cEnd   = cStart + lenMs
-    int qLen   = int(lenMs / 4)
-
-    int q1Ts = cStart
-    int q2Ts = cStart + 1 * qLen
-    int q3Ts = cStart + 2 * qLen
-    int q4Ts = cStart + 3 * qLen
+    [cStart, cEnd, q1Ts, q2Ts, q3Ts, q4Ts, qi, inW] = f_fixed_cycle_window(tRef, cfg, lenMs)
 
     bool q2R = tClose > q2Ts
     bool q3R = tClose > q3Ts
@@ -749,9 +985,6 @@ f_fixed_cycle_update(
 
     bool sR  = tClose > cStart
     bool eR  = tClose > cEnd
-
-    bool inW = tRef >= cStart and tRef < cEnd
-    int  qi  = f_quarter_index(tRef, cStart, lenMs)
 
     // Printed start retention + cycle-change detection
     int[] starts2    = stIn.starts
@@ -787,62 +1020,13 @@ f_fixed_cycle_update(
 
     // If cycle rolled, finalize remaining old-cycle quarters (gap-safe), then reset records for the new cycle.
     if cycleChanged
-        int lastIdxOld = f_q_idx_from_boundary(lastBoundary2, q1.boundaryTs, q2.boundaryTs, q3.boundaryTs, q4.boundaryTs)
-
-        if lastIdxOld == 0 or lastIdxOld == 1   
-            [tmpQ1_1, tmpP1_1, tmpP2_1] = f_finalize_and_roll(q1, prev1, prev2)
-            q1 := tmpQ1_1
-            prev1 := tmpP1_1
-            prev2 := tmpP2_1
-
-            [tmpQ2_2, tmpP1_2, tmpP2_2] = f_finalize_and_roll(q2, prev1, prev2)
-            q2 := tmpQ2_2
-            prev1 := tmpP1_2
-            prev2 := tmpP2_2
-
-            [tmpQ3_3, tmpP1_3, tmpP2_3] = f_finalize_and_roll(q3, prev1, prev2)
-            q3 := tmpQ3_3
-            prev1 := tmpP1_3
-            prev2 := tmpP2_3
-
-            [tmpQ4_4, tmpP1_4, tmpP2_4] = f_finalize_and_roll(q4, prev1, prev2)
-            q4 := tmpQ4_4
-            prev1 := tmpP1_4
-            prev2 := tmpP2_4
-
-        else if lastIdxOld == 2
-            [tmpQ2_5, tmpP1_5, tmpP2_5] = f_finalize_and_roll(q2, prev1, prev2)
-            q2 := tmpQ2_5
-            prev1 := tmpP1_5
-            prev2 := tmpP2_5
-
-            [tmpQ3_6, tmpP1_6, tmpP2_6] = f_finalize_and_roll(q3, prev1, prev2)
-            q3 := tmpQ3_6
-            prev1 := tmpP1_6
-            prev2 := tmpP2_6
-
-            [tmpQ4_7, tmpP1_7, tmpP2_7] = f_finalize_and_roll(q4, prev1, prev2)
-            q4 := tmpQ4_7
-            prev1 := tmpP1_7
-            prev2 := tmpP2_7
-
-        else if lastIdxOld == 3
-            [tmpQ3_8, tmpP1_8, tmpP2_8] = f_finalize_and_roll(q3, prev1, prev2)
-            q3 := tmpQ3_8
-            prev1 := tmpP1_8
-            prev2 := tmpP2_8
-
-            [tmpQ4_9, tmpP1_9, tmpP2_9] = f_finalize_and_roll(q4, prev1, prev2)
-            q4 := tmpQ4_9
-            prev1 := tmpP1_9
-            prev2 := tmpP2_9
-
-        else if lastIdxOld == 4
-            [tmpQ4_10, tmpP1_10, tmpP2_10] = f_finalize_and_roll(q4, prev1, prev2)
-            q4 := tmpQ4_10
-            prev1 := tmpP1_10
-            prev2 := tmpP2_10
-
+        [tmpQ1, tmpQ2, tmpQ3, tmpQ4, tmpP1, tmpP2] = f_core_finalize_old_cycle(q1, q2, q3, q4, prev1, prev2, lastBoundary2)
+        q1 := tmpQ1
+        q2 := tmpQ2
+        q3 := tmpQ3
+        q4 := tmpQ4
+        prev1 := tmpP1
+        prev2 := tmpP2
 
         q1 := f_make_empty_q(q1Ts)
         q2 := f_make_empty_q(q2Ts)
@@ -869,20 +1053,13 @@ f_fixed_cycle_update(
         pendingOpenTs2 := int(na)
         pendingHas2 := false
 
-    // Current quarter boundary for this bar
-    int qCurTs = q1Ts
-    if qi == 2
-        qCurTs := q2Ts
-    else if qi == 3
-        qCurTs := q3Ts
-    else if qi == 4
-        qCurTs := q4Ts
-    bool startEdge = inW and (tClose > qCurTs) and (na(lastBoundary2) or qCurTs != lastBoundary2)
+    // Current quarter boundary candidate for this bar
+    int candidateBoundaryTs = f_fixed_cycle_next_boundary_ts(q1Ts, q2Ts, q3Ts, q4Ts, qi, inW)
 
     // Aligned-TF quarter aggregation (Micro/Nano/90m/Daily).
     bool useAligned = isM90 or isDaily
-    [aO, aH, aL, aC, aT, aActualOpen, aActualOpenTs, aActualBoundaryTs, aActualQi] = f_aligned_ohlc_pick(isNano, isMicro, isM90, isDaily)
-    if (isMicro or isNano) and not na(aActualOpen) and not na(aActualOpenTs) and not na(aActualBoundaryTs)
+    [aO, aH, aL, aC, aT, aTClose, aActualOpen, aActualOpenTs, aActualBoundaryTs, aActualQi] = f_aligned_ohlc_pick(isNano, isMicro, isM90, isDaily)
+    if not na(aActualOpen) and not na(aActualOpenTs) and not na(aActualBoundaryTs)
         if aActualBoundaryTs == q1Ts or aActualBoundaryTs == q2Ts or aActualBoundaryTs == q3Ts or aActualBoundaryTs == q4Ts
             pendingBoundary2 := aActualBoundaryTs
             pendingOpen2 := aActualOpen
@@ -892,76 +1069,17 @@ f_fixed_cycle_update(
     bool aNew = not na(aT) and (na(alignedLastBar2) or aT != alignedLastBar2)
     if aNew
         alignedLastBar2 := aT
-        [aLen, aRef, aClose] = f_aligned_bar_timing(isNano, isMicro, isM90, isDaily, aT)
-        int aDs = f_qt_day_start(aRef, cfg)
-        int aCStart = f_cycle_start(aRef, aDs, lenMs)
-        int aCEnd = aCStart + lenMs
-        int aQLen = int(lenMs / 4)
-
-        int aq1Ts = aCStart
-        int aq2Ts = aCStart + 1 * aQLen
-        int aq3Ts = aCStart + 2 * aQLen
-        int aq4Ts = aCStart + 3 * aQLen
-
-        int aQi = f_quarter_index(aRef, aCStart, lenMs)
-        bool aInW = aRef >= aCStart and aRef < aCEnd
+        [aLen, aRef] = f_aligned_bar_timing(isNano, isMicro, isM90, isDaily, aT, aTClose)
+        [aCStart, aCEnd, aq1Ts, aq2Ts, aq3Ts, aq4Ts, aQi, aInW] = f_fixed_cycle_window(aRef, cfg, lenMs)
         bool aCycleChanged = na(alignedLastStart2) or aCStart != alignedLastStart2
         if aCycleChanged
-            int aLastIdxOld = f_q_idx_from_boundary(alignedLastBoundary2, aq1.boundaryTs, aq2.boundaryTs, aq3.boundaryTs, aq4.boundaryTs)
-
-            if aLastIdxOld == 0 or aLastIdxOld == 1
-                [tmpAQ1_1, tmpAP1_1, tmpAP2_1] = f_finalize_and_roll(aq1, aprev1, aprev2)
-                aq1 := tmpAQ1_1
-                aprev1 := tmpAP1_1
-                aprev2 := tmpAP2_1
-
-                [tmpAQ2_2, tmpAP1_2, tmpAP2_2] = f_finalize_and_roll(aq2, aprev1, aprev2)
-                aq2 := tmpAQ2_2
-                aprev1 := tmpAP1_2
-                aprev2 := tmpAP2_2
-
-                [tmpAQ3_3, tmpAP1_3, tmpAP2_3] = f_finalize_and_roll(aq3, aprev1, aprev2)
-                aq3 := tmpAQ3_3
-                aprev1 := tmpAP1_3
-                aprev2 := tmpAP2_3
-
-                [tmpAQ4_4, tmpAP1_4, tmpAP2_4] = f_finalize_and_roll(aq4, aprev1, aprev2)
-                aq4 := tmpAQ4_4
-                aprev1 := tmpAP1_4
-                aprev2 := tmpAP2_4
-
-            else if aLastIdxOld == 2
-                [tmpAQ2_5, tmpAP1_5, tmpAP2_5] = f_finalize_and_roll(aq2, aprev1, aprev2)
-                aq2 := tmpAQ2_5
-                aprev1 := tmpAP1_5
-                aprev2 := tmpAP2_5
-
-                [tmpAQ3_6, tmpAP1_6, tmpAP2_6] = f_finalize_and_roll(aq3, aprev1, aprev2)
-                aq3 := tmpAQ3_6
-                aprev1 := tmpAP1_6
-                aprev2 := tmpAP2_6
-
-                [tmpAQ4_7, tmpAP1_7, tmpAP2_7] = f_finalize_and_roll(aq4, aprev1, aprev2)
-                aq4 := tmpAQ4_7
-                aprev1 := tmpAP1_7
-                aprev2 := tmpAP2_7
-
-            else if aLastIdxOld == 3
-                [tmpAQ3_8, tmpAP1_8, tmpAP2_8] = f_finalize_and_roll(aq3, aprev1, aprev2)
-                aq3 := tmpAQ3_8
-                aprev1 := tmpAP1_8
-                aprev2 := tmpAP2_8
-
-                [tmpAQ4_9, tmpAP1_9, tmpAP2_9] = f_finalize_and_roll(aq4, aprev1, aprev2)
-                aq4 := tmpAQ4_9
-                aprev1 := tmpAP1_9
-                aprev2 := tmpAP2_9
-
-            else if aLastIdxOld == 4
-                [tmpAQ4_10, tmpAP1_10, tmpAP2_10] = f_finalize_and_roll(aq4, aprev1, aprev2)
-                aq4 := tmpAQ4_10
-                aprev1 := tmpAP1_10
-                aprev2 := tmpAP2_10
+            [tmpAQ1, tmpAQ2, tmpAQ3, tmpAQ4, tmpAP1, tmpAP2] = f_core_finalize_old_cycle(aq1, aq2, aq3, aq4, aprev1, aprev2, alignedLastBoundary2)
+            aq1 := tmpAQ1
+            aq2 := tmpAQ2
+            aq3 := tmpAQ3
+            aq4 := tmpAQ4
+            aprev1 := tmpAP1
+            aprev2 := tmpAP2
 
             aq1 := f_make_empty_q(aq1Ts)
             aq2 := f_make_empty_q(aq2Ts)
@@ -979,147 +1097,81 @@ f_fixed_cycle_update(
         if na(aq4.boundaryTs) or aq4.boundaryTs != aq4Ts
             aq4 := f_make_empty_q(aq4Ts)
 
-        int aQCurTs = aq1Ts
-        if aQi == 2
-            aQCurTs := aq2Ts
-        else if aQi == 3
-            aQCurTs := aq3Ts
-        else if aQi == 4
-            aQCurTs := aq4Ts
+        int aCandidateBoundaryTs = f_fixed_cycle_next_boundary_ts(aq1Ts, aq2Ts, aq3Ts, aq4Ts, aQi, aInW)
+        bool aQ2R = aTClose > aq2Ts
+        bool aQ3R = aTClose > aq3Ts
+        bool aQ4R = aTClose > aq4Ts
+        bool aSR = aTClose > aCStart
+        bool aER = aTClose > aCEnd
 
-        bool aStartEdge = aInW and (aClose > aQCurTs) and (na(alignedLastBoundary2) or aQCurTs != alignedLastBoundary2)
-        if aStartEdge and not aCycleChanged
-            int aLastIdx = f_q_idx_from_boundary(alignedLastBoundary2, aq1Ts, aq2Ts, aq3Ts, aq4Ts)
-            int aNewIdx  = aQi
+        QtCycleState aCore = QtCycleState.new(
+            aCStart,
+            aCEnd,
+            aSR,
+            aER,
+            alignedLastBoundary2,
+            aQi,
+            aInW,
+            aQ2R,
+            aQ3R,
+            aQ4R,
+            aq1,
+            aq2,
+            aq3,
+            aq4,
+            aprev1,
+            aprev2,
+            f_qt_event_none(),
+            0,
+            0
+        )
 
-            if aLastIdx == 1
-                [tmpAQ1_A, tmpAP1_A, tmpAP2_A] = f_finalize_and_roll(aq1, aprev1, aprev2)
-                aq1 := tmpAQ1_A
-                aprev1 := tmpAP1_A
-                aprev2 := tmpAP2_A
-
-                if aNewIdx >= 3
-                    [tmpAQ2_B, tmpAP1_B, tmpAP2_B] = f_finalize_and_roll(aq2, aprev1, aprev2)
-                    aq2 := tmpAQ2_B
-                    aprev1 := tmpAP1_B
-                    aprev2 := tmpAP2_B
-
-                if aNewIdx >= 4
-                    [tmpAQ3_C, tmpAP1_C, tmpAP2_C] = f_finalize_and_roll(aq3, aprev1, aprev2)
-                    aq3 := tmpAQ3_C
-                    aprev1 := tmpAP1_C
-                    aprev2 := tmpAP2_C
-
-            else if aLastIdx == 2
-                [tmpAQ2_D, tmpAP1_D, tmpAP2_D] = f_finalize_and_roll(aq2, aprev1, aprev2)
-                aq2 := tmpAQ2_D
-                aprev1 := tmpAP1_D
-                aprev2 := tmpAP2_D
-
-                if aNewIdx >= 4
-                    [tmpAQ3_E, tmpAP1_E, tmpAP2_E] = f_finalize_and_roll(aq3, aprev1, aprev2)
-                    aq3 := tmpAQ3_E
-                    aprev1 := tmpAP1_E
-                    aprev2 := tmpAP2_E
-
-            else if aLastIdx == 3
-                [tmpAQ3_F, tmpAP1_F, tmpAP2_F] = f_finalize_and_roll(aq3, aprev1, aprev2)
-                aq3 := tmpAQ3_F
-                aprev1 := tmpAP1_F
-                aprev2 := tmpAP2_F
-
-        if aStartEdge
-            alignedLastBoundary2 := aQCurTs
-
+        QtBoundaryEvent aEvt = f_core_make_event_if_realized(aCore, aCandidateBoundaryTs, aTClose)
+        QtCycleState aCore2 = f_core_roll_quarter(aCore, aEvt)
         if not na(aO) and not na(aH) and not na(aL) and not na(aC)
-            if aQi == 1 and not aq1.isFinal
-                aq1 := f_q_apply_bar(aq1, aT, aO, aH, aL, aC, aStartEdge)
-            else if aQi == 2 and not aq2.isFinal
-                aq2 := f_q_apply_bar(aq2, aT, aO, aH, aL, aC, aStartEdge)
-            else if aQi == 3 and not aq3.isFinal
-                aq3 := f_q_apply_bar(aq3, aT, aO, aH, aL, aC, aStartEdge)
-            else if aQi == 4 and not aq4.isFinal
-                aq4 := f_q_apply_bar(aq4, aT, aO, aH, aL, aC, aStartEdge)
+            aCore2 := f_core_update_ohlc(aCore2, aT, aO, aH, aL, aC, aEvt.happened)
 
+        aq1 := aCore2.q1
+        aq2 := aCore2.q2
+        aq3 := aCore2.q3
+        aq4 := aCore2.q4
+        aprev1 := aCore2.prev1
+        aprev2 := aCore2.prev2
+        alignedLastBoundary2 := aCore2.lastBoundaryTs
 
-    // Finalize the quarter we were last in (and any skipped quarters) on the first bar of the new quarter.
-    if startEdge and not cycleChanged
-        int lastIdx = f_q_idx_from_boundary(lastBoundary2, q1Ts, q2Ts, q3Ts, q4Ts)
-        int newIdx  = qi
+    QtCycleState core = QtCycleState.new(
+        cStart,
+        cEnd,
+        sR,
+        eR,
+        lastBoundary2,
+        qi,
+        inW,
+        q2R,
+        q3R,
+        q4R,
+        q1,
+        q2,
+        q3,
+        q4,
+        prev1,
+        prev2,
+        f_qt_event_none(),
+        0,
+        0
+    )
 
-        if lastIdx == 1
-            [tmpQ1_A, tmpP1_A, tmpP2_A] = f_finalize_and_roll(q1, prev1, prev2)
-            q1 := tmpQ1_A
-            prev1 := tmpP1_A
-            prev2 := tmpP2_A
+    QtBoundaryEvent evt = f_core_make_event_if_realized(core, candidateBoundaryTs, tClose)
+    QtCycleState core2 = f_core_roll_quarter(core, evt)
+    core2 := f_core_update_ohlc(core2, t, open, high, low, close, evt.happened)
 
-            if newIdx >= 3
-                [tmpQ2_B, tmpP1_B, tmpP2_B] = f_finalize_and_roll(q2, prev1, prev2)
-                q2 := tmpQ2_B
-                prev1 := tmpP1_B
-                prev2 := tmpP2_B
-
-            if newIdx >= 4
-                [tmpQ3_C, tmpP1_C, tmpP2_C] = f_finalize_and_roll(q3, prev1, prev2)
-                q3 := tmpQ3_C
-                prev1 := tmpP1_C
-                prev2 := tmpP2_C
-
-        else if lastIdx == 2
-            [tmpQ2_D, tmpP1_D, tmpP2_D] = f_finalize_and_roll(q2, prev1, prev2)
-            q2 := tmpQ2_D
-            prev1 := tmpP1_D
-            prev2 := tmpP2_D
-
-            if newIdx >= 4
-                [tmpQ3_E, tmpP1_E, tmpP2_E] = f_finalize_and_roll(q3, prev1, prev2)
-                q3 := tmpQ3_E
-                prev1 := tmpP1_E
-                prev2 := tmpP2_E
-
-        else if lastIdx == 3
-            [tmpQ3_F, tmpP1_F, tmpP2_F] = f_finalize_and_roll(q3, prev1, prev2)
-            q3 := tmpQ3_F
-            prev1 := tmpP1_F
-            prev2 := tmpP2_F
-
-
-    if startEdge
-        lastBoundary2 := qCurTs
-
-    // Update active quarter OHLC on chart TF
-    if qi == 1 and not q1.isFinal
-        q1 := f_q_apply_bar(q1, t, open, high, low, close, startEdge)
-    else if qi == 2 and not q2.isFinal
-        q2 := f_q_apply_bar(q2, t, open, high, low, close, startEdge)
-    else if qi == 3 and not q3.isFinal
-        q3 := f_q_apply_bar(q3, t, open, high, low, close, startEdge)
-    else if qi == 4 and not q4.isFinal
-        q4 := f_q_apply_bar(q4, t, open, high, low, close, startEdge)
-
-    // Micro/Nano: apply pending true-open when its quarter becomes active.
-    if (isNano or isMicro) and pendingHas2
-        if pendingBoundary2 == q1Ts and qi == 1
-            q1.o   := pendingOpen2
-            q1.oTs := pendingOpenTs2
-            pendingHas2 := false
-        else if pendingBoundary2 == q2Ts and qi == 2
-            q2.o   := pendingOpen2
-            q2.oTs := pendingOpenTs2
-            pendingHas2 := false
-        else if pendingBoundary2 == q3Ts and qi == 3
-            q3.o   := pendingOpen2
-            q3.oTs := pendingOpenTs2
-            pendingHas2 := false
-        else if pendingBoundary2 == q4Ts and qi == 4
-            q4.o   := pendingOpen2
-            q4.oTs := pendingOpenTs2
-            pendingHas2 := false
-        else if (pendingBoundary2 == q1Ts and qi > 1) or (pendingBoundary2 == q2Ts and qi > 2) or (pendingBoundary2 == q3Ts and qi > 3)
-            pendingBoundary2 := int(na)
-            pendingOpen2 := float(na)
-            pendingOpenTs2 := int(na)
-            pendingHas2 := false
+    q1 := core2.q1
+    q2 := core2.q2
+    q3 := core2.q3
+    q4 := core2.q4
+    prev1 := core2.prev1
+    prev2 := core2.prev2
+    lastBoundary2 := core2.lastBoundaryTs
 
     // Phase 3: Micro/Nano H/L/C come from aligned-TF quarter aggregation.
     if isNano or isMicro
@@ -1189,6 +1241,30 @@ f_fixed_cycle_update(
         q4.c := aq4.c
         q4.cTs := aq4.cTs
 
+    // Apply pending true-open when its quarter becomes active (all fixed cycles).
+    if pendingHas2
+        if pendingBoundary2 == q1Ts and qi == 1
+            q1.o   := pendingOpen2
+            q1.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if pendingBoundary2 == q2Ts and qi == 2
+            q2.o   := pendingOpen2
+            q2.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if pendingBoundary2 == q3Ts and qi == 3
+            q3.o   := pendingOpen2
+            q3.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if pendingBoundary2 == q4Ts and qi == 4
+            q4.o   := pendingOpen2
+            q4.oTs := pendingOpenTs2
+            pendingHas2 := false
+        else if (pendingBoundary2 == q1Ts and qi > 1) or (pendingBoundary2 == q2Ts and qi > 2) or (pendingBoundary2 == q3Ts and qi > 3)
+            pendingBoundary2 := int(na)
+            pendingOpen2 := float(na)
+            pendingOpenTs2 := int(na)
+            pendingHas2 := false
+
     FixedCycleState stOut = FixedCycleState.new(starts2, lastStart2, lastBoundary2, q1, q2, q3, q4, prev1, prev2, pendingBoundary2, pendingOpen2, pendingOpenTs2, pendingHas2, aq1, aq2, aq3, aq4, aprev1, aprev2, alignedLastStart2, alignedLastBoundary2, alignedLastBar2)
 
     CycleResult res = CycleResult.new(
@@ -1249,13 +1325,13 @@ export f_qt_step(QtEngineState eng, int t, int tClose) =>
 // ============================================================================
 
 export qt_micro_aligned_ohlc_debug() =>
-    f_micro_aligned_ohlc_current()
+    f_pack_to_tuple(f_ingest_pack_micro())
 
 export qt_nano_aligned_ohlc_debug() =>
-    f_nano_aligned_ohlc_current()
+    f_pack_to_tuple(f_ingest_pack_nano())
 
 export qt_m90_aligned_ohlc_debug() =>
-    f_m90_aligned_ohlc_current()
+    f_pack_to_tuple(f_ingest_pack_m90())
 
 export qt_micro_aligned_qr_debug(CycleState st) =>
     [st.micro.aq1, st.micro.aq2, st.micro.aq3, st.micro.aq4]

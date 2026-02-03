@@ -1,5 +1,17 @@
 QTEngine TODO
 
+STATUS (DONE/DEFERRED)
+DONE
+- Public surface stable (UDTs + wrappers preserved)
+- Core module helpers (event/roll/update + finalize-old-cycle)
+- Fixed-cycle module helpers (window + next-boundary + quarter-id)
+- Ingestion/caching via QtSeriesPack + f_ingest_pack_* (per-TF cache)
+
+DEFERRED
+- Elastic/calendar cycles (Weekly/Monthly/etc)
+- Divider collision module
+- Debug/telemetry module
+
 1) Public Surface
 2) Core Module
 3) Fixed-Cycle Module
@@ -249,4 +261,3 @@ Testing TODO
 - Better Asset Selector (already have helper file)
 - Add toggle for "Display Parent Cycle Opens" (Maybe a list: All Opens, Q1 + Q2, None)
 - Help with SSMT drawings
-
