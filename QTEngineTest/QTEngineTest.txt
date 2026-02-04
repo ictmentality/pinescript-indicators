@@ -3,9 +3,8 @@ indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=5
 
 import Jaw1312/QTEngine/33 as qt
 
-// -----------------------------------------------------------------------------
+
 // Inputs
-// -----------------------------------------------------------------------------
 groupCycles = "TIME CYCLES"
 showDaily = input.bool(true, "Daily (24h cycle; q=6h)", group=groupCycles)
 show90m  = input.bool(true, "90m (6h cycle; q=90m)", group=groupCycles)
@@ -66,9 +65,8 @@ showMicroBullHSSMT = input.bool(false, "Show Bullish Micro HSSMT (Dyad)", group=
 showNanoBearHSSMT = input.bool(false, "Show Bearish Nano HSSMT (Dyad)", group=groupHSSMT)
 showNanoBullHSSMT = input.bool(false, "Show Bullish Nano HSSMT (Dyad)", group=groupHSSMT)
 
-// -----------------------------------------------------------------------------
+
 // Performance caps (seconds charts)
-// -----------------------------------------------------------------------------
 int SSMT_KEEP_CAP_SEC = 2
 int MICRO_KEEP_CAP_SEC = 3
 int NANO_KEEP_CAP_SEC = 2
@@ -76,20 +74,18 @@ int STORE_MAX_SEC = 300
 
 int ssmtKeepEff = timeframe.isseconds ? (ssmtKeep < SSMT_KEEP_CAP_SEC ? ssmtKeep : SSMT_KEEP_CAP_SEC) : ssmtKeep
 
-// -----------------------------------------------------------------------------
+
 // Color palette (Old QT Indicator) + divider opacity rule
-// -----------------------------------------------------------------------------
-var color COL_Q1 = color.rgb(99, 99, 99)      // #636363
-var color COL_Q2 = color.rgb(242, 54, 69)     // #f23645
-var color COL_Q3 = color.rgb(76, 175, 80)     // #4caf50
-var color COL_Q4 = color.rgb(41, 98, 255)     // #2962ff
+var color COL_Q1 = color.rgb(99, 99, 99)
+var color COL_Q2 = color.rgb(242, 54, 69)
+var color COL_Q3 = color.rgb(76, 175, 80)
+var color COL_Q4 = color.rgb(41, 98, 255)
 var int V_TRANSP = 70
 f_vcol(color c) =>
     color.new(c, V_TRANSP)
 
-// -----------------------------------------------------------------------------
+
 // Helpers (display-only)
-// -----------------------------------------------------------------------------
 f_hhmmss(int ts, string tz) =>
     int hh = hour(ts, tz)
     int mm = minute(ts, tz)
@@ -130,13 +126,12 @@ f_snap_daily_draw(int ts) =>
             i += 1
         na(snapped) ? ts : snapped
 
-// -----------------------------------------------------------------------------
+
 // Visibility Alignments (hardcoded)
 // Nano  = 5s - 15s
 // Micro = 30s - 4m
 // 90m   = 5m - 14m
 // Daily = 15m - 30m
-// -----------------------------------------------------------------------------
 int tfSec = timeframe.in_seconds(timeframe.period)
 bool visNanoTf = not na(tfSec) and tfSec >= 5 and tfSec <= 15
 bool visMicroTf = not na(tfSec) and tfSec >= 30 and tfSec <= 240
@@ -622,9 +617,7 @@ f_ssmt_hist_purge_q(line[] lines, label[] labels, int[] qts, int[] blockQts) =>
         i -= 1
     0
 
-// -----------------------------------------------------------------------------
 // Array helpers
-// -----------------------------------------------------------------------------
 f_find_int(int[] arr, int v) =>
     int idx = -1
     int i = array.size(arr) - 1
@@ -641,9 +634,8 @@ f_push_unique_int(int[] arr, int v, int maxN) =>
             array.shift(arr)
     0
 
-// -----------------------------------------------------------------------------
+
 // Old-QT vertical divider line storage helpers
-// -----------------------------------------------------------------------------
 type vset
     line[] ln
     int[]  ts
@@ -755,9 +747,8 @@ f_kill(line ln) =>
         line.delete(ln)
     out
 
-// -----------------------------------------------------------------------------
+
 // QT Core update (Daily + 90m + Micro + Nano)
-// -----------------------------------------------------------------------------
 var qt.QTConfig   cfg = qt.qt_config_default()
 var qt.CycleState st  = qt.qt_state_new()
 
@@ -776,9 +767,8 @@ qt.QuarterRecord m90_q = f_pick_qr(m90.curQuarterIndex, m90.q1, m90.q2, m90.q3, 
 qt.QuarterRecord m_q = f_pick_qr(m.curQuarterIndex, m.q1, m.q2, m.q3, m.q4)
 qt.QuarterRecord n_q = f_pick_qr(n.curQuarterIndex, n.q1, n.q2, n.q3, n.q4)
 
-// -----------------------------------------------------------------------------
+
 // Data Window — Step 1: boundaryTs checks
-// -----------------------------------------------------------------------------
 plot(show90mTf and dw90mStep1 ? m90.q1Ts : na, "90m q1Ts", display=display.data_window)
 plot(show90mTf and dw90mStep1 ? m90.q2Ts : na, "90m q2Ts", display=display.data_window)
 plot(show90mTf and dw90mStep1 ? m90.q3Ts : na, "90m q3Ts", display=display.data_window)
@@ -803,9 +793,8 @@ plot(showNanoTf and dwNanoStep1 ? (n.q2Realized ? 1.0 : 0.0) : na, "Nano q2Reali
 plot(showNanoTf and dwNanoStep1 ? (n.q3Realized ? 1.0 : 0.0) : na, "Nano q3Realized", display=display.data_window)
 plot(showNanoTf and dwNanoStep1 ? (n.q4Realized ? 1.0 : 0.0) : na, "Nano q4Realized", display=display.data_window)
 
-// -----------------------------------------------------------------------------
+
 // Data Window — Step 2: QuarterRecord (minimal)
-// -----------------------------------------------------------------------------
 float m_q1_o_hhmmss = f_hhmmss(m.q1.oTs, cfg.tz)
 float m_q2_o_hhmmss = f_hhmmss(m.q2.oTs, cfg.tz)
 float m_q3_o_hhmmss = f_hhmmss(m.q3.oTs, cfg.tz)
@@ -863,9 +852,8 @@ float n_q2_open_delta = not na(n.q2.oTs) ? (n.q2.oTs - n_q2_target) / 1000.0 : n
 float n_q3_open_delta = not na(n.q3.oTs) ? (n.q3.oTs - n_q3_target) / 1000.0 : na
 float n_q4_open_delta = not na(n.q4.oTs) ? (n.q4.oTs - n_q4_target) / 1000.0 : na
 
-// -----------------------------------------------------------------------------
+
 // Aligned TF OHLC (read-only debug)
-// -----------------------------------------------------------------------------
 var table aligned_tbl = na
 if showAlignedOhlc and barstate.islast
     if na(aligned_tbl)
@@ -930,9 +918,8 @@ else if not showAlignedOhlc and not na(aligned_tbl)
     table.delete(aligned_tbl)
     aligned_tbl := na
 
-// -----------------------------------------------------------------------------
+
 // Daily aligned open debug (m15) — compare chart vs 15m
-// -----------------------------------------------------------------------------
 var table daily_align_tbl = na
 if showDailyAlignDbg and barstate.islast
     [aO, aOTs, aPrevO, aPrevOTs, aQi, aQ1Ts, aQ2Ts, aQ3Ts, aQ4Ts] = request.security(syminfo.tickerid, "15", f_daily_aligned_open_debug(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
@@ -1014,10 +1001,8 @@ plot(showNanoTf and dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)",
 
 
 f_run_ssmt_hssmt() =>
-    // -----------------------------------------------------------------------------
     // Bearish Daily SSMT (ES/NQ) — test-only
     // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
     var table ssmtDbgTbl = na
     var line[] ssmtHistLines = array.new_line()
     var label[] ssmtHistLbls = array.new_label()
@@ -1298,10 +1283,9 @@ f_run_ssmt_hssmt() =>
         ssmtEventKey := na
         ssmtExtendTier := 0
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish Daily SSMT (ES/NQ) — test-only
-    // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt) 
     var table ssmtBDbgTbl = na
     var line[] ssmtBHistLines = array.new_line()
     var label[] ssmtBHistLbls = array.new_label()
@@ -1474,10 +1458,9 @@ f_run_ssmt_hssmt() =>
         ssmtBEventKey := na
         ssmtBExtendTier := 0
 
-    // -----------------------------------------------------------------------------
+    
     // Bearish Daily HSSMT (ES/NQ) — test-only
     // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
     var line[] dailyHssmtHistLines = array.new_line()
     var label[] dailyHssmtHistLbls = array.new_label()
     var int[] dailyHssmtHistQTs = array.new_int()
@@ -1664,10 +1647,9 @@ f_run_ssmt_hssmt() =>
         dailyHssmtExtendTier := 0
         dailyHssmtSuppressed := false
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish Daily HSSMT (ES/NQ) — test-only
     // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
     var line[] dailyHssmtBHistLines = array.new_line()
     var label[] dailyHssmtBHistLbls = array.new_label()
     var int[] dailyHssmtBHistQTs = array.new_int()
@@ -1854,10 +1836,10 @@ f_run_ssmt_hssmt() =>
         dailyHssmtBExtendTier := 0
         dailyHssmtBSuppressed := false
 
-    // -----------------------------------------------------------------------------
+    
     // Bearish m90 SSMT (ES/NQ) — test-only
     // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var table m90SsmtDbgTbl = na
     var line[] m90SsmtHistLines = array.new_line()
     var label[] m90SsmtHistLbls = array.new_label()
@@ -2121,10 +2103,10 @@ f_run_ssmt_hssmt() =>
         m90SsmtEventKey := na
         m90SsmtExtendTier := 0
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish m90 SSMT (ES/NQ) — test-only
     // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var table m90SsmtBDbgTbl = na
     var line[] m90SsmtBHistLines = array.new_line()
     var label[] m90SsmtBHistLbls = array.new_label()
@@ -2292,10 +2274,10 @@ f_run_ssmt_hssmt() =>
         m90SsmtBEventKey := na
         m90SsmtBExtendTier := 0
 
-    // -----------------------------------------------------------------------------
+    
     // Bearish m90 HSSMT (ES/NQ) — test-only
     // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] m90HssmtHistLines = array.new_line()
     var label[] m90HssmtHistLbls = array.new_label()
     var int[] m90HssmtHistQTs = array.new_int()
@@ -2481,10 +2463,10 @@ f_run_ssmt_hssmt() =>
         m90HssmtExtendTier := 0
         m90HssmtSuppressed := false
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish m90 HSSMT (ES/NQ) — test-only
     // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] m90HssmtBHistLines = array.new_line()
     var label[] m90HssmtBHistLbls = array.new_label()
     var int[] m90HssmtBHistQTs = array.new_int()
@@ -2670,18 +2652,25 @@ f_run_ssmt_hssmt() =>
         m90HssmtBExtendTier := 0
         m90HssmtBSuppressed := false
 
+    var int[] microSsmtHistQTs = array.new_int()
+    var int[] microSsmtBHistQTs = array.new_int()
+    var int microSsmtBearQTs = na
+    var int microSsmtBullQTs = na
 
-    // -----------------------------------------------------------------------------
+
+    
     // Bearish Micro HSSMT (ES/NQ) — test-only
     // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] microHssmtHistLines = array.new_line()
     var label[] microHssmtHistLbls = array.new_label()
+    var int[] microHssmtHistQTs = array.new_int()
     var line microHssmtLine = na
     var int  microHssmtEventKey = na
     var label microHssmtLbl = na
     var int  microHssmtExtendTier = 0
     var int  microHssmtActiveQTs = na
+    var bool microHssmtSuppressed = false
     int MicroHssmtQLen = 22 * 60 * 1000 + 30 * 1000
 
     bool hssmtMicroTfOk = visMicroTf
@@ -2781,10 +2770,10 @@ f_run_ssmt_hssmt() =>
     int esWLprevTsUSnap = f_snap_to_chart_bar(esWLprevTsU)
     int nqWLprevTsUSnap = f_snap_to_chart_bar(nqWLprevTsU)
 
-    // -----------------------------------------------------------------------------
+    
     // Bearish Micro SSMT (ES/NQ) — test-only
     // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] microSsmtHistLines = array.new_line()
     var label[] microSsmtHistLbls = array.new_label()
     var line microSsmtLine = na
@@ -2843,11 +2832,12 @@ f_run_ssmt_hssmt() =>
             if splitU
                 int eventKey = prevHTs
                 if na(microSsmtEventKey) or microSsmtEventKey != eventKey
-                    f_ssmt_hist_push(microSsmtLine, microSsmtLbl, microSsmtHistLines, microSsmtHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(microSsmtLine, microSsmtLbl, microSsmtHistLines, microSsmtHistLbls, microSsmtHistQTs, microSsmtActiveQTs, ssmtKeepEff)
                     microSsmtLine := na
                     microSsmtLbl := na
                     microSsmtEventKey := eventKey
                     microSsmtActiveQTs := curQTs
+                    microSsmtBearQTs := curQTs
                     microSsmtExtendTier := 0
 
                 if hasPoints and curSweep
@@ -2911,7 +2901,7 @@ f_run_ssmt_hssmt() =>
             if not splitU and not na(microSsmtEventKey)
                 bool rolled = not na(microSsmtActiveQTs) and not na(curQTs) and curQTs != microSsmtActiveQTs
                 if rolled
-                    f_ssmt_hist_push(microSsmtLine, microSsmtLbl, microSsmtHistLines, microSsmtHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(microSsmtLine, microSsmtLbl, microSsmtHistLines, microSsmtHistLbls, microSsmtHistQTs, microSsmtActiveQTs, ssmtKeepEff)
                 else
                     if not na(microSsmtLine)
                         line.delete(microSsmtLine)
@@ -2933,6 +2923,7 @@ f_run_ssmt_hssmt() =>
             microSsmtEventKey := na
             microSsmtExtendTier := 0
         f_ssmt_hist_trim(microSsmtHistLines, microSsmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(microSsmtHistQTs, ssmtKeepEff)
     else
         if not na(microSsmtLine)
             line.delete(microSsmtLine)
@@ -2941,13 +2932,14 @@ f_run_ssmt_hssmt() =>
             label.delete(microSsmtLbl)
             microSsmtLbl := na
         f_ssmt_hist_clear(microSsmtHistLines, microSsmtHistLbls)
+        f_ssmt_hist_clear_q(microSsmtHistQTs)
         microSsmtEventKey := na
         microSsmtExtendTier := 0
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish Micro SSMT (ES/NQ) — test-only
     // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] microSsmtBHistLines = array.new_line()
     var label[] microSsmtBHistLbls = array.new_label()
     var line microSsmtBLine = na
@@ -3005,11 +2997,12 @@ f_run_ssmt_hssmt() =>
             if splitUB
                 int eventKeyB = prevLTs
                 if na(microSsmtBEventKey) or microSsmtBEventKey != eventKeyB
-                    f_ssmt_hist_push(microSsmtBLine, microSsmtBLbl, microSsmtBHistLines, microSsmtBHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(microSsmtBLine, microSsmtBLbl, microSsmtBHistLines, microSsmtBHistLbls, microSsmtBHistQTs, microSsmtBActiveQTs, ssmtKeepEff)
                     microSsmtBLine := na
                     microSsmtBLbl := na
                     microSsmtBEventKey := eventKeyB
                     microSsmtBActiveQTs := curQTs
+                    microSsmtBullQTs := curQTs
                     microSsmtBExtendTier := 0
 
                 if hasPointsB and curSweep
@@ -3073,7 +3066,7 @@ f_run_ssmt_hssmt() =>
             if not splitUB and not na(microSsmtBEventKey)
                 bool rolledB = not na(microSsmtBActiveQTs) and not na(curQTs) and curQTs != microSsmtBActiveQTs
                 if rolledB
-                    f_ssmt_hist_push(microSsmtBLine, microSsmtBLbl, microSsmtBHistLines, microSsmtBHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(microSsmtBLine, microSsmtBLbl, microSsmtBHistLines, microSsmtBHistLbls, microSsmtBHistQTs, microSsmtBActiveQTs, ssmtKeepEff)
                 else
                     if not na(microSsmtBLine)
                         line.delete(microSsmtBLine)
@@ -3095,6 +3088,7 @@ f_run_ssmt_hssmt() =>
             microSsmtBEventKey := na
             microSsmtBExtendTier := 0
         f_ssmt_hist_trim(microSsmtBHistLines, microSsmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(microSsmtBHistQTs, ssmtKeepEff)
     else
         if not na(microSsmtBLine)
             line.delete(microSsmtBLine)
@@ -3103,6 +3097,7 @@ f_run_ssmt_hssmt() =>
             label.delete(microSsmtBLbl)
             microSsmtBLbl := na
         f_ssmt_hist_clear(microSsmtBHistLines, microSsmtBHistLbls)
+        f_ssmt_hist_clear_q(microSsmtBHistQTs)
         microSsmtBEventKey := na
         microSsmtBExtendTier := 0
 
@@ -3153,9 +3148,18 @@ f_run_ssmt_hssmt() =>
             if splitU
                 int eventKey = prevHTs
                 if na(microHssmtEventKey) or microHssmtEventKey != eventKey
-                    f_ssmt_hist_push(microHssmtLine, microHssmtLbl, microHssmtHistLines, microHssmtHistLbls, ssmtKeepEff)
-                    microHssmtLine := na
-                    microHssmtLbl := na
+                    if microHssmtSuppressed
+                        if not na(microHssmtLine)
+                            line.delete(microHssmtLine)
+                        if not na(microHssmtLbl)
+                            label.delete(microHssmtLbl)
+                        microHssmtLine := na
+                        microHssmtLbl := na
+                        microHssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(microHssmtLine, microHssmtLbl, microHssmtHistLines, microHssmtHistLbls, microHssmtHistQTs, microHssmtActiveQTs, ssmtKeepEff)
+                        microHssmtLine := na
+                        microHssmtLbl := na
                     microHssmtEventKey := eventKey
                     microHssmtActiveQTs := curQTs
                     microHssmtExtendTier := 0
@@ -3215,10 +3219,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabel and not na(microHssmtLbl)
                     label.delete(microHssmtLbl)
                     microHssmtLbl := na
+                bool suppressU = ssmtOverride and not na(microSsmtBearQTs) and microSsmtBearQTs == curQTs
+                microHssmtSuppressed := suppressU
+                if microHssmtSuppressed
+                    if not na(microHssmtLine)
+                        line.set_color(microHssmtLine, color.new(ssmtBearLineCol, 100))
+                    if not na(microHssmtLbl)
+                        label.set_textcolor(microHssmtLbl, color.new(color.black, 100))
             if not splitU and not na(microHssmtEventKey)
                 bool rolled = not na(microHssmtActiveQTs) and not na(curQTs) and curQTs != microHssmtActiveQTs
                 if rolled
-                    f_ssmt_hist_push(microHssmtLine, microHssmtLbl, microHssmtHistLines, microHssmtHistLbls, ssmtKeepEff)
+                    if microHssmtSuppressed
+                        if not na(microHssmtLine)
+                            line.delete(microHssmtLine)
+                        if not na(microHssmtLbl)
+                            label.delete(microHssmtLbl)
+                        microHssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(microHssmtLine, microHssmtLbl, microHssmtHistLines, microHssmtHistLbls, microHssmtHistQTs, microHssmtActiveQTs, ssmtKeepEff)
                 else
                     if not na(microHssmtLine)
                         line.delete(microHssmtLine)
@@ -3239,7 +3257,11 @@ f_run_ssmt_hssmt() =>
                 microHssmtLbl := na
             microHssmtEventKey := na
             microHssmtExtendTier := 0
+            microHssmtSuppressed := false
         f_ssmt_hist_trim(microHssmtHistLines, microHssmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(microHssmtHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(microHssmtHistLines, microHssmtHistLbls, microHssmtHistQTs, microSsmtHistQTs)
     else
         if not na(microHssmtLine)
             line.delete(microHssmtLine)
@@ -3248,21 +3270,25 @@ f_run_ssmt_hssmt() =>
             label.delete(microHssmtLbl)
             microHssmtLbl := na
         f_ssmt_hist_clear(microHssmtHistLines, microHssmtHistLbls)
+        f_ssmt_hist_clear_q(microHssmtHistQTs)
         microHssmtEventKey := na
         microHssmtExtendTier := 0
+        microHssmtSuppressed := false
 
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish Micro HSSMT (ES/NQ) — test-only
     // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] microHssmtBHistLines = array.new_line()
     var label[] microHssmtBHistLbls = array.new_label()
+    var int[] microHssmtBHistQTs = array.new_int()
     var line microHssmtBLine = na
     var int  microHssmtBEventKey = na
     var label microHssmtBLbl = na
     var int  microHssmtBExtendTier = 0
     var int  microHssmtBActiveQTs = na
+    var bool microHssmtBSuppressed = false
 
     bool hssmtMicroBullTfOk = visMicroTf
     if showMicroBullHSSMT and hssmtMicroBullTfOk
@@ -3312,9 +3338,18 @@ f_run_ssmt_hssmt() =>
             if splitUB
                 int eventKeyB = prevLTs
                 if na(microHssmtBEventKey) or microHssmtBEventKey != eventKeyB
-                    f_ssmt_hist_push(microHssmtBLine, microHssmtBLbl, microHssmtBHistLines, microHssmtBHistLbls, ssmtKeepEff)
-                    microHssmtBLine := na
-                    microHssmtBLbl := na
+                    if microHssmtBSuppressed
+                        if not na(microHssmtBLine)
+                            line.delete(microHssmtBLine)
+                        if not na(microHssmtBLbl)
+                            label.delete(microHssmtBLbl)
+                        microHssmtBLine := na
+                        microHssmtBLbl := na
+                        microHssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(microHssmtBLine, microHssmtBLbl, microHssmtBHistLines, microHssmtBHistLbls, microHssmtBHistQTs, microHssmtBActiveQTs, ssmtKeepEff)
+                        microHssmtBLine := na
+                        microHssmtBLbl := na
                     microHssmtBEventKey := eventKeyB
                     microHssmtBActiveQTs := curQTs
                     microHssmtBExtendTier := 0
@@ -3374,10 +3409,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabelB and not na(microHssmtBLbl)
                     label.delete(microHssmtBLbl)
                     microHssmtBLbl := na
+                bool suppressUB = ssmtOverride and not na(microSsmtBullQTs) and microSsmtBullQTs == curQTs
+                microHssmtBSuppressed := suppressUB
+                if microHssmtBSuppressed
+                    if not na(microHssmtBLine)
+                        line.set_color(microHssmtBLine, color.new(ssmtBullLineCol, 100))
+                    if not na(microHssmtBLbl)
+                        label.set_textcolor(microHssmtBLbl, color.new(color.black, 100))
             if not splitUB and not na(microHssmtBEventKey)
                 bool rolledB = not na(microHssmtBActiveQTs) and not na(curQTs) and curQTs != microHssmtBActiveQTs
                 if rolledB
-                    f_ssmt_hist_push(microHssmtBLine, microHssmtBLbl, microHssmtBHistLines, microHssmtBHistLbls, ssmtKeepEff)
+                    if microHssmtBSuppressed
+                        if not na(microHssmtBLine)
+                            line.delete(microHssmtBLine)
+                        if not na(microHssmtBLbl)
+                            label.delete(microHssmtBLbl)
+                        microHssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(microHssmtBLine, microHssmtBLbl, microHssmtBHistLines, microHssmtBHistLbls, microHssmtBHistQTs, microHssmtBActiveQTs, ssmtKeepEff)
                 else
                     if not na(microHssmtBLine)
                         line.delete(microHssmtBLine)
@@ -3398,7 +3447,11 @@ f_run_ssmt_hssmt() =>
                 microHssmtBLbl := na
             microHssmtBEventKey := na
             microHssmtBExtendTier := 0
+            microHssmtBSuppressed := false
         f_ssmt_hist_trim(microHssmtBHistLines, microHssmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(microHssmtBHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(microHssmtBHistLines, microHssmtBHistLbls, microHssmtBHistQTs, microSsmtBHistQTs)
     else
         if not na(microHssmtBLine)
             line.delete(microHssmtBLine)
@@ -3407,14 +3460,16 @@ f_run_ssmt_hssmt() =>
             label.delete(microHssmtBLbl)
             microHssmtBLbl := na
         f_ssmt_hist_clear(microHssmtBHistLines, microHssmtBHistLbls)
+        f_ssmt_hist_clear_q(microHssmtBHistQTs)
         microHssmtBEventKey := na
         microHssmtBExtendTier := 0
+        microHssmtBSuppressed := false
 
 
-    // -----------------------------------------------------------------------------
+    
     // Nano SSMT + HSSMT (ES/NQ) — test-only
     // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     int NanoSsmtQLen = 5 * 60 * 1000 + 37500
 
     bool ssmtNanoTfOk = visNanoTf
@@ -3514,17 +3569,19 @@ f_run_ssmt_hssmt() =>
     int esLprevTsNSnap = f_snap_to_chart_bar(esLprevTsN)
     int nqLprevTsNSnap = f_snap_to_chart_bar(nqLprevTsN)
 
-    // -----------------------------------------------------------------------------
+    
     // Bearish Nano SSMT (ES/NQ) — test-only
     // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] nanoSsmtHistLines = array.new_line()
     var label[] nanoSsmtHistLbls = array.new_label()
+    var int[] nanoSsmtHistQTs = array.new_int()
     var line nanoSsmtLine = na
     var int  nanoSsmtEventKey = na
     var label nanoSsmtLbl = na
     var int  nanoSsmtExtendTier = 0
     var int  nanoSsmtActiveQTs = na
+    var int  nanoSsmtBearQTs = na
 
     if showNanoBearSSMT and ssmtNanoTfOk
         string chartTagN = f_ssmt_tag(syminfo.tickerid)
@@ -3574,11 +3631,12 @@ f_run_ssmt_hssmt() =>
             if splitN
                 int eventKey = prevHTs
                 if na(nanoSsmtEventKey) or nanoSsmtEventKey != eventKey
-                    f_ssmt_hist_push(nanoSsmtLine, nanoSsmtLbl, nanoSsmtHistLines, nanoSsmtHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(nanoSsmtLine, nanoSsmtLbl, nanoSsmtHistLines, nanoSsmtHistLbls, nanoSsmtHistQTs, nanoSsmtActiveQTs, ssmtKeepEff)
                     nanoSsmtLine := na
                     nanoSsmtLbl := na
                     nanoSsmtEventKey := eventKey
                     nanoSsmtActiveQTs := curQTs
+                    nanoSsmtBearQTs := curQTs
                     nanoSsmtExtendTier := 0
 
                 if hasPoints and curSweep
@@ -3642,7 +3700,7 @@ f_run_ssmt_hssmt() =>
             if not splitN and not na(nanoSsmtEventKey)
                 bool rolled = not na(nanoSsmtActiveQTs) and not na(curQTs) and curQTs != nanoSsmtActiveQTs
                 if rolled
-                    f_ssmt_hist_push(nanoSsmtLine, nanoSsmtLbl, nanoSsmtHistLines, nanoSsmtHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(nanoSsmtLine, nanoSsmtLbl, nanoSsmtHistLines, nanoSsmtHistLbls, nanoSsmtHistQTs, nanoSsmtActiveQTs, ssmtKeepEff)
                 else
                     if not na(nanoSsmtLine)
                         line.delete(nanoSsmtLine)
@@ -3664,6 +3722,7 @@ f_run_ssmt_hssmt() =>
             nanoSsmtEventKey := na
             nanoSsmtExtendTier := 0
         f_ssmt_hist_trim(nanoSsmtHistLines, nanoSsmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(nanoSsmtHistQTs, ssmtKeepEff)
     else
         if not na(nanoSsmtLine)
             line.delete(nanoSsmtLine)
@@ -3672,20 +3731,23 @@ f_run_ssmt_hssmt() =>
             label.delete(nanoSsmtLbl)
             nanoSsmtLbl := na
         f_ssmt_hist_clear(nanoSsmtHistLines, nanoSsmtHistLbls)
+        f_ssmt_hist_clear_q(nanoSsmtHistQTs)
         nanoSsmtEventKey := na
         nanoSsmtExtendTier := 0
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish Nano SSMT (ES/NQ) — test-only
     // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] nanoSsmtBHistLines = array.new_line()
     var label[] nanoSsmtBHistLbls = array.new_label()
+    var int[] nanoSsmtBHistQTs = array.new_int()
     var line nanoSsmtBLine = na
     var int  nanoSsmtBEventKey = na
     var label nanoSsmtBLbl = na
     var int  nanoSsmtBExtendTier = 0
     var int  nanoSsmtBActiveQTs = na
+    var int  nanoSsmtBullQTs = na
 
     if showNanoBullSSMT and ssmtNanoTfOk
         string chartTagNB = f_ssmt_tag(syminfo.tickerid)
@@ -3735,11 +3797,12 @@ f_run_ssmt_hssmt() =>
             if splitNB
                 int eventKeyB = prevLTs
                 if na(nanoSsmtBEventKey) or nanoSsmtBEventKey != eventKeyB
-                    f_ssmt_hist_push(nanoSsmtBLine, nanoSsmtBLbl, nanoSsmtBHistLines, nanoSsmtBHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(nanoSsmtBLine, nanoSsmtBLbl, nanoSsmtBHistLines, nanoSsmtBHistLbls, nanoSsmtBHistQTs, nanoSsmtBActiveQTs, ssmtKeepEff)
                     nanoSsmtBLine := na
                     nanoSsmtBLbl := na
                     nanoSsmtBEventKey := eventKeyB
                     nanoSsmtBActiveQTs := curQTs
+                    nanoSsmtBullQTs := curQTs
                     nanoSsmtBExtendTier := 0
 
                 if hasPointsB and curSweep
@@ -3803,7 +3866,7 @@ f_run_ssmt_hssmt() =>
             if not splitNB and not na(nanoSsmtBEventKey)
                 bool rolledB = not na(nanoSsmtBActiveQTs) and not na(curQTs) and curQTs != nanoSsmtBActiveQTs
                 if rolledB
-                    f_ssmt_hist_push(nanoSsmtBLine, nanoSsmtBLbl, nanoSsmtBHistLines, nanoSsmtBHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(nanoSsmtBLine, nanoSsmtBLbl, nanoSsmtBHistLines, nanoSsmtBHistLbls, nanoSsmtBHistQTs, nanoSsmtBActiveQTs, ssmtKeepEff)
                 else
                     if not na(nanoSsmtBLine)
                         line.delete(nanoSsmtBLine)
@@ -3825,6 +3888,7 @@ f_run_ssmt_hssmt() =>
             nanoSsmtBEventKey := na
             nanoSsmtBExtendTier := 0
         f_ssmt_hist_trim(nanoSsmtBHistLines, nanoSsmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(nanoSsmtBHistQTs, ssmtKeepEff)
     else
         if not na(nanoSsmtBLine)
             line.delete(nanoSsmtBLine)
@@ -3833,20 +3897,23 @@ f_run_ssmt_hssmt() =>
             label.delete(nanoSsmtBLbl)
             nanoSsmtBLbl := na
         f_ssmt_hist_clear(nanoSsmtBHistLines, nanoSsmtBHistLbls)
+        f_ssmt_hist_clear_q(nanoSsmtBHistQTs)
         nanoSsmtBEventKey := na
         nanoSsmtBExtendTier := 0
 
-    // -----------------------------------------------------------------------------
+    
     // Bearish Nano HSSMT (ES/NQ) — test-only
     // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] nanoHssmtHistLines = array.new_line()
     var label[] nanoHssmtHistLbls = array.new_label()
+    var int[] nanoHssmtHistQTs = array.new_int()
     var line nanoHssmtLine = na
     var int  nanoHssmtEventKey = na
     var label nanoHssmtLbl = na
     var int  nanoHssmtExtendTier = 0
     var int  nanoHssmtActiveQTs = na
+    var bool nanoHssmtSuppressed = false
 
     bool hssmtNanoTfOk = visNanoTf
     if showNanoBearHSSMT and hssmtNanoTfOk
@@ -3896,9 +3963,18 @@ f_run_ssmt_hssmt() =>
             if splitNH
                 int eventKey = prevHTs
                 if na(nanoHssmtEventKey) or nanoHssmtEventKey != eventKey
-                    f_ssmt_hist_push(nanoHssmtLine, nanoHssmtLbl, nanoHssmtHistLines, nanoHssmtHistLbls, ssmtKeepEff)
-                    nanoHssmtLine := na
-                    nanoHssmtLbl := na
+                    if nanoHssmtSuppressed
+                        if not na(nanoHssmtLine)
+                            line.delete(nanoHssmtLine)
+                        if not na(nanoHssmtLbl)
+                            label.delete(nanoHssmtLbl)
+                        nanoHssmtLine := na
+                        nanoHssmtLbl := na
+                        nanoHssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(nanoHssmtLine, nanoHssmtLbl, nanoHssmtHistLines, nanoHssmtHistLbls, nanoHssmtHistQTs, nanoHssmtActiveQTs, ssmtKeepEff)
+                        nanoHssmtLine := na
+                        nanoHssmtLbl := na
                     nanoHssmtEventKey := eventKey
                     nanoHssmtActiveQTs := curQTs
                     nanoHssmtExtendTier := 0
@@ -3958,10 +4034,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabel and not na(nanoHssmtLbl)
                     label.delete(nanoHssmtLbl)
                     nanoHssmtLbl := na
+                bool suppressNH = ssmtOverride and not na(nanoSsmtBearQTs) and nanoSsmtBearQTs == curQTs
+                nanoHssmtSuppressed := suppressNH
+                if nanoHssmtSuppressed
+                    if not na(nanoHssmtLine)
+                        line.set_color(nanoHssmtLine, color.new(ssmtBearLineCol, 100))
+                    if not na(nanoHssmtLbl)
+                        label.set_textcolor(nanoHssmtLbl, color.new(color.black, 100))
             if not splitNH and not na(nanoHssmtEventKey)
                 bool rolled = not na(nanoHssmtActiveQTs) and not na(curQTs) and curQTs != nanoHssmtActiveQTs
                 if rolled
-                    f_ssmt_hist_push(nanoHssmtLine, nanoHssmtLbl, nanoHssmtHistLines, nanoHssmtHistLbls, ssmtKeepEff)
+                    if nanoHssmtSuppressed
+                        if not na(nanoHssmtLine)
+                            line.delete(nanoHssmtLine)
+                        if not na(nanoHssmtLbl)
+                            label.delete(nanoHssmtLbl)
+                        nanoHssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(nanoHssmtLine, nanoHssmtLbl, nanoHssmtHistLines, nanoHssmtHistLbls, nanoHssmtHistQTs, nanoHssmtActiveQTs, ssmtKeepEff)
                 else
                     if not na(nanoHssmtLine)
                         line.delete(nanoHssmtLine)
@@ -3982,7 +4072,11 @@ f_run_ssmt_hssmt() =>
                 nanoHssmtLbl := na
             nanoHssmtEventKey := na
             nanoHssmtExtendTier := 0
+            nanoHssmtSuppressed := false
         f_ssmt_hist_trim(nanoHssmtHistLines, nanoHssmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(nanoHssmtHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(nanoHssmtHistLines, nanoHssmtHistLbls, nanoHssmtHistQTs, nanoSsmtHistQTs)
     else
         if not na(nanoHssmtLine)
             line.delete(nanoHssmtLine)
@@ -3991,20 +4085,24 @@ f_run_ssmt_hssmt() =>
             label.delete(nanoHssmtLbl)
             nanoHssmtLbl := na
         f_ssmt_hist_clear(nanoHssmtHistLines, nanoHssmtHistLbls)
+        f_ssmt_hist_clear_q(nanoHssmtHistQTs)
         nanoHssmtEventKey := na
         nanoHssmtExtendTier := 0
+        nanoHssmtSuppressed := false
 
-    // -----------------------------------------------------------------------------
+    
     // Bullish Nano HSSMT (ES/NQ) — test-only
     // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
-    // -----------------------------------------------------------------------------
+    
     var line[] nanoHssmtBHistLines = array.new_line()
     var label[] nanoHssmtBHistLbls = array.new_label()
+    var int[] nanoHssmtBHistQTs = array.new_int()
     var line nanoHssmtBLine = na
     var int  nanoHssmtBEventKey = na
     var label nanoHssmtBLbl = na
     var int  nanoHssmtBExtendTier = 0
     var int  nanoHssmtBActiveQTs = na
+    var bool nanoHssmtBSuppressed = false
 
     bool hssmtNanoBullTfOk = visNanoTf
     if showNanoBullHSSMT and hssmtNanoBullTfOk
@@ -4054,9 +4152,18 @@ f_run_ssmt_hssmt() =>
             if splitNHB
                 int eventKeyB = prevLTs
                 if na(nanoHssmtBEventKey) or nanoHssmtBEventKey != eventKeyB
-                    f_ssmt_hist_push(nanoHssmtBLine, nanoHssmtBLbl, nanoHssmtBHistLines, nanoHssmtBHistLbls, ssmtKeepEff)
-                    nanoHssmtBLine := na
-                    nanoHssmtBLbl := na
+                    if nanoHssmtBSuppressed
+                        if not na(nanoHssmtBLine)
+                            line.delete(nanoHssmtBLine)
+                        if not na(nanoHssmtBLbl)
+                            label.delete(nanoHssmtBLbl)
+                        nanoHssmtBLine := na
+                        nanoHssmtBLbl := na
+                        nanoHssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(nanoHssmtBLine, nanoHssmtBLbl, nanoHssmtBHistLines, nanoHssmtBHistLbls, nanoHssmtBHistQTs, nanoHssmtBActiveQTs, ssmtKeepEff)
+                        nanoHssmtBLine := na
+                        nanoHssmtBLbl := na
                     nanoHssmtBEventKey := eventKeyB
                     nanoHssmtBActiveQTs := curQTs
                     nanoHssmtBExtendTier := 0
@@ -4116,10 +4223,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabelB and not na(nanoHssmtBLbl)
                     label.delete(nanoHssmtBLbl)
                     nanoHssmtBLbl := na
+                bool suppressNHB = ssmtOverride and not na(nanoSsmtBullQTs) and nanoSsmtBullQTs == curQTs
+                nanoHssmtBSuppressed := suppressNHB
+                if nanoHssmtBSuppressed
+                    if not na(nanoHssmtBLine)
+                        line.set_color(nanoHssmtBLine, color.new(ssmtBullLineCol, 100))
+                    if not na(nanoHssmtBLbl)
+                        label.set_textcolor(nanoHssmtBLbl, color.new(color.black, 100))
             if not splitNHB and not na(nanoHssmtBEventKey)
                 bool rolledB = not na(nanoHssmtBActiveQTs) and not na(curQTs) and curQTs != nanoHssmtBActiveQTs
                 if rolledB
-                    f_ssmt_hist_push(nanoHssmtBLine, nanoHssmtBLbl, nanoHssmtBHistLines, nanoHssmtBHistLbls, ssmtKeepEff)
+                    if nanoHssmtBSuppressed
+                        if not na(nanoHssmtBLine)
+                            line.delete(nanoHssmtBLine)
+                        if not na(nanoHssmtBLbl)
+                            label.delete(nanoHssmtBLbl)
+                        nanoHssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(nanoHssmtBLine, nanoHssmtBLbl, nanoHssmtBHistLines, nanoHssmtBHistLbls, nanoHssmtBHistQTs, nanoHssmtBActiveQTs, ssmtKeepEff)
                 else
                     if not na(nanoHssmtBLine)
                         line.delete(nanoHssmtBLine)
@@ -4140,7 +4261,11 @@ f_run_ssmt_hssmt() =>
                 nanoHssmtBLbl := na
             nanoHssmtBEventKey := na
             nanoHssmtBExtendTier := 0
+            nanoHssmtBSuppressed := false
         f_ssmt_hist_trim(nanoHssmtBHistLines, nanoHssmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(nanoHssmtBHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(nanoHssmtBHistLines, nanoHssmtBHistLbls, nanoHssmtBHistQTs, nanoSsmtBHistQTs)
     else
         if not na(nanoHssmtBLine)
             line.delete(nanoHssmtBLine)
@@ -4149,8 +4274,10 @@ f_run_ssmt_hssmt() =>
             label.delete(nanoHssmtBLbl)
             nanoHssmtBLbl := na
         f_ssmt_hist_clear(nanoHssmtBHistLines, nanoHssmtBHistLbls)
+        f_ssmt_hist_clear_q(nanoHssmtBHistQTs)
         nanoHssmtBEventKey := na
         nanoHssmtBExtendTier := 0
+        nanoHssmtBSuppressed := false
 
 
 
@@ -4159,16 +4286,16 @@ f_run_ssmt_hssmt() =>
 
 f_run_ssmt_hssmt()
 
-// -----------------------------------------------------------------------------
+
 // Divider + cycle-window management (QTIndicator model)
-// -----------------------------------------------------------------------------
+
 // TODO Later: Add option to extend all opening lines an entire cycle length
 var int MAX_LINES = 500
 var int STORE_MAX = timeframe.isseconds ? STORE_MAX_SEC : 800
 
-// -----------------------------------------------------------------------------
+
 // Daily cycle storage
-// -----------------------------------------------------------------------------
+
 var int[] dailyStarts = array.new_int()
 var vset  dailyV = vset_new()
 
@@ -4285,9 +4412,9 @@ f_dhist_ensure_current() =>
             f_dhist_shift_front()
     0
 
-// -----------------------------------------------------------------------------
+
 // 90m cycle storage
-// -----------------------------------------------------------------------------
+
 var int[] m90Starts = array.new_int()
 var vset  m90V = vset_new()
 
@@ -4404,9 +4531,8 @@ f_m90hist_ensure_current() =>
             f_m90hist_shift_front()
     0
 
-// -----------------------------------------------------------------------------
+
 // Micro cycle storage
-// -----------------------------------------------------------------------------
 var int[] microStarts = array.new_int()
 var vset  microV = vset_new()
 
@@ -4523,9 +4649,8 @@ f_mhist_ensure_current() =>
             f_mhist_shift_front()
     0
 
-// -----------------------------------------------------------------------------
+
 // Nano cycle storage
-// -----------------------------------------------------------------------------
 var int[] nanoStarts = array.new_int()
 var vset  nanoV = vset_new()
 
@@ -4534,10 +4659,8 @@ var line projQ3  = na
 var line projQ4  = na
 var line projEnd = na
 
-// -----------------------------------------------------------------------------
 // Open-line history (per displayed cycle) — values captured from QTCore during
 // the cycle, then retained + drawn as long as the cycle is inside keepCycles.
-// -----------------------------------------------------------------------------
 var int[]   histStart = array.new_int()
 var int[]   histEnd   = array.new_int()
 
@@ -4650,9 +4773,8 @@ f_hist_ensure_current() =>
             f_hist_shift_front()
     0
 
-// -----------------------------------------------------------------------------
+
 // Main draw logic
-// -----------------------------------------------------------------------------
 int enabledCycles = (showDailyTf ? 1 : 0) + (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
 if enabledCycles < 1
     enabledCycles := 1

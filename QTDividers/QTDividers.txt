@@ -1,0 +1,1382 @@
+//@version=6
+indicator("QTDividers", overlay=true, max_lines_count=500)
+
+import Jaw1312/QTEngine/33 as qt
+
+// Inputs
+groupCycles = "TIME CYCLES"
+showDaily = input.bool(true, "Daily", group=groupCycles)
+show90m  = input.bool(true, "m90", group=groupCycles)
+showMicro = input.bool(true, "Micro", group=groupCycles)
+showNano  = input.bool(true, "Nano", group=groupCycles)
+
+groupAll = "CYCLE SETTINGS"
+showOpens = input.bool(true, "Show Opens", group=groupAll)
+parentOpenMode = input.string("None", "Show Parent Cycle Opens", options=["None", "Q1", "Q1 + Q2", "All"], group=groupAll)
+keepCycles = input.int(4, "# of Cycles", minval=1, maxval=200, group=groupAll)
+
+q1OpenCol = input.color(color.new(color.rgb(99, 99, 99), 70), "Q1", group=groupAll, inline="q1")
+q2OpenCol = input.color(color.new(color.rgb(242, 54, 69), 70), "Q2", group=groupAll, inline="q2")
+q3OpenCol = input.color(color.new(color.rgb(76, 175, 80), 70), "Q3", group=groupAll, inline="q3")
+q4OpenCol = input.color(color.new(color.rgb(41, 98, 255), 70), "Q4", group=groupAll, inline="q4")
+
+q1OpenStyleStr = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], group=groupAll, inline="q1")
+q2OpenStyleStr = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], group=groupAll, inline="q2")
+q3OpenStyleStr = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], group=groupAll, inline="q3")
+q4OpenStyleStr = input.string("Dashed", "", options=["Solid", "Dashed", "Dotted"], group=groupAll, inline="q4")
+
+// Colors
+var color COL_Q1 = color.rgb(99, 99, 99)
+var color COL_Q2 = color.rgb(242, 54, 69)
+var color COL_Q3 = color.rgb(76, 175, 80)
+var color COL_Q4 = color.rgb(41, 98, 255)
+var int V_TRANSP = 70
+f_vcol(color c) =>
+    color.new(c, V_TRANSP)
+
+// Helpers
+f_find_int(int[] arr, int v) =>
+    int idx = -1
+    int i = array.size(arr) - 1
+    while i >= 0 and idx == -1
+        if array.get(arr, i) == v
+            idx := i
+        i -= 1
+    idx
+
+f_push_unique_int(int[] arr, int v, int maxN) =>
+    if f_find_int(arr, v) == -1
+        array.push(arr, v)
+        while array.size(arr) > maxN
+            array.shift(arr)
+    0
+
+f_clamp_int(int v, int lo, int hi) =>
+    v < lo ? lo : v > hi ? hi : v
+
+lineStyleFrom(string s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        =>          line.style_dotted
+
+type vset
+    line[] ln
+    int[]  ts
+
+vset_new() =>
+    vset.new(array.new_line(), array.new_int())
+
+vset_clear(vset s) =>
+    int i = array.size(s.ln) - 1
+    while i >= 0
+        line.delete(array.get(s.ln, i))
+        i -= 1
+    array.clear(s.ln)
+    array.clear(s.ts)
+    0
+
+vset_has(vset s, int ts) =>
+    bool found = false
+    int i = array.size(s.ts) - 1
+    while i >= 0 and not found
+        found := array.get(s.ts, i) == ts
+        i -= 1
+    found
+
+vset_add(vset s, int ts, color c) =>
+    if not vset_has(s, ts)
+        array.push(s.ln, line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c)))
+        array.push(s.ts, ts)
+    0
+
+vset_trim_since(vset s, int cutoffTs) =>
+    int i = array.size(s.ts) - 1
+    while i >= 0
+        int t = array.get(s.ts, i)
+        if t < cutoffTs
+            line ln = array.remove(s.ln, i)
+            line.delete(ln)
+            array.remove(s.ts, i)
+        i -= 1
+    0
+
+f_set_or_make_vline(line ln, int ts, color c) =>
+    line out = ln
+    if na(out)
+        out := line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c))
+    else
+        line.set_xy1(out, ts, low)
+        line.set_xy2(out, ts, high)
+        line.set_style(out, line.style_solid)
+        line.set_width(out, 1)
+        line.set_color(out, f_vcol(c))
+    out
+
+f_set_or_make_hline(line ln, int x1, int x2, float y, color c, sty) =>
+    line out = ln
+    if na(out)
+        out := line.new(x1, y, x2, y, xloc=xloc.bar_time, extend=extend.none, style=sty, width=1, color=c)
+    else
+        line.set_xy1(out, x1, y)
+        line.set_xy2(out, x2, y)
+        line.set_extend(out, extend.none)
+        line.set_style(out, sty)
+        line.set_width(out, 1)
+        line.set_color(out, c)
+    out
+
+f_set_or_make_hline_w(line ln, int x1, int x2, float y, color c, sty, int w) =>
+    line out = ln
+    if na(out)
+        out := line.new(x1, y, x2, y, xloc=xloc.bar_time, extend=extend.none, style=sty, width=w, color=c)
+    else
+        line.set_xy1(out, x1, y)
+        line.set_xy2(out, x2, y)
+        line.set_extend(out, extend.none)
+        line.set_style(out, sty)
+        line.set_width(out, w)
+        line.set_color(out, c)
+    out
+
+f_kill(line ln) =>
+    line out = na
+    if not na(ln)
+        line.delete(ln)
+    out
+
+f_clear_parent_lines(line[] l1, line[] l2, line[] l3, line[] l4) =>
+    int i = array.size(l1) - 1
+    while i >= 0
+        line a = array.get(l1, i)
+        line b = array.get(l2, i)
+        line c = array.get(l3, i)
+        line d = array.get(l4, i)
+        if not na(a)
+            line.delete(a)
+        if not na(b)
+            line.delete(b)
+        if not na(c)
+            line.delete(c)
+        if not na(d)
+            line.delete(d)
+        array.set(l1, i, na)
+        array.set(l2, i, na)
+        array.set(l3, i, na)
+        array.set(l4, i, na)
+        i -= 1
+    0
+
+// Visibility alignments
+int tfSec = timeframe.in_seconds(timeframe.period)
+bool visNanoTf = not na(tfSec) and tfSec >= 5 and tfSec <= 15
+bool visMicroTf = not na(tfSec) and tfSec >= 30 and tfSec <= 240
+bool vis90mTf = not na(tfSec) and tfSec >= 300 and tfSec <= 840
+bool visDailyTf = not na(tfSec) and tfSec >= 900 and tfSec <= 1800
+bool showNanoTf = showNano and visNanoTf
+bool showMicroTf = showMicro and visMicroTf
+bool show90mTf = show90m and vis90mTf
+bool showDailyTf = showDaily and visDailyTf
+
+bool parentShow = parentOpenMode != "None"
+bool parentShowQ1 = parentShow
+bool parentShowQ2 = parentOpenMode == "Q1 + Q2" or parentOpenMode == "All"
+bool parentShowQ3 = parentOpenMode == "All"
+bool parentShowQ4 = parentOpenMode == "All"
+
+bool parentFromDaily = parentShow and show90mTf
+bool parentFromM90 = parentShow and showMicroTf
+bool parentFromMicro = parentShow and showNanoTf
+
+// QT Core update
+var qt.QTConfig   cfg = qt.qt_config_default()
+var qt.CycleState st  = qt.qt_state_new()
+
+int t  = time
+int tc = time_close
+
+[st0, d] = qt.qt_daily_update(st, cfg, t, tc)
+[st1, m90] = qt.qt_m90_update(st0, cfg, t, tc)
+[st2, m] = qt.qt_micro_update(st1, cfg, t, tc)
+[st3, n] = qt.qt_nano_update(st2, cfg, t, tc)
+st := st3
+
+// Performance caps
+int MICRO_KEEP_CAP_SEC = 3
+int NANO_KEEP_CAP_SEC = 2
+int STORE_MAX_SEC = 300
+var int MAX_LINES = 500
+var int STORE_MAX = timeframe.isseconds ? STORE_MAX_SEC : 800
+
+// Daily cycle storage
+var int[] dailyStarts = array.new_int()
+var vset  dailyV = vset_new()
+
+var line dailyProjQ2  = na
+var line dailyProjQ3  = na
+var line dailyProjQ4  = na
+var line dailyProjEnd = na
+
+var int[]   dailyHistStart = array.new_int()
+var int[]   dailyHistEnd   = array.new_int()
+
+var float[] daily_h_q1o   = array.new_float()
+var int[]   daily_h_q1oTs = array.new_int()
+var float[] daily_h_q2o   = array.new_float()
+var int[]   daily_h_q2oTs = array.new_int()
+var float[] daily_h_q3o   = array.new_float()
+var int[]   daily_h_q3oTs = array.new_int()
+var float[] daily_h_q4o   = array.new_float()
+var int[]   daily_h_q4oTs = array.new_int()
+
+var line[]  daily_l_q1o   = array.new_line()
+var line[]  daily_l_q2o   = array.new_line()
+var line[]  daily_l_q3o   = array.new_line()
+var line[]  daily_l_q4o   = array.new_line()
+
+var line[]  daily_p_l_q1o   = array.new_line()
+var line[]  daily_p_l_q2o   = array.new_line()
+var line[]  daily_p_l_q3o   = array.new_line()
+var line[]  daily_p_l_q4o   = array.new_line()
+
+f_dhist_kill_at(int idx) =>
+    line a = array.get(daily_l_q1o, idx)
+    line b = array.get(daily_l_q2o, idx)
+    line c = array.get(daily_l_q3o, idx)
+    line l4 = array.get(daily_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(daily_l_q1o, idx, na)
+    array.set(daily_l_q2o, idx, na)
+    array.set(daily_l_q3o, idx, na)
+    array.set(daily_l_q4o, idx, na)
+    0
+
+f_dhist_kill_parent_at(int idx) =>
+    line a = array.get(daily_p_l_q1o, idx)
+    line b = array.get(daily_p_l_q2o, idx)
+    line c = array.get(daily_p_l_q3o, idx)
+    line l4 = array.get(daily_p_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(daily_p_l_q1o, idx, na)
+    array.set(daily_p_l_q2o, idx, na)
+    array.set(daily_p_l_q3o, idx, na)
+    array.set(daily_p_l_q4o, idx, na)
+    0
+
+f_dhist_shift_front() =>
+    if array.size(dailyHistStart) > 0
+        f_dhist_kill_at(0)
+        f_dhist_kill_parent_at(0)
+        array.shift(dailyHistStart)
+        array.shift(dailyHistEnd)
+
+        array.shift(daily_h_q1o),  array.shift(daily_h_q1oTs)
+        array.shift(daily_h_q2o),  array.shift(daily_h_q2oTs)
+        array.shift(daily_h_q3o),  array.shift(daily_h_q3oTs)
+        array.shift(daily_h_q4o),  array.shift(daily_h_q4oTs)
+
+        array.shift(daily_l_q1o)
+        array.shift(daily_l_q2o)
+        array.shift(daily_l_q3o)
+        array.shift(daily_l_q4o)
+
+        array.shift(daily_p_l_q1o)
+        array.shift(daily_p_l_q2o)
+        array.shift(daily_p_l_q3o)
+        array.shift(daily_p_l_q4o)
+    0
+
+f_dhist_trim_cutoff(int cutoffTs) =>
+    while array.size(dailyHistStart) > 0 and array.get(dailyHistStart, 0) < cutoffTs
+        f_dhist_shift_front()
+    0
+
+f_dhist_ensure_current() =>
+    if d.inWindow and not na(d.q1Ts)
+        int key = d.q1Ts
+        int idx = f_find_int(dailyHistStart, key)
+        if idx == -1
+            array.push(dailyHistStart, key)
+            array.push(dailyHistEnd, d.endTs)
+
+            array.push(daily_h_q1o, na), array.push(daily_h_q1oTs, na)
+            array.push(daily_h_q2o, na), array.push(daily_h_q2oTs, na)
+            array.push(daily_h_q3o, na), array.push(daily_h_q3oTs, na)
+            array.push(daily_h_q4o, na), array.push(daily_h_q4oTs, na)
+
+            line naL = na
+            array.push(daily_l_q1o, naL)
+            array.push(daily_l_q2o, naL)
+            array.push(daily_l_q3o, naL)
+            array.push(daily_l_q4o, naL)
+            array.push(daily_p_l_q1o, naL)
+            array.push(daily_p_l_q2o, naL)
+            array.push(daily_p_l_q3o, naL)
+            array.push(daily_p_l_q4o, naL)
+            idx := array.size(dailyHistStart) - 1
+
+        array.set(dailyHistEnd, idx, d.endTs)
+
+        float q1o = d.q1.o
+        int   q1t = d.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(daily_h_q1o, idx, q1o)
+            array.set(daily_h_q1oTs, idx, q1t)
+
+        float q2o = d.q2.o
+        int   q2t = d.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(daily_h_q2o, idx, q2o)
+            array.set(daily_h_q2oTs, idx, q2t)
+
+        float q3o = d.q3.o
+        int   q3t = d.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(daily_h_q3o, idx, q3o)
+            array.set(daily_h_q3oTs, idx, q3t)
+
+        float q4o = d.q4.o
+        int   q4t = d.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(daily_h_q4o, idx, q4o)
+            array.set(daily_h_q4oTs, idx, q4t)
+
+        while array.size(dailyHistStart) > STORE_MAX
+            f_dhist_shift_front()
+    0
+
+// 90m cycle storage
+var int[] m90Starts = array.new_int()
+var vset  m90V = vset_new()
+
+var line m90ProjQ2  = na
+var line m90ProjQ3  = na
+var line m90ProjQ4  = na
+var line m90ProjEnd = na
+
+var int[]   m90HistStart = array.new_int()
+var int[]   m90HistEnd   = array.new_int()
+
+var float[] m90_h_q1o   = array.new_float()
+var int[]   m90_h_q1oTs = array.new_int()
+var float[] m90_h_q2o   = array.new_float()
+var int[]   m90_h_q2oTs = array.new_int()
+var float[] m90_h_q3o   = array.new_float()
+var int[]   m90_h_q3oTs = array.new_int()
+var float[] m90_h_q4o   = array.new_float()
+var int[]   m90_h_q4oTs = array.new_int()
+
+var line[]  m90_l_q1o   = array.new_line()
+var line[]  m90_l_q2o   = array.new_line()
+var line[]  m90_l_q3o   = array.new_line()
+var line[]  m90_l_q4o   = array.new_line()
+
+var line[]  m90_p_l_q1o   = array.new_line()
+var line[]  m90_p_l_q2o   = array.new_line()
+var line[]  m90_p_l_q3o   = array.new_line()
+var line[]  m90_p_l_q4o   = array.new_line()
+
+f_m90hist_kill_at(int idx) =>
+    line a = array.get(m90_l_q1o, idx)
+    line b = array.get(m90_l_q2o, idx)
+    line c = array.get(m90_l_q3o, idx)
+    line l4 = array.get(m90_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(m90_l_q1o, idx, na)
+    array.set(m90_l_q2o, idx, na)
+    array.set(m90_l_q3o, idx, na)
+    array.set(m90_l_q4o, idx, na)
+    0
+
+f_m90hist_kill_parent_at(int idx) =>
+    line a = array.get(m90_p_l_q1o, idx)
+    line b = array.get(m90_p_l_q2o, idx)
+    line c = array.get(m90_p_l_q3o, idx)
+    line l4 = array.get(m90_p_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(m90_p_l_q1o, idx, na)
+    array.set(m90_p_l_q2o, idx, na)
+    array.set(m90_p_l_q3o, idx, na)
+    array.set(m90_p_l_q4o, idx, na)
+    0
+
+f_m90hist_shift_front() =>
+    if array.size(m90HistStart) > 0
+        f_m90hist_kill_at(0)
+        f_m90hist_kill_parent_at(0)
+        array.shift(m90HistStart)
+        array.shift(m90HistEnd)
+
+        array.shift(m90_h_q1o),  array.shift(m90_h_q1oTs)
+        array.shift(m90_h_q2o),  array.shift(m90_h_q2oTs)
+        array.shift(m90_h_q3o),  array.shift(m90_h_q3oTs)
+        array.shift(m90_h_q4o),  array.shift(m90_h_q4oTs)
+
+        array.shift(m90_l_q1o)
+        array.shift(m90_l_q2o)
+        array.shift(m90_l_q3o)
+        array.shift(m90_l_q4o)
+
+        array.shift(m90_p_l_q1o)
+        array.shift(m90_p_l_q2o)
+        array.shift(m90_p_l_q3o)
+        array.shift(m90_p_l_q4o)
+    0
+
+f_m90hist_trim_cutoff(int cutoffTs) =>
+    while array.size(m90HistStart) > 0 and array.get(m90HistStart, 0) < cutoffTs
+        f_m90hist_shift_front()
+    0
+
+f_m90hist_ensure_current() =>
+    if m90.inWindow and not na(m90.q1Ts)
+        int key = m90.q1Ts
+        int idx = f_find_int(m90HistStart, key)
+        if idx == -1
+            array.push(m90HistStart, key)
+            array.push(m90HistEnd, m90.endTs)
+
+            array.push(m90_h_q1o, na), array.push(m90_h_q1oTs, na)
+            array.push(m90_h_q2o, na), array.push(m90_h_q2oTs, na)
+            array.push(m90_h_q3o, na), array.push(m90_h_q3oTs, na)
+            array.push(m90_h_q4o, na), array.push(m90_h_q4oTs, na)
+
+            line naL = na
+            array.push(m90_l_q1o, naL)
+            array.push(m90_l_q2o, naL)
+            array.push(m90_l_q3o, naL)
+            array.push(m90_l_q4o, naL)
+            array.push(m90_p_l_q1o, naL)
+            array.push(m90_p_l_q2o, naL)
+            array.push(m90_p_l_q3o, naL)
+            array.push(m90_p_l_q4o, naL)
+            idx := array.size(m90HistStart) - 1
+
+        array.set(m90HistEnd, idx, m90.endTs)
+
+        float q1o = m90.q1.o
+        int   q1t = m90.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(m90_h_q1o, idx, q1o)
+            array.set(m90_h_q1oTs, idx, q1t)
+
+        float q2o = m90.q2.o
+        int   q2t = m90.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(m90_h_q2o, idx, q2o)
+            array.set(m90_h_q2oTs, idx, q2t)
+
+        float q3o = m90.q3.o
+        int   q3t = m90.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(m90_h_q3o, idx, q3o)
+            array.set(m90_h_q3oTs, idx, q3t)
+
+        float q4o = m90.q4.o
+        int   q4t = m90.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(m90_h_q4o, idx, q4o)
+            array.set(m90_h_q4oTs, idx, q4t)
+
+        while array.size(m90HistStart) > STORE_MAX
+            f_m90hist_shift_front()
+    0
+
+// Micro cycle storage
+var int[] microStarts = array.new_int()
+var vset  microV = vset_new()
+
+var line microProjQ2  = na
+var line microProjQ3  = na
+var line microProjQ4  = na
+var line microProjEnd = na
+
+var int[]   microHistStart = array.new_int()
+var int[]   microHistEnd   = array.new_int()
+
+var float[] micro_h_q1o   = array.new_float()
+var int[]   micro_h_q1oTs = array.new_int()
+var float[] micro_h_q2o   = array.new_float()
+var int[]   micro_h_q2oTs = array.new_int()
+var float[] micro_h_q3o   = array.new_float()
+var int[]   micro_h_q3oTs = array.new_int()
+var float[] micro_h_q4o   = array.new_float()
+var int[]   micro_h_q4oTs = array.new_int()
+
+var line[]  micro_l_q1o   = array.new_line()
+var line[]  micro_l_q2o   = array.new_line()
+var line[]  micro_l_q3o   = array.new_line()
+var line[]  micro_l_q4o   = array.new_line()
+
+var line[]  micro_p_l_q1o   = array.new_line()
+var line[]  micro_p_l_q2o   = array.new_line()
+var line[]  micro_p_l_q3o   = array.new_line()
+var line[]  micro_p_l_q4o   = array.new_line()
+
+f_mhist_kill_at(int idx) =>
+    line a = array.get(micro_l_q1o, idx)
+    line b = array.get(micro_l_q2o, idx)
+    line c = array.get(micro_l_q3o, idx)
+    line l4 = array.get(micro_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(micro_l_q1o, idx, na)
+    array.set(micro_l_q2o, idx, na)
+    array.set(micro_l_q3o, idx, na)
+    array.set(micro_l_q4o, idx, na)
+    0
+
+f_mhist_kill_parent_at(int idx) =>
+    line a = array.get(micro_p_l_q1o, idx)
+    line b = array.get(micro_p_l_q2o, idx)
+    line c = array.get(micro_p_l_q3o, idx)
+    line l4 = array.get(micro_p_l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(micro_p_l_q1o, idx, na)
+    array.set(micro_p_l_q2o, idx, na)
+    array.set(micro_p_l_q3o, idx, na)
+    array.set(micro_p_l_q4o, idx, na)
+    0
+
+f_mhist_shift_front() =>
+    if array.size(microHistStart) > 0
+        f_mhist_kill_at(0)
+        f_mhist_kill_parent_at(0)
+        array.shift(microHistStart)
+        array.shift(microHistEnd)
+
+        array.shift(micro_h_q1o),  array.shift(micro_h_q1oTs)
+        array.shift(micro_h_q2o),  array.shift(micro_h_q2oTs)
+        array.shift(micro_h_q3o),  array.shift(micro_h_q3oTs)
+        array.shift(micro_h_q4o),  array.shift(micro_h_q4oTs)
+
+        array.shift(micro_l_q1o)
+        array.shift(micro_l_q2o)
+        array.shift(micro_l_q3o)
+        array.shift(micro_l_q4o)
+
+        array.shift(micro_p_l_q1o)
+        array.shift(micro_p_l_q2o)
+        array.shift(micro_p_l_q3o)
+        array.shift(micro_p_l_q4o)
+    0
+
+f_mhist_trim_cutoff(int cutoffTs) =>
+    while array.size(microHistStart) > 0 and array.get(microHistStart, 0) < cutoffTs
+        f_mhist_shift_front()
+    0
+
+f_mhist_ensure_current() =>
+    if m.inWindow and not na(m.q1Ts)
+        int key = m.q1Ts
+        int idx = f_find_int(microHistStart, key)
+        if idx == -1
+            array.push(microHistStart, key)
+            array.push(microHistEnd, m.endTs)
+
+            array.push(micro_h_q1o, na), array.push(micro_h_q1oTs, na)
+            array.push(micro_h_q2o, na), array.push(micro_h_q2oTs, na)
+            array.push(micro_h_q3o, na), array.push(micro_h_q3oTs, na)
+            array.push(micro_h_q4o, na), array.push(micro_h_q4oTs, na)
+
+            line naL = na
+            array.push(micro_l_q1o, naL)
+            array.push(micro_l_q2o, naL)
+            array.push(micro_l_q3o, naL)
+            array.push(micro_l_q4o, naL)
+            array.push(micro_p_l_q1o, naL)
+            array.push(micro_p_l_q2o, naL)
+            array.push(micro_p_l_q3o, naL)
+            array.push(micro_p_l_q4o, naL)
+            idx := array.size(microHistStart) - 1
+
+        array.set(microHistEnd, idx, m.endTs)
+
+        float q1o = m.q1.o
+        int   q1t = m.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(micro_h_q1o, idx, q1o)
+            array.set(micro_h_q1oTs, idx, q1t)
+
+        float q2o = m.q2.o
+        int   q2t = m.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(micro_h_q2o, idx, q2o)
+            array.set(micro_h_q2oTs, idx, q2t)
+
+        float q3o = m.q3.o
+        int   q3t = m.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(micro_h_q3o, idx, q3o)
+            array.set(micro_h_q3oTs, idx, q3t)
+
+        float q4o = m.q4.o
+        int   q4t = m.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(micro_h_q4o, idx, q4o)
+            array.set(micro_h_q4oTs, idx, q4t)
+
+        while array.size(microHistStart) > STORE_MAX
+            f_mhist_shift_front()
+    0
+
+// Nano cycle storage
+var int[] nanoStarts = array.new_int()
+var vset  nanoV = vset_new()
+
+var line projQ2  = na
+var line projQ3  = na
+var line projQ4  = na
+var line projEnd = na
+
+// Open-line history (per displayed cycle) -- values captured from QTCore during
+// the cycle, then retained + drawn as long as the cycle is inside keepCycles.
+var int[]   histStart = array.new_int()
+var int[]   histEnd   = array.new_int()
+
+var float[] h_q1o     = array.new_float()
+var int[]   h_q1oTs   = array.new_int()
+var float[] h_q2o     = array.new_float()
+var int[]   h_q2oTs   = array.new_int()
+var float[] h_q3o     = array.new_float()
+var int[]   h_q3oTs   = array.new_int()
+var float[] h_q4o     = array.new_float()
+var int[]   h_q4oTs   = array.new_int()
+
+var line[]  l_q1o     = array.new_line()
+var line[]  l_q2o     = array.new_line()
+var line[]  l_q3o     = array.new_line()
+var line[]  l_q4o     = array.new_line()
+
+f_hist_kill_at(int idx) =>
+    line a = array.get(l_q1o, idx)
+    line b = array.get(l_q2o, idx)
+    line c = array.get(l_q3o, idx)
+    line l4 = array.get(l_q4o, idx)
+    if not na(a)
+        line.delete(a)
+    if not na(b)
+        line.delete(b)
+    if not na(c)
+        line.delete(c)
+    if not na(l4)
+        line.delete(l4)
+    array.set(l_q1o, idx, na)
+    array.set(l_q2o, idx, na)
+    array.set(l_q3o, idx, na)
+    array.set(l_q4o, idx, na)
+    0
+
+f_hist_shift_front() =>
+    if array.size(histStart) > 0
+        f_hist_kill_at(0)
+        array.shift(histStart)
+        array.shift(histEnd)
+
+        array.shift(h_q1o),  array.shift(h_q1oTs)
+        array.shift(h_q2o),  array.shift(h_q2oTs)
+        array.shift(h_q3o),  array.shift(h_q3oTs)
+        array.shift(h_q4o),  array.shift(h_q4oTs)
+
+        array.shift(l_q1o)
+        array.shift(l_q2o)
+        array.shift(l_q3o)
+        array.shift(l_q4o)
+    0
+
+f_hist_trim_cutoff(int cutoffTs) =>
+    while array.size(histStart) > 0 and array.get(histStart, 0) < cutoffTs
+        f_hist_shift_front()
+    0
+
+f_hist_ensure_current() =>
+    if n.inWindow and not na(n.q1Ts)
+        int key = n.q1Ts
+        int idx = f_find_int(histStart, key)
+        if idx == -1
+            array.push(histStart, key)
+            array.push(histEnd, n.endTs)
+
+            array.push(h_q1o, na), array.push(h_q1oTs, na)
+            array.push(h_q2o, na), array.push(h_q2oTs, na)
+            array.push(h_q3o, na), array.push(h_q3oTs, na)
+            array.push(h_q4o, na), array.push(h_q4oTs, na)
+
+            line naL = na
+            array.push(l_q1o, naL)
+            array.push(l_q2o, naL)
+            array.push(l_q3o, naL)
+            array.push(l_q4o, naL)
+            idx := array.size(histStart) - 1
+
+        // Update current cycle snapshot from QTCore values
+        // IMPORTANT: For sub-TF-aligned opens (e.g., Nano forced to 5S), always anchor open-lines to q?.oTs.
+        // Do NOT fall back to boundaryTs (q?Ts), or the line will be shifted on higher chart TFs.
+        array.set(histEnd, idx, n.endTs)
+
+        float q1o = n.q1.o
+        int   q1t = n.q1.oTs
+        if not na(q1o) and not na(q1t)
+            array.set(h_q1o, idx, q1o)
+            array.set(h_q1oTs, idx, q1t)
+
+        float q2o = n.q2.o
+        int   q2t = n.q2.oTs
+        if not na(q2o) and not na(q2t)
+            array.set(h_q2o, idx, q2o)
+            array.set(h_q2oTs, idx, q2t)
+
+        float q3o = n.q3.o
+        int   q3t = n.q3.oTs
+        if not na(q3o) and not na(q3t)
+            array.set(h_q3o, idx, q3o)
+            array.set(h_q3oTs, idx, q3t)
+
+        float q4o = n.q4.o
+        int   q4t = n.q4.oTs
+        if not na(q4o) and not na(q4t)
+            array.set(h_q4o, idx, q4o)
+            array.set(h_q4oTs, idx, q4t)
+
+        // Hard cap history storage (delete oldest if exceeded)
+        while array.size(histStart) > STORE_MAX
+            f_hist_shift_front()
+    0
+
+// Main draw logic
+int enabledCycles = (showDailyTf ? 1 : 0) + (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
+if enabledCycles < 1
+    enabledCycles := 1
+int perCycle = showOpens ? 9 : 5
+int maxC = int(math.floor((MAX_LINES - 10) / (perCycle * (enabledCycles * 1.0))))
+maxC := f_clamp_int(maxC, 1, 200)
+int keepEff = f_clamp_int(keepCycles, 1, maxC)
+int keepEffMicro = keepEff
+int keepEffNano = keepEff
+if timeframe.isseconds
+    keepEffMicro := f_clamp_int(keepCycles < MICRO_KEEP_CAP_SEC ? keepCycles : MICRO_KEEP_CAP_SEC, 1, maxC)
+    keepEffNano := f_clamp_int(keepCycles < NANO_KEEP_CAP_SEC ? keepCycles : NANO_KEEP_CAP_SEC, 1, maxC)
+
+int dCutoff = na
+int m90Cutoff = na
+int mCutoff = na
+int nCutoff = na
+int PARENT_LINE_W = 2
+
+if not showDailyTf
+    vset_clear(dailyV)
+    dailyProjQ2  := f_kill(dailyProjQ2)
+    dailyProjQ3  := f_kill(dailyProjQ3)
+    dailyProjQ4  := f_kill(dailyProjQ4)
+    dailyProjEnd := f_kill(dailyProjEnd)
+    if not parentFromDaily
+        int di = array.size(dailyHistStart) - 1
+        while di >= 0
+            f_dhist_kill_at(di)
+            f_dhist_kill_parent_at(di)
+            di -= 1
+        array.clear(dailyHistStart), array.clear(dailyHistEnd)
+        array.clear(daily_h_q1o), array.clear(daily_h_q1oTs)
+        array.clear(daily_h_q2o), array.clear(daily_h_q2oTs)
+        array.clear(daily_h_q3o), array.clear(daily_h_q3oTs)
+        array.clear(daily_h_q4o), array.clear(daily_h_q4oTs)
+        array.clear(daily_l_q1o), array.clear(daily_l_q2o), array.clear(daily_l_q3o), array.clear(daily_l_q4o)
+        array.clear(daily_p_l_q1o), array.clear(daily_p_l_q2o), array.clear(daily_p_l_q3o), array.clear(daily_p_l_q4o)
+        array.clear(dailyStarts)
+    else
+        int di = array.size(dailyHistStart) - 1
+        while di >= 0
+            f_dhist_kill_at(di)
+            di -= 1
+        f_dhist_ensure_current()
+else
+    if not na(d.q2Ts)
+        dailyProjQ2 := tc > d.q2Ts ? f_kill(dailyProjQ2) : f_set_or_make_vline(dailyProjQ2, d.q2Ts, COL_Q2)
+    if not na(d.q3Ts)
+        dailyProjQ3 := tc > d.q3Ts ? f_kill(dailyProjQ3) : f_set_or_make_vline(dailyProjQ3, d.q3Ts, COL_Q3)
+    if not na(d.q4Ts)
+        dailyProjQ4 := tc > d.q4Ts ? f_kill(dailyProjQ4) : f_set_or_make_vline(dailyProjQ4, d.q4Ts, COL_Q4)
+    if not na(d.endTs)
+        dailyProjEnd := f_set_or_make_vline(dailyProjEnd, d.endTs, COL_Q1)
+
+    if d.inWindow and not na(d.q1Ts)
+        f_push_unique_int(dailyStarts, d.q1Ts, STORE_MAX)
+
+    dCutoff := na(d.q1Ts) ? 0 : d.q1Ts
+    int dAvail = array.size(dailyStarts)
+    int dUse   = math.min(keepEff, dAvail)
+    int dFirst = dAvail - dUse
+    if dUse > 0
+        dCutoff := array.get(dailyStarts, dFirst)
+
+    vset_trim_since(dailyV, dCutoff)
+    f_dhist_ensure_current()
+    f_dhist_trim_cutoff(dCutoff)
+
+    if d.inWindow
+        if not na(d.q1Ts) and tc > d.q1Ts
+            vset_add(dailyV, d.q1Ts, COL_Q1)
+        if not na(d.q2Ts) and tc > d.q2Ts
+            vset_add(dailyV, d.q2Ts, COL_Q2)
+        if not na(d.q3Ts) and tc > d.q3Ts
+            vset_add(dailyV, d.q3Ts, COL_Q3)
+        if not na(d.q4Ts) and tc > d.q4Ts
+            vset_add(dailyV, d.q4Ts, COL_Q4)
+        if not na(d.endTs) and tc > d.endTs
+            vset_add(dailyV, d.endTs, COL_Q1)
+
+    if not showOpens
+        int dj = array.size(dailyHistStart) - 1
+        while dj >= 0
+            f_dhist_kill_at(dj)
+            dj -= 1
+    else
+        int dsz = array.size(dailyHistStart)
+        int dk = 0
+        while dk < dsz
+            int dEndTs = array.get(dailyHistEnd, dk)
+
+            float dy1 = array.get(daily_h_q1o, dk)
+            int   dx1 = array.get(daily_h_q1oTs, dk)
+            line  dl1 = array.get(daily_l_q1o, dk)
+            if not na(dy1) and not na(dx1) and not na(dEndTs)
+                dl1 := f_set_or_make_hline(dl1, dx1, dEndTs, dy1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                dl1 := f_kill(dl1)
+            array.set(daily_l_q1o, dk, dl1)
+
+            float dy2 = array.get(daily_h_q2o, dk)
+            int   dx2 = array.get(daily_h_q2oTs, dk)
+            line  dl2 = array.get(daily_l_q2o, dk)
+            if not na(dy2) and not na(dx2) and not na(dEndTs)
+                dl2 := f_set_or_make_hline(dl2, dx2, dEndTs, dy2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                dl2 := f_kill(dl2)
+            array.set(daily_l_q2o, dk, dl2)
+
+            float dy3 = array.get(daily_h_q3o, dk)
+            int   dx3 = array.get(daily_h_q3oTs, dk)
+            line  dl3 = array.get(daily_l_q3o, dk)
+            if not na(dy3) and not na(dx3) and not na(dEndTs)
+                dl3 := f_set_or_make_hline(dl3, dx3, dEndTs, dy3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                dl3 := f_kill(dl3)
+            array.set(daily_l_q3o, dk, dl3)
+
+            float dy4 = array.get(daily_h_q4o, dk)
+            int   dx4 = array.get(daily_h_q4oTs, dk)
+            line  dl4 = array.get(daily_l_q4o, dk)
+            if not na(dy4) and not na(dx4) and not na(dEndTs)
+                dl4 := f_set_or_make_hline(dl4, dx4, dEndTs, dy4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                dl4 := f_kill(dl4)
+            array.set(daily_l_q4o, dk, dl4)
+
+            dk += 1
+
+if not showMicroTf
+    vset_clear(microV)
+    microProjQ2  := f_kill(microProjQ2)
+    microProjQ3  := f_kill(microProjQ3)
+    microProjQ4  := f_kill(microProjQ4)
+    microProjEnd := f_kill(microProjEnd)
+    if not parentFromMicro
+        int mi = array.size(microHistStart) - 1
+        while mi >= 0
+            f_mhist_kill_at(mi)
+            f_mhist_kill_parent_at(mi)
+            mi -= 1
+        array.clear(microHistStart), array.clear(microHistEnd)
+        array.clear(micro_h_q1o), array.clear(micro_h_q1oTs)
+        array.clear(micro_h_q2o), array.clear(micro_h_q2oTs)
+        array.clear(micro_h_q3o), array.clear(micro_h_q3oTs)
+        array.clear(micro_h_q4o), array.clear(micro_h_q4oTs)
+        array.clear(micro_l_q1o), array.clear(micro_l_q2o), array.clear(micro_l_q3o), array.clear(micro_l_q4o)
+        array.clear(micro_p_l_q1o), array.clear(micro_p_l_q2o), array.clear(micro_p_l_q3o), array.clear(micro_p_l_q4o)
+        array.clear(microStarts)
+    else
+        int mi = array.size(microHistStart) - 1
+        while mi >= 0
+            f_mhist_kill_at(mi)
+            mi -= 1
+        f_mhist_ensure_current()
+else
+    if not na(m.q2Ts)
+        microProjQ2 := tc > m.q2Ts ? f_kill(microProjQ2) : f_set_or_make_vline(microProjQ2, m.q2Ts, COL_Q2)
+    if not na(m.q3Ts)
+        microProjQ3 := tc > m.q3Ts ? f_kill(microProjQ3) : f_set_or_make_vline(microProjQ3, m.q3Ts, COL_Q3)
+    if not na(m.q4Ts)
+        microProjQ4 := tc > m.q4Ts ? f_kill(microProjQ4) : f_set_or_make_vline(microProjQ4, m.q4Ts, COL_Q4)
+    if not na(m.endTs)
+        microProjEnd := f_set_or_make_vline(microProjEnd, m.endTs, COL_Q1)
+
+    if m.inWindow and not na(m.q1Ts)
+        f_push_unique_int(microStarts, m.q1Ts, STORE_MAX)
+
+    mCutoff := na(m.q1Ts) ? 0 : m.q1Ts
+    int mAvail = array.size(microStarts)
+    int mUse   = math.min(keepEffMicro, mAvail)
+    int mFirst = mAvail - mUse
+    if mUse > 0
+        mCutoff := array.get(microStarts, mFirst)
+
+    vset_trim_since(microV, mCutoff)
+    f_mhist_ensure_current()
+    f_mhist_trim_cutoff(mCutoff)
+
+    if m.inWindow
+        if not na(m.q1Ts) and tc > m.q1Ts
+            vset_add(microV, m.q1Ts, COL_Q1)
+        if not na(m.q2Ts) and tc > m.q2Ts
+            vset_add(microV, m.q2Ts, COL_Q2)
+        if not na(m.q3Ts) and tc > m.q3Ts
+            vset_add(microV, m.q3Ts, COL_Q3)
+        if not na(m.q4Ts) and tc > m.q4Ts
+            vset_add(microV, m.q4Ts, COL_Q4)
+        if not na(m.endTs) and tc > m.endTs
+            vset_add(microV, m.endTs, COL_Q1)
+
+    if not showOpens
+        int mj = array.size(microHistStart) - 1
+        while mj >= 0
+            f_mhist_kill_at(mj)
+            mj -= 1
+    else
+        int msz = array.size(microHistStart)
+        int mk = 0
+        while mk < msz
+            int mEndTs = array.get(microHistEnd, mk)
+
+            float my1 = array.get(micro_h_q1o, mk)
+            int   mx1 = array.get(micro_h_q1oTs, mk)
+            line  ml1 = array.get(micro_l_q1o, mk)
+            if not na(my1) and not na(mx1) and not na(mEndTs)
+                ml1 := f_set_or_make_hline(ml1, mx1, mEndTs, my1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                ml1 := f_kill(ml1)
+            array.set(micro_l_q1o, mk, ml1)
+
+            float my2 = array.get(micro_h_q2o, mk)
+            int   mx2 = array.get(micro_h_q2oTs, mk)
+            line  ml2 = array.get(micro_l_q2o, mk)
+            if not na(my2) and not na(mx2) and not na(mEndTs)
+                ml2 := f_set_or_make_hline(ml2, mx2, mEndTs, my2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                ml2 := f_kill(ml2)
+            array.set(micro_l_q2o, mk, ml2)
+
+            float my3 = array.get(micro_h_q3o, mk)
+            int   mx3 = array.get(micro_h_q3oTs, mk)
+            line  ml3 = array.get(micro_l_q3o, mk)
+            if not na(my3) and not na(mx3) and not na(mEndTs)
+                ml3 := f_set_or_make_hline(ml3, mx3, mEndTs, my3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                ml3 := f_kill(ml3)
+            array.set(micro_l_q3o, mk, ml3)
+
+            float my4 = array.get(micro_h_q4o, mk)
+            int   mx4 = array.get(micro_h_q4oTs, mk)
+            line  ml4 = array.get(micro_l_q4o, mk)
+            if not na(my4) and not na(mx4) and not na(mEndTs)
+                ml4 := f_set_or_make_hline(ml4, mx4, mEndTs, my4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                ml4 := f_kill(ml4)
+            array.set(micro_l_q4o, mk, ml4)
+
+            mk += 1
+
+if not show90mTf
+    vset_clear(m90V)
+    m90ProjQ2  := f_kill(m90ProjQ2)
+    m90ProjQ3  := f_kill(m90ProjQ3)
+    m90ProjQ4  := f_kill(m90ProjQ4)
+    m90ProjEnd := f_kill(m90ProjEnd)
+    if not parentFromM90
+        int m90i = array.size(m90HistStart) - 1
+        while m90i >= 0
+            f_m90hist_kill_at(m90i)
+            f_m90hist_kill_parent_at(m90i)
+            m90i -= 1
+        array.clear(m90HistStart), array.clear(m90HistEnd)
+        array.clear(m90_h_q1o), array.clear(m90_h_q1oTs)
+        array.clear(m90_h_q2o), array.clear(m90_h_q2oTs)
+        array.clear(m90_h_q3o), array.clear(m90_h_q3oTs)
+        array.clear(m90_h_q4o), array.clear(m90_h_q4oTs)
+        array.clear(m90_l_q1o), array.clear(m90_l_q2o), array.clear(m90_l_q3o), array.clear(m90_l_q4o)
+        array.clear(m90_p_l_q1o), array.clear(m90_p_l_q2o), array.clear(m90_p_l_q3o), array.clear(m90_p_l_q4o)
+        array.clear(m90Starts)
+    else
+        int m90i = array.size(m90HistStart) - 1
+        while m90i >= 0
+            f_m90hist_kill_at(m90i)
+            m90i -= 1
+        f_m90hist_ensure_current()
+else
+    if not na(m90.q2Ts)
+        m90ProjQ2 := tc > m90.q2Ts ? f_kill(m90ProjQ2) : f_set_or_make_vline(m90ProjQ2, m90.q2Ts, COL_Q2)
+    if not na(m90.q3Ts)
+        m90ProjQ3 := tc > m90.q3Ts ? f_kill(m90ProjQ3) : f_set_or_make_vline(m90ProjQ3, m90.q3Ts, COL_Q3)
+    if not na(m90.q4Ts)
+        m90ProjQ4 := tc > m90.q4Ts ? f_kill(m90ProjQ4) : f_set_or_make_vline(m90ProjQ4, m90.q4Ts, COL_Q4)
+    if not na(m90.endTs)
+        m90ProjEnd := f_set_or_make_vline(m90ProjEnd, m90.endTs, COL_Q1)
+
+    if m90.inWindow and not na(m90.q1Ts)
+        f_push_unique_int(m90Starts, m90.q1Ts, STORE_MAX)
+
+    m90Cutoff := na(m90.q1Ts) ? 0 : m90.q1Ts
+    int m90Avail = array.size(m90Starts)
+    int m90Use   = math.min(keepEff, m90Avail)
+    int m90First = m90Avail - m90Use
+    if m90Use > 0
+        m90Cutoff := array.get(m90Starts, m90First)
+
+    vset_trim_since(m90V, m90Cutoff)
+    f_m90hist_ensure_current()
+    f_m90hist_trim_cutoff(m90Cutoff)
+
+    if m90.inWindow
+        if not na(m90.q1Ts) and tc > m90.q1Ts
+            vset_add(m90V, m90.q1Ts, COL_Q1)
+        if not na(m90.q2Ts) and tc > m90.q2Ts
+            vset_add(m90V, m90.q2Ts, COL_Q2)
+        if not na(m90.q3Ts) and tc > m90.q3Ts
+            vset_add(m90V, m90.q3Ts, COL_Q3)
+        if not na(m90.q4Ts) and tc > m90.q4Ts
+            vset_add(m90V, m90.q4Ts, COL_Q4)
+        if not na(m90.endTs) and tc > m90.endTs
+            vset_add(m90V, m90.endTs, COL_Q1)
+
+    if not showOpens
+        int m90j = array.size(m90HistStart) - 1
+        while m90j >= 0
+            f_m90hist_kill_at(m90j)
+            m90j -= 1
+    else
+        int m90sz = array.size(m90HistStart)
+        int m90k = 0
+        while m90k < m90sz
+            int m90EndTs = array.get(m90HistEnd, m90k)
+
+            float m90y1 = array.get(m90_h_q1o, m90k)
+            int   m90x1 = array.get(m90_h_q1oTs, m90k)
+            line  m90l1 = array.get(m90_l_q1o, m90k)
+            if not na(m90y1) and not na(m90x1) and not na(m90EndTs)
+                m90l1 := f_set_or_make_hline(m90l1, m90x1, m90EndTs, m90y1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                m90l1 := f_kill(m90l1)
+            array.set(m90_l_q1o, m90k, m90l1)
+
+            float m90y2 = array.get(m90_h_q2o, m90k)
+            int   m90x2 = array.get(m90_h_q2oTs, m90k)
+            line  m90l2 = array.get(m90_l_q2o, m90k)
+            if not na(m90y2) and not na(m90x2) and not na(m90EndTs)
+                m90l2 := f_set_or_make_hline(m90l2, m90x2, m90EndTs, m90y2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                m90l2 := f_kill(m90l2)
+            array.set(m90_l_q2o, m90k, m90l2)
+
+            float m90y3 = array.get(m90_h_q3o, m90k)
+            int   m90x3 = array.get(m90_h_q3oTs, m90k)
+            line  m90l3 = array.get(m90_l_q3o, m90k)
+            if not na(m90y3) and not na(m90x3) and not na(m90EndTs)
+                m90l3 := f_set_or_make_hline(m90l3, m90x3, m90EndTs, m90y3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                m90l3 := f_kill(m90l3)
+            array.set(m90_l_q3o, m90k, m90l3)
+
+            float m90y4 = array.get(m90_h_q4o, m90k)
+            int   m90x4 = array.get(m90_h_q4oTs, m90k)
+            line  m90l4 = array.get(m90_l_q4o, m90k)
+            if not na(m90y4) and not na(m90x4) and not na(m90EndTs)
+                m90l4 := f_set_or_make_hline(m90l4, m90x4, m90EndTs, m90y4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                m90l4 := f_kill(m90l4)
+            array.set(m90_l_q4o, m90k, m90l4)
+
+            m90k += 1
+
+if not showNanoTf
+    vset_clear(nanoV)
+    projQ2  := f_kill(projQ2)
+    projQ3  := f_kill(projQ3)
+    projQ4  := f_kill(projQ4)
+    projEnd := f_kill(projEnd)
+    int i = array.size(histStart) - 1
+    while i >= 0
+        f_hist_kill_at(i)
+        i -= 1
+    array.clear(histStart), array.clear(histEnd)
+    array.clear(h_q1o), array.clear(h_q1oTs)
+    array.clear(h_q2o), array.clear(h_q2oTs)
+    array.clear(h_q3o), array.clear(h_q3oTs)
+    array.clear(h_q4o), array.clear(h_q4oTs)
+    array.clear(l_q1o), array.clear(l_q2o), array.clear(l_q3o), array.clear(l_q4o)
+    array.clear(nanoStarts)
+else
+    if not na(n.q2Ts)
+        projQ2 := tc > n.q2Ts ? f_kill(projQ2) : f_set_or_make_vline(projQ2, n.q2Ts, COL_Q2)
+    if not na(n.q3Ts)
+        projQ3 := tc > n.q3Ts ? f_kill(projQ3) : f_set_or_make_vline(projQ3, n.q3Ts, COL_Q3)
+    if not na(n.q4Ts)
+        projQ4 := tc > n.q4Ts ? f_kill(projQ4) : f_set_or_make_vline(projQ4, n.q4Ts, COL_Q4)
+    if not na(n.endTs)
+        projEnd := f_set_or_make_vline(projEnd, n.endTs, COL_Q1)
+
+    if n.inWindow and not na(n.q1Ts)
+        f_push_unique_int(nanoStarts, n.q1Ts, STORE_MAX)
+
+    nCutoff := na(n.q1Ts) ? 0 : n.q1Ts
+    int nAvail = array.size(nanoStarts)
+    int nUse   = math.min(keepEffNano, nAvail)
+    int first  = nAvail - nUse
+    if nUse > 0
+        nCutoff := array.get(nanoStarts, first)
+
+    vset_trim_since(nanoV, nCutoff)
+    f_hist_ensure_current()
+    f_hist_trim_cutoff(nCutoff)
+
+    if n.inWindow
+        if not na(n.q1Ts) and tc > n.q1Ts
+            vset_add(nanoV, n.q1Ts, COL_Q1)
+        if not na(n.q2Ts) and tc > n.q2Ts
+            vset_add(nanoV, n.q2Ts, COL_Q2)
+        if not na(n.q3Ts) and tc > n.q3Ts
+            vset_add(nanoV, n.q3Ts, COL_Q3)
+        if not na(n.q4Ts) and tc > n.q4Ts
+            vset_add(nanoV, n.q4Ts, COL_Q4)
+        if not na(n.endTs) and tc > n.endTs
+            vset_add(nanoV, n.endTs, COL_Q1)
+
+    if not showOpens
+        int j = array.size(histStart) - 1
+        while j >= 0
+            f_hist_kill_at(j)
+            j -= 1
+    else
+        int sz = array.size(histStart)
+        int k = 0
+        while k < sz
+            int endTs = array.get(histEnd, k)
+
+            float y1 = array.get(h_q1o, k)
+            int   x1 = array.get(h_q1oTs, k)
+            line  l1 = array.get(l_q1o, k)
+            if not na(y1) and not na(x1) and not na(endTs)
+                l1 := f_set_or_make_hline(l1, x1, endTs, y1, q1OpenCol, lineStyleFrom(q1OpenStyleStr))
+            else
+                l1 := f_kill(l1)
+            array.set(l_q1o, k, l1)
+
+            float y2 = array.get(h_q2o, k)
+            int   x2 = array.get(h_q2oTs, k)
+            line  l2 = array.get(l_q2o, k)
+            if not na(y2) and not na(x2) and not na(endTs)
+                l2 := f_set_or_make_hline(l2, x2, endTs, y2, q2OpenCol, lineStyleFrom(q2OpenStyleStr))
+            else
+                l2 := f_kill(l2)
+            array.set(l_q2o, k, l2)
+
+            float y3 = array.get(h_q3o, k)
+            int   x3 = array.get(h_q3oTs, k)
+            line  l3 = array.get(l_q3o, k)
+            if not na(y3) and not na(x3) and not na(endTs)
+                l3 := f_set_or_make_hline(l3, x3, endTs, y3, q3OpenCol, lineStyleFrom(q3OpenStyleStr))
+            else
+                l3 := f_kill(l3)
+            array.set(l_q3o, k, l3)
+
+            float y4 = array.get(h_q4o, k)
+            int   x4 = array.get(h_q4oTs, k)
+            line  l4 = array.get(l_q4o, k)
+            if not na(y4) and not na(x4) and not na(endTs)
+                l4 := f_set_or_make_hline(l4, x4, endTs, y4, q4OpenCol, lineStyleFrom(q4OpenStyleStr))
+            else
+                l4 := f_kill(l4)
+            array.set(l_q4o, k, l4)
+
+            k += 1
+
+// Parent cycle opens (thicker lines)
+if parentFromDaily and m90Cutoff > 0
+    int pdSz = array.size(dailyHistStart)
+    int pdi = 0
+    while pdi < pdSz
+        int pEnd = array.get(dailyHistEnd, pdi)
+        bool inWin = not na(pEnd) and pEnd >= m90Cutoff
+
+        line pl1 = array.get(daily_p_l_q1o, pdi)
+        float py1 = array.get(daily_h_q1o, pdi)
+        int   px1 = array.get(daily_h_q1oTs, pdi)
+        if parentShowQ1 and inWin and not na(py1) and not na(px1)
+            pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, lineStyleFrom(q1OpenStyleStr), PARENT_LINE_W)
+        else
+            pl1 := f_kill(pl1)
+        array.set(daily_p_l_q1o, pdi, pl1)
+
+        line pl2 = array.get(daily_p_l_q2o, pdi)
+        float py2 = array.get(daily_h_q2o, pdi)
+        int   px2 = array.get(daily_h_q2oTs, pdi)
+        if parentShowQ2 and inWin and not na(py2) and not na(px2)
+            pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, lineStyleFrom(q2OpenStyleStr), PARENT_LINE_W)
+        else
+            pl2 := f_kill(pl2)
+        array.set(daily_p_l_q2o, pdi, pl2)
+
+        line pl3 = array.get(daily_p_l_q3o, pdi)
+        float py3 = array.get(daily_h_q3o, pdi)
+        int   px3 = array.get(daily_h_q3oTs, pdi)
+        if parentShowQ3 and inWin and not na(py3) and not na(px3)
+            pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, lineStyleFrom(q3OpenStyleStr), PARENT_LINE_W)
+        else
+            pl3 := f_kill(pl3)
+        array.set(daily_p_l_q3o, pdi, pl3)
+
+        line pl4 = array.get(daily_p_l_q4o, pdi)
+        float py4 = array.get(daily_h_q4o, pdi)
+        int   px4 = array.get(daily_h_q4oTs, pdi)
+        if parentShowQ4 and inWin and not na(py4) and not na(px4)
+            pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, lineStyleFrom(q4OpenStyleStr), PARENT_LINE_W)
+        else
+            pl4 := f_kill(pl4)
+        array.set(daily_p_l_q4o, pdi, pl4)
+
+        pdi += 1
+else
+    f_clear_parent_lines(daily_p_l_q1o, daily_p_l_q2o, daily_p_l_q3o, daily_p_l_q4o)
+
+if parentFromM90 and mCutoff > 0
+    int pm90Sz = array.size(m90HistStart)
+    int pm90i = 0
+    while pm90i < pm90Sz
+        int pEnd = array.get(m90HistEnd, pm90i)
+        bool inWin = not na(pEnd) and pEnd >= mCutoff
+
+        line pl1 = array.get(m90_p_l_q1o, pm90i)
+        float py1 = array.get(m90_h_q1o, pm90i)
+        int   px1 = array.get(m90_h_q1oTs, pm90i)
+        if parentShowQ1 and inWin and not na(py1) and not na(px1)
+            pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, lineStyleFrom(q1OpenStyleStr), PARENT_LINE_W)
+        else
+            pl1 := f_kill(pl1)
+        array.set(m90_p_l_q1o, pm90i, pl1)
+
+        line pl2 = array.get(m90_p_l_q2o, pm90i)
+        float py2 = array.get(m90_h_q2o, pm90i)
+        int   px2 = array.get(m90_h_q2oTs, pm90i)
+        if parentShowQ2 and inWin and not na(py2) and not na(px2)
+            pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, lineStyleFrom(q2OpenStyleStr), PARENT_LINE_W)
+        else
+            pl2 := f_kill(pl2)
+        array.set(m90_p_l_q2o, pm90i, pl2)
+
+        line pl3 = array.get(m90_p_l_q3o, pm90i)
+        float py3 = array.get(m90_h_q3o, pm90i)
+        int   px3 = array.get(m90_h_q3oTs, pm90i)
+        if parentShowQ3 and inWin and not na(py3) and not na(px3)
+            pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, lineStyleFrom(q3OpenStyleStr), PARENT_LINE_W)
+        else
+            pl3 := f_kill(pl3)
+        array.set(m90_p_l_q3o, pm90i, pl3)
+
+        line pl4 = array.get(m90_p_l_q4o, pm90i)
+        float py4 = array.get(m90_h_q4o, pm90i)
+        int   px4 = array.get(m90_h_q4oTs, pm90i)
+        if parentShowQ4 and inWin and not na(py4) and not na(px4)
+            pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, lineStyleFrom(q4OpenStyleStr), PARENT_LINE_W)
+        else
+            pl4 := f_kill(pl4)
+        array.set(m90_p_l_q4o, pm90i, pl4)
+
+        pm90i += 1
+else
+    f_clear_parent_lines(m90_p_l_q1o, m90_p_l_q2o, m90_p_l_q3o, m90_p_l_q4o)
+
+if parentFromMicro and nCutoff > 0
+    int pmSz = array.size(microHistStart)
+    int pmi = 0
+    while pmi < pmSz
+        int pEnd = array.get(microHistEnd, pmi)
+        bool inWin = not na(pEnd) and pEnd >= nCutoff
+
+        line pl1 = array.get(micro_p_l_q1o, pmi)
+        float py1 = array.get(micro_h_q1o, pmi)
+        int   px1 = array.get(micro_h_q1oTs, pmi)
+        if parentShowQ1 and inWin and not na(py1) and not na(px1)
+            pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, lineStyleFrom(q1OpenStyleStr), PARENT_LINE_W)
+        else
+            pl1 := f_kill(pl1)
+        array.set(micro_p_l_q1o, pmi, pl1)
+
+        line pl2 = array.get(micro_p_l_q2o, pmi)
+        float py2 = array.get(micro_h_q2o, pmi)
+        int   px2 = array.get(micro_h_q2oTs, pmi)
+        if parentShowQ2 and inWin and not na(py2) and not na(px2)
+            pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, lineStyleFrom(q2OpenStyleStr), PARENT_LINE_W)
+        else
+            pl2 := f_kill(pl2)
+        array.set(micro_p_l_q2o, pmi, pl2)
+
+        line pl3 = array.get(micro_p_l_q3o, pmi)
+        float py3 = array.get(micro_h_q3o, pmi)
+        int   px3 = array.get(micro_h_q3oTs, pmi)
+        if parentShowQ3 and inWin and not na(py3) and not na(px3)
+            pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, lineStyleFrom(q3OpenStyleStr), PARENT_LINE_W)
+        else
+            pl3 := f_kill(pl3)
+        array.set(micro_p_l_q3o, pmi, pl3)
+
+        line pl4 = array.get(micro_p_l_q4o, pmi)
+        float py4 = array.get(micro_h_q4o, pmi)
+        int   px4 = array.get(micro_h_q4oTs, pmi)
+        if parentShowQ4 and inWin and not na(py4) and not na(px4)
+            pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, lineStyleFrom(q4OpenStyleStr), PARENT_LINE_W)
+        else
+            pl4 := f_kill(pl4)
+        array.set(micro_p_l_q4o, pmi, pl4)
+
+        pmi += 1
+else
+    f_clear_parent_lines(micro_p_l_q1o, micro_p_l_q2o, micro_p_l_q3o, micro_p_l_q4o)
