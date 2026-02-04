@@ -1,7 +1,7 @@
 //@version=6
 indicator("QTEngine Harness", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/25 as qt
+import Jaw1312/QTEngine/30 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -36,6 +36,10 @@ dwNanoStep2  = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — min
 groupDbg = "ALIGNED TF DEBUG"
 showAlignedOhlc = input.bool(false, "Show aligned TF OHLC table", group=groupDbg)
 
+groupHssmtDbg = "HSSMT DEBUG (ES/NQ)"
+showHssmtDbg = input.bool(false, "Show HSSMT debug table", group=groupHssmtDbg)
+hssmtSymES = input.symbol("MESH2026", "ES / MES", group=groupHssmtDbg)
+hssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ", group=groupHssmtDbg)
 
 // -----------------------------------------------------------------------------
 // Color palette (Old QT Indicator) + divider opacity rule
@@ -137,6 +141,134 @@ f_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3
     else if idx == 4
         out := q4
     out
+
+f_qr_ready_bh(qt.QuarterRecord q) =>
+    q.has and not q.isEmpty and not na(q.bh) and not na(q.bhTs) and not na(q.boundaryTs) and q.bhTs >= q.boundaryTs
+
+f_hssmt_daily_highs() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, d] = qt.qt_daily_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
+    qt.QuarterRecord qprev = d.curQuarterIndex == 1 ? st.daily.prev1 : d.curQuarterIndex == 2 ? d.q1 : d.curQuarterIndex == 3 ? d.q2 : d.q3
+    float hcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   hcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float hprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   hprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+
+    int qcurTs = d.q1Ts
+    if d.curQuarterIndex == 2
+        qcurTs := d.q2Ts
+    else if d.curQuarterIndex == 3
+        qcurTs := d.q3Ts
+    else if d.curQuarterIndex == 4
+        qcurTs := d.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, d.curQuarterIndex, qcurTs]
+
+f_hssmt_m90_highs() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, m90] = qt.qt_m90_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(m90.curQuarterIndex, m90.q1, m90.q2, m90.q3, m90.q4)
+    qt.QuarterRecord qprev = m90.curQuarterIndex == 1 ? st.m90.prev1 : m90.curQuarterIndex == 2 ? m90.q1 : m90.curQuarterIndex == 3 ? m90.q2 : m90.q3
+    float hcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   hcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float hprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   hprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+
+    int qcurTs = m90.q1Ts
+    if m90.curQuarterIndex == 2
+        qcurTs := m90.q2Ts
+    else if m90.curQuarterIndex == 3
+        qcurTs := m90.q3Ts
+    else if m90.curQuarterIndex == 4
+        qcurTs := m90.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, m90.curQuarterIndex, qcurTs]
+
+f_hssmt_micro_highs() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, micro] = qt.qt_micro_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(micro.curQuarterIndex, micro.q1, micro.q2, micro.q3, micro.q4)
+    qt.QuarterRecord qprev = micro.curQuarterIndex == 1 ? st.micro.prev1 : micro.curQuarterIndex == 2 ? micro.q1 : micro.curQuarterIndex == 3 ? micro.q2 : micro.q3
+    float hcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   hcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float hprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   hprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+
+    int qcurTs = micro.q1Ts
+    if micro.curQuarterIndex == 2
+        qcurTs := micro.q2Ts
+    else if micro.curQuarterIndex == 3
+        qcurTs := micro.q3Ts
+    else if micro.curQuarterIndex == 4
+        qcurTs := micro.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, micro.curQuarterIndex, qcurTs]
+
+f_hssmt_nano_highs() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, nano] = qt.qt_nano_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(nano.curQuarterIndex, nano.q1, nano.q2, nano.q3, nano.q4)
+    qt.QuarterRecord qprev = nano.curQuarterIndex == 1 ? st.nano.prev1 : nano.curQuarterIndex == 2 ? nano.q1 : nano.curQuarterIndex == 3 ? nano.q2 : nano.q3
+    float hcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   hcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float hprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   hprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+
+    int qcurTs = nano.q1Ts
+    if nano.curQuarterIndex == 2
+        qcurTs := nano.q2Ts
+    else if nano.curQuarterIndex == 3
+        qcurTs := nano.q3Ts
+    else if nano.curQuarterIndex == 4
+        qcurTs := nano.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, nano.curQuarterIndex, qcurTs]
+
+f_hssmt_sym_ticker(string sym) =>
+    string s = str.upper(sym)
+    string[] parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+f_hssmt_norm_sym(string sym) =>
+    syminfo.type == "futures" ? ticker.modify(sym, session=syminfo.session) : sym
+
+f_hssmt_tag(string sym) =>
+    string s = f_hssmt_sym_ticker(sym)
+    string tag = s
+    if str.contains(s, "MES")
+        tag := "ES"
+    else if str.contains(s, "MNQ")
+        tag := "NQ"
+    else if str.contains(s, "MYM")
+        tag := "YM"
+    else if str.contains(s, "ES")
+        tag := "ES"
+    else if str.contains(s, "NQ")
+        tag := "NQ"
+    else if str.contains(s, "YM")
+        tag := "YM"
+    tag
 
 // -----------------------------------------------------------------------------
 // Array helpers
@@ -537,6 +669,135 @@ if showAlignedOhlc and barstate.islast
 else if not showAlignedOhlc and not na(aligned_tbl)
     table.delete(aligned_tbl)
     aligned_tbl := na
+
+// -----------------------------------------------------------------------------
+// HSSMT Debug Table (auto-aligned to visibility)
+// -----------------------------------------------------------------------------
+var table hssmt_dbg_tbl = na
+if showHssmtDbg and barstate.islast
+    bool hssmtUseNano = visNanoTf
+    bool hssmtUseMicro = visMicroTf
+    bool hssmtUse90m = vis90mTf
+    bool hssmtUseDaily = visDailyTf
+    bool hssmtCycleOk = hssmtUseNano or hssmtUseMicro or hssmtUse90m or hssmtUseDaily
+
+    if not hssmtCycleOk
+        if not na(hssmt_dbg_tbl)
+            table.delete(hssmt_dbg_tbl)
+            hssmt_dbg_tbl := na
+    else
+        string cycleTag = hssmtUseNano ? "Nano" : hssmtUseMicro ? "Micro" : hssmtUse90m ? "m90" : "Daily"
+        if na(hssmt_dbg_tbl)
+            hssmt_dbg_tbl := table.new(position.bottom_right, 6, 4, border_width=1, border_color=color.gray)
+
+        string esSym = f_hssmt_norm_sym(hssmtSymES)
+        string nqSym = f_hssmt_norm_sym(hssmtSymNQ)
+
+        float esBHcur = na
+        int   esBHcurTs = na
+        float esBHprev = na
+        int   esBHprevTs = na
+        int   esQi = na
+        int   esQts = na
+
+        float nqBHcur = na
+        int   nqBHcurTs = na
+        float nqBHprev = na
+        int   nqBHprevTs = na
+        int   nqQi = na
+        int   nqQts = na
+
+        if hssmtUseNano
+            [esBHcur_t, esBHcurTs_t, esBHprev_t, esBHprevTs_t, esQi_t, esQts_t] = request.security(esSym, timeframe.period, f_hssmt_nano_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            [nqBHcur_t, nqBHcurTs_t, nqBHprev_t, nqBHprevTs_t, nqQi_t, nqQts_t] = request.security(nqSym, timeframe.period, f_hssmt_nano_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            esBHcur := esBHcur_t
+            esBHcurTs := esBHcurTs_t
+            esBHprev := esBHprev_t
+            esBHprevTs := esBHprevTs_t
+            esQi := esQi_t
+            esQts := esQts_t
+            nqBHcur := nqBHcur_t
+            nqBHcurTs := nqBHcurTs_t
+            nqBHprev := nqBHprev_t
+            nqBHprevTs := nqBHprevTs_t
+            nqQi := nqQi_t
+            nqQts := nqQts_t
+        else if hssmtUseMicro
+            [esBHcur_t, esBHcurTs_t, esBHprev_t, esBHprevTs_t, esQi_t, esQts_t] = request.security(esSym, timeframe.period, f_hssmt_micro_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            [nqBHcur_t, nqBHcurTs_t, nqBHprev_t, nqBHprevTs_t, nqQi_t, nqQts_t] = request.security(nqSym, timeframe.period, f_hssmt_micro_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            esBHcur := esBHcur_t
+            esBHcurTs := esBHcurTs_t
+            esBHprev := esBHprev_t
+            esBHprevTs := esBHprevTs_t
+            esQi := esQi_t
+            esQts := esQts_t
+            nqBHcur := nqBHcur_t
+            nqBHcurTs := nqBHcurTs_t
+            nqBHprev := nqBHprev_t
+            nqBHprevTs := nqBHprevTs_t
+            nqQi := nqQi_t
+            nqQts := nqQts_t
+        else if hssmtUse90m
+            [esBHcur_t, esBHcurTs_t, esBHprev_t, esBHprevTs_t, esQi_t, esQts_t] = request.security(esSym, timeframe.period, f_hssmt_m90_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            [nqBHcur_t, nqBHcurTs_t, nqBHprev_t, nqBHprevTs_t, nqQi_t, nqQts_t] = request.security(nqSym, timeframe.period, f_hssmt_m90_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            esBHcur := esBHcur_t
+            esBHcurTs := esBHcurTs_t
+            esBHprev := esBHprev_t
+            esBHprevTs := esBHprevTs_t
+            esQi := esQi_t
+            esQts := esQts_t
+            nqBHcur := nqBHcur_t
+            nqBHcurTs := nqBHcurTs_t
+            nqBHprev := nqBHprev_t
+            nqBHprevTs := nqBHprevTs_t
+            nqQi := nqQi_t
+            nqQts := nqQts_t
+        else
+            [esBHcur_t, esBHcurTs_t, esBHprev_t, esBHprevTs_t, esQi_t, esQts_t] = request.security(esSym, timeframe.period, f_hssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            [nqBHcur_t, nqBHcurTs_t, nqBHprev_t, nqBHprevTs_t, nqQi_t, nqQts_t] = request.security(nqSym, timeframe.period, f_hssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+            esBHcur := esBHcur_t
+            esBHcurTs := esBHcurTs_t
+            esBHprev := esBHprev_t
+            esBHprevTs := esBHprevTs_t
+            esQi := esQi_t
+            esQts := esQts_t
+            nqBHcur := nqBHcur_t
+            nqBHcurTs := nqBHcurTs_t
+            nqBHprev := nqBHprev_t
+            nqBHprevTs := nqBHprevTs_t
+            nqQi := nqQi_t
+            nqQts := nqQts_t
+
+        table.cell(hssmt_dbg_tbl, 0, 0, "Sym (" + cycleTag + ")", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(hssmt_dbg_tbl, 1, 0, "BHprev", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(hssmt_dbg_tbl, 2, 0, "BHprevTs", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(hssmt_dbg_tbl, 3, 0, "BHcur", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(hssmt_dbg_tbl, 4, 0, "BHcurTs", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(hssmt_dbg_tbl, 5, 0, "Sweep", text_color=color.black, bgcolor=color.new(color.black, 85))
+
+        table.cell(hssmt_dbg_tbl, 0, 1, f_hssmt_tag(hssmtSymES), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 1, 1, f_fmt(esBHprev), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 2, 1, f_fmt_time(esBHprevTs, cfg.tz), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 3, 1, f_fmt(esBHcur), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 4, 1, f_fmt_time(esBHcurTs, cfg.tz), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 5, 1, esBHcur > esBHprev ? "Y" : "N", text_color=color.black)
+
+        table.cell(hssmt_dbg_tbl, 0, 2, f_hssmt_tag(hssmtSymNQ), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 1, 2, f_fmt(nqBHprev), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 2, 2, f_fmt_time(nqBHprevTs, cfg.tz), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 3, 2, f_fmt(nqBHcur), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 4, 2, f_fmt_time(nqBHcurTs, cfg.tz), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 5, 2, nqBHcur > nqBHprev ? "Y" : "N", text_color=color.black)
+
+        table.cell(hssmt_dbg_tbl, 0, 3, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
+        table.cell(hssmt_dbg_tbl, 1, 3, f_fmt_time(esQts, cfg.tz), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 2, 3, "", text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 3, 3, f_fmt_time(nqQts, cfg.tz), text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 4, 3, "", text_color=color.black)
+        table.cell(hssmt_dbg_tbl, 5, 3, "", text_color=color.black)
+else if not showHssmtDbg and not na(hssmt_dbg_tbl)
+    table.delete(hssmt_dbg_tbl)
+    hssmt_dbg_tbl := na
 
 plot(showNanoTf and dwNanoStep2 ? n.q1.o : na, "Nano QR q1.o", display=display.data_window)
 plot(showNanoTf and dwNanoStep2 ? n.q1.h : na, "Nano QR q1.h", display=display.data_window)

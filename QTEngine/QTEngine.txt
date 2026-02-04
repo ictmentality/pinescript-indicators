@@ -70,6 +70,10 @@ export type QuarterRecord
     int   hTs
     int   lTs
     int   cTs
+    float bh
+    float bl
+    int   bhTs
+    int   blTs
     bool  has
     bool  isEmpty
     bool  isFinal
@@ -134,7 +138,7 @@ export type FixedCycleState
     QuarterRecord prev1
     QuarterRecord prev2
 
-    // Fixed-cycle: pending true-open capture (applied when quarter becomes active)
+    // Fixed-cycle: pending actual-open capture (applied when quarter becomes active)
     int   pendingBoundaryTs
     float pendingOpen
     int   pendingOpenTs
@@ -222,6 +226,10 @@ export qt_state_new() =>
         float(na),
         int(na),
         int(na),
+        int(na),
+        int(na),
+        float(na),
+        float(na),
         int(na),
         int(na),
         false,
@@ -362,6 +370,7 @@ f_make_empty_q(int qStart) =>
         qStart,
         na, na, na, na,
         int(na), int(na), int(na), int(na),
+        na, na, int(na), int(na),
         false, true, false,
         false, false
     )
@@ -758,6 +767,8 @@ f_finalize_and_roll(QuarterRecord qIn, QuarterRecord prev1In, QuarterRecord prev
 
 f_q_apply_bar(QuarterRecord qIn, int t, float o, float h, float l, float c, bool isStartBar) =>
     QuarterRecord q = qIn
+    float barBH = math.max(o, c)
+    float barBL = math.min(o, c)
 
     if not q.has
         q.o := o
@@ -768,6 +779,10 @@ f_q_apply_bar(QuarterRecord qIn, int t, float o, float h, float l, float c, bool
         q.lTs := t
         q.c := c
         q.cTs := t
+        q.bh := barBH
+        q.bl := barBL
+        q.bhTs := t
+        q.blTs := t
         q.has := true
         q.isEmpty := false
         q.isFinal := false
@@ -775,17 +790,39 @@ f_q_apply_bar(QuarterRecord qIn, int t, float o, float h, float l, float c, bool
     else
         bool newHigh = na(q.h) or h > q.h
         bool newLow  = na(q.l) or l < q.l
+        bool newBH   = na(q.bh) or barBH > q.bh
+        bool newBL   = na(q.bl) or barBL < q.bl
         if newHigh
             q.h := h
             q.hTs := t
         if newLow
             q.l := l
             q.lTs := t
+        if newBH
+            q.bh := barBH
+            q.bhTs := t
+        if newBL
+            q.bl := barBL
+            q.blTs := t
         q.c := c
         q.cTs := t
         if isStartBar
             q.evtStart := true
 
+    q
+
+f_apply_aligned_qr(QuarterRecord qIn, QuarterRecord aIn) =>
+    QuarterRecord q = qIn
+    q.h := aIn.h
+    q.hTs := aIn.hTs
+    q.l := aIn.l
+    q.lTs := aIn.lTs
+    q.c := aIn.c
+    q.cTs := aIn.cTs
+    q.bh := aIn.bh
+    q.bhTs := aIn.bhTs
+    q.bl := aIn.bl
+    q.blTs := aIn.blTs
     q
 
 // ============================================================================
@@ -1173,75 +1210,23 @@ f_fixed_cycle_update(
     prev2 := core2.prev2
     lastBoundary2 := core2.lastBoundaryTs
 
-    // Phase 3: Micro/Nano H/L/C come from aligned-TF quarter aggregation.
-    if isNano or isMicro
-        q1.h := aq1.h
-        q1.hTs := aq1.hTs
-        q1.l := aq1.l
-        q1.lTs := aq1.lTs
-        q1.c := aq1.c
-        q1.cTs := aq1.cTs
+    // Phase 3: Apply aligned H/L/C/body values (opens preserved from pending actual-open).
+    // NOTE: Actual open is preserved since aligned aggregation can miss sub-bars on higher chart TFs.
+    bool applyAlignedValues = isNano or isMicro or useAligned
+    if applyAlignedValues
+        q1 := f_apply_aligned_qr(q1, aq1)
+        q2 := f_apply_aligned_qr(q2, aq2)
+        q3 := f_apply_aligned_qr(q3, aq3)
+        q4 := f_apply_aligned_qr(q4, aq4)
 
-        q2.h := aq2.h
-        q2.hTs := aq2.hTs
-        q2.l := aq2.l
-        q2.lTs := aq2.lTs
-        q2.c := aq2.c
-        q2.cTs := aq2.cTs
+        // Align prev quarters' H/L/C/body values for 90m/Daily (keep chart/open from pending actual-open)
+        if useAligned
+            if aprev1.has
+                prev1 := f_apply_aligned_qr(prev1, aprev1)
+            if aprev2.has
+                prev2 := f_apply_aligned_qr(prev2, aprev2)
 
-        q3.h := aq3.h
-        q3.hTs := aq3.hTs
-        q3.l := aq3.l
-        q3.lTs := aq3.lTs
-        q3.c := aq3.c
-        q3.cTs := aq3.cTs
-
-        q4.h := aq4.h
-        q4.hTs := aq4.hTs
-        q4.l := aq4.l
-        q4.lTs := aq4.lTs
-        q4.c := aq4.c
-        q4.cTs := aq4.cTs
-
-    // Phase 3b: 90m/Daily OHLC come from aligned-TF quarter aggregation.
-    if useAligned
-        q1.o := aq1.o
-        q1.oTs := aq1.oTs
-        q1.h := aq1.h
-        q1.hTs := aq1.hTs
-        q1.l := aq1.l
-        q1.lTs := aq1.lTs
-        q1.c := aq1.c
-        q1.cTs := aq1.cTs
-
-        q2.o := aq2.o
-        q2.oTs := aq2.oTs
-        q2.h := aq2.h
-        q2.hTs := aq2.hTs
-        q2.l := aq2.l
-        q2.lTs := aq2.lTs
-        q2.c := aq2.c
-        q2.cTs := aq2.cTs
-
-        q3.o := aq3.o
-        q3.oTs := aq3.oTs
-        q3.h := aq3.h
-        q3.hTs := aq3.hTs
-        q3.l := aq3.l
-        q3.lTs := aq3.lTs
-        q3.c := aq3.c
-        q3.cTs := aq3.cTs
-
-        q4.o := aq4.o
-        q4.oTs := aq4.oTs
-        q4.h := aq4.h
-        q4.hTs := aq4.hTs
-        q4.l := aq4.l
-        q4.lTs := aq4.lTs
-        q4.c := aq4.c
-        q4.cTs := aq4.cTs
-
-    // Apply pending true-open when its quarter becomes active (all fixed cycles).
+    // Apply pending actual-open when its quarter becomes active (all fixed cycles).
     if pendingHas2
         if pendingBoundary2 == q1Ts and qi == 1
             q1.o   := pendingOpen2

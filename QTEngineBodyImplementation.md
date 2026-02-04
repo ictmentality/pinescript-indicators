@@ -4,7 +4,7 @@
 
 Implement **quarter body extremes** (body high/low + timestamps) inside QTEngine so all
 consumers can reuse them without per-indicator recomputation. This is required for
-HSSMT (body/close-based divergence) and any future body-based logic.
+HSSMT (body-based divergence) and any future body-based logic.
 
 ## Scope
 
@@ -74,8 +74,8 @@ On subsequent bars (strict comparisons only; ties keep earliest):
 
 ## Aligned Aggregation Requirements (Micro/Nano invariance)
 
-Micro/Nano body extremes must be sourced from the same **aligned aggregates** that drive
-their quarter OHLC (30s for Micro, 5s for Nano).
+All cycles body extremes must be sourced from the same **aligned aggregates** that drive
+their quarter OHLC (m15 for Daily, m5 for m90, 30s for Micro, 5s for Nano).
 
 - Wherever aligned bars are folded into `aq1..aq4`, ensure BH/BL + timestamps are computed
   using the **same rules** as `f_q_apply_bar`:
@@ -92,12 +92,6 @@ body extremes and timestamps:
 - `qX.bhTs := aqX.bhTs`
 - `qX.blTs := aqX.blTs`
 
-Minimum expected locations:
-
-- **Micro/Nano aligned override** (where `h/l/c` are overwritten)
-- **m90 override** (where `o/c` are overwritten)
-
-Rationale: aligned OHLC without aligned body extremes produces inconsistent results.
 
 ## Carry-Forward Behavior
 
@@ -113,9 +107,8 @@ roll automatically with existing behavior.
 ## Daily + m90 Notes
 
 - If Daily/m90 already use aligned aggregates for quarter OHLC, copy BH/BL from those
-  aligned records as well.
-- If they do not, BH/BL will remain chart-TF dependent until aligned overrides are wired
-  (reuse existing aligned ingest; do not add new requests).
+  aligned records as well. (They all should, please bring this to my attention if this is not the case)
+
 
 ## Expected Consumer Usage (Context Only)
 
@@ -134,11 +127,11 @@ No per-indicator recomputation of body extremes should be needed.
    - Verify `q#.bh/q#.bhTs` and `q#.bl/q#.blTs` match the first occurrence.
 
 2) **Micro invariance**
-   - Switch chart TF to 1m/5m.
+   - Switch chart TF to 30s/1m/3m.
    - BH/BL values and timestamps remain unchanged.
 
 3) **Nano on 5s chart**
-   - Repeat Micro checks; switch to 15s/1m and verify invariance.
+   - Repeat Micro checks; switch to 5s/15s/ and verify invariance.
 
 4) **Tie handling**
    - If two bars share identical bodyHigh/bodyLow, timestamp remains the **first** occurrence.

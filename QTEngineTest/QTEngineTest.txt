@@ -1,7 +1,7 @@
 //@version=6
 indicator("QTEngine Test", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/24 as qt
+import Jaw1312/QTEngine/33 as qt
 
 // -----------------------------------------------------------------------------
 // Inputs
@@ -35,12 +35,18 @@ dwNanoStep2  = input.bool(true, "Step 2 — Nano QuarterRecord (q1–q4) — min
 
 groupDbg = "ALIGNED TF DEBUG"
 showAlignedOhlc = input.bool(false, "Show aligned TF OHLC table", group=groupDbg)
+showDailyAlignDbg = input.bool(false, "Show Daily aligned open debug (15m)", group=groupDbg)
 
-groupSSMT = "SSMT TEST (Daily ES/NQ)"
+groupSSMT = "SSMT TEST (ES/NQ)"
+
 showDailyBearSSMT = input.bool(false, "Show Bearish Daily SSMT (Dyad)", group=groupSSMT)
 showDailyBullSSMT = input.bool(false, "Show Bullish Daily SSMT (Dyad)", group=groupSSMT)
 show90mBearSSMT = input.bool(false, "Show Bearish m90 SSMT (Dyad)", group=groupSSMT)
 show90mBullSSMT = input.bool(false, "Show Bullish m90 SSMT (Dyad)", group=groupSSMT)
+showMicroBearSSMT = input.bool(false, "Show Bearish Micro SSMT (Dyad)", group=groupSSMT)
+showMicroBullSSMT = input.bool(false, "Show Bullish Micro SSMT (Dyad)", group=groupSSMT)
+showNanoBearSSMT = input.bool(false, "Show Bearish Nano SSMT (Dyad)", group=groupSSMT)
+showNanoBullSSMT = input.bool(false, "Show Bullish Nano SSMT (Dyad)", group=groupSSMT)
 ssmtSymES = input.symbol("MESH2026", "ES / MES", group=groupSSMT)
 ssmtSymNQ = input.symbol("MNQH2026", "NQ / MNQ", group=groupSSMT)
 ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)  // #F23645
@@ -48,6 +54,26 @@ ssmtBullLineCol = input.color(color.rgb(41, 98, 255), "Bullish SSMT Color", grou
 ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
 ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
 ssmtDebug = input.bool(false, "Debug SSMT values", group=groupSSMT)
+
+groupHSSMT = "HSSMT TEST (ES/NQ)"
+showDailyBearHSSMT = input.bool(false, "Show Bearish Daily HSSMT (Dyad)", group=groupHSSMT)
+showDailyBullHSSMT = input.bool(false, "Show Bullish Daily HSSMT (Dyad)", group=groupHSSMT)
+show90mBearHSSMT = input.bool(false, "Show Bearish m90 HSSMT (Dyad)", group=groupHSSMT)
+show90mBullHSSMT = input.bool(false, "Show Bullish m90 HSSMT (Dyad)", group=groupHSSMT)
+showMicroBearHSSMT = input.bool(false, "Show Bearish Micro HSSMT (Dyad)", group=groupHSSMT)
+showMicroBullHSSMT = input.bool(false, "Show Bullish Micro HSSMT (Dyad)", group=groupHSSMT)
+showNanoBearHSSMT = input.bool(false, "Show Bearish Nano HSSMT (Dyad)", group=groupHSSMT)
+showNanoBullHSSMT = input.bool(false, "Show Bullish Nano HSSMT (Dyad)", group=groupHSSMT)
+
+// -----------------------------------------------------------------------------
+// Performance caps (seconds charts)
+// -----------------------------------------------------------------------------
+int SSMT_KEEP_CAP_SEC = 2
+int MICRO_KEEP_CAP_SEC = 3
+int NANO_KEEP_CAP_SEC = 2
+int STORE_MAX_SEC = 300
+
+int ssmtKeepEff = timeframe.isseconds ? (ssmtKeep < SSMT_KEEP_CAP_SEC ? ssmtKeep : SSMT_KEEP_CAP_SEC) : ssmtKeep
 
 // -----------------------------------------------------------------------------
 // Color palette (Old QT Indicator) + divider opacity rule
@@ -82,6 +108,11 @@ f_ceil_5s(int ts) =>
     int step = 5 * 1000
     int rem = ts % step
     rem == 0 ? ts : ts + (step - rem)
+
+// Snap an arbitrary timestamp to the current chart bar open (for visual anchoring on higher TFs).
+f_snap_to_chart_bar(int ts) =>
+    int snap = ta.valuewhen(time <= ts and time_close > ts, time, 0)
+    na(ts) ? ts : (na(snap) ? ts : snap)
 
 // -----------------------------------------------------------------------------
 // Visibility Alignments (hardcoded)
@@ -126,6 +157,12 @@ f_qr_ready(qt.QuarterRecord q) =>
 f_qr_ready_low(qt.QuarterRecord q) =>
     q.has and not q.isEmpty and not na(q.l) and not na(q.lTs) and not na(q.boundaryTs) and q.lTs >= q.boundaryTs
 
+f_qr_ready_bh(qt.QuarterRecord q) =>
+    q.has and not q.isEmpty and not na(q.bh) and not na(q.bhTs) and not na(q.boundaryTs) and q.bhTs >= q.boundaryTs
+
+f_qr_ready_bl(qt.QuarterRecord q) =>
+    q.has and not q.isEmpty and not na(q.bl) and not na(q.blTs) and not na(q.boundaryTs) and q.blTs >= q.boundaryTs
+
 f_ssmt_daily_highs() =>
     var qt.QTConfig cfg = qt.qt_config_default()
     var qt.CycleState st = qt.qt_state_new()
@@ -140,6 +177,10 @@ f_ssmt_daily_highs() =>
     int   hcurTs = f_qr_ready(qcur) ? qcur.hTs : na
     float hprev = f_qr_ready(qprev) ? qprev.h : na
     int   hprevTs = f_qr_ready(qprev) ? qprev.hTs : na
+    float bhcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   bhcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float bhprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   bhprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
 
     int qcurTs = d.q1Ts
     if d.curQuarterIndex == 2
@@ -149,7 +190,7 @@ f_ssmt_daily_highs() =>
     else if d.curQuarterIndex == 4
         qcurTs := d.q4Ts
 
-    [hcur, hcurTs, hprev, hprevTs, d.curQuarterIndex, qcurTs]
+    [hcur, hcurTs, hprev, hprevTs, bhcur, bhcurTs, bhprev, bhprevTs, d.curQuarterIndex, qcurTs]
 
 f_ssmt_daily_lows() =>
     var qt.QTConfig cfg = qt.qt_config_default()
@@ -165,6 +206,10 @@ f_ssmt_daily_lows() =>
     int   lcurTs = f_qr_ready_low(qcur) ? qcur.lTs : na
     float lprev = f_qr_ready_low(qprev) ? qprev.l : na
     int   lprevTs = f_qr_ready_low(qprev) ? qprev.lTs : na
+    float blcur = f_qr_ready_bl(qcur) ? qcur.bl : na
+    int   blcurTs = f_qr_ready_bl(qcur) ? qcur.blTs : na
+    float blprev = f_qr_ready_bl(qprev) ? qprev.bl : na
+    int   blprevTs = f_qr_ready_bl(qprev) ? qprev.blTs : na
 
     int qcurTs = d.q1Ts
     if d.curQuarterIndex == 2
@@ -176,6 +221,54 @@ f_ssmt_daily_lows() =>
 
     [lcur, lcurTs, lprev, lprevTs, d.curQuarterIndex, qcurTs]
 
+f_ssmt_daily_extremes() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, d] = qt.qt_daily_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
+    qt.QuarterRecord qprev = d.curQuarterIndex == 1 ? st.daily.prev1 : d.curQuarterIndex == 2 ? d.q1 : d.curQuarterIndex == 3 ? d.q2 : d.q3
+    float hcur = f_qr_ready(qcur) ? qcur.h : na
+    int   hcurTs = f_qr_ready(qcur) ? qcur.hTs : na
+    float hprev = f_qr_ready(qprev) ? qprev.h : na
+    int   hprevTs = f_qr_ready(qprev) ? qprev.hTs : na
+    float bhcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   bhcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float bhprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   bhprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+    float lcur = f_qr_ready_low(qcur) ? qcur.l : na
+    int   lcurTs = f_qr_ready_low(qcur) ? qcur.lTs : na
+    float lprev = f_qr_ready_low(qprev) ? qprev.l : na
+    int   lprevTs = f_qr_ready_low(qprev) ? qprev.lTs : na
+    float blcur = f_qr_ready_bl(qcur) ? qcur.bl : na
+    int   blcurTs = f_qr_ready_bl(qcur) ? qcur.blTs : na
+    float blprev = f_qr_ready_bl(qprev) ? qprev.bl : na
+    int   blprevTs = f_qr_ready_bl(qprev) ? qprev.blTs : na
+
+    int qcurTs = d.q1Ts
+    if d.curQuarterIndex == 2
+        qcurTs := d.q2Ts
+    else if d.curQuarterIndex == 3
+        qcurTs := d.q3Ts
+    else if d.curQuarterIndex == 4
+        qcurTs := d.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, bhcur, bhcurTs, bhprev, bhprevTs, lcur, lcurTs, lprev, lprevTs, d.curQuarterIndex, qcurTs, blcur, blcurTs, blprev, blprevTs]
+
+f_daily_aligned_open_debug() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, d] = qt.qt_daily_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
+    qt.QuarterRecord qprev = d.curQuarterIndex == 1 ? st.daily.prev1 : d.curQuarterIndex == 2 ? d.q1 : d.curQuarterIndex == 3 ? d.q2 : d.q3
+    [qcur.o, qcur.oTs, qprev.o, qprev.oTs, d.curQuarterIndex, d.q1Ts, d.q2Ts, d.q3Ts, d.q4Ts]
 
 f_ssmt_m90_highs() =>
     var qt.QTConfig cfg = qt.qt_config_default()
@@ -226,6 +319,175 @@ f_ssmt_m90_lows() =>
         qcurTs := m90.q4Ts
 
     [lcur, lcurTs, lprev, lprevTs, m90.curQuarterIndex, qcurTs]
+
+f_ssmt_m90_extremes() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, m90] = qt.qt_m90_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(m90.curQuarterIndex, m90.q1, m90.q2, m90.q3, m90.q4)
+    qt.QuarterRecord qprev = m90.curQuarterIndex == 1 ? st.m90.prev1 : m90.curQuarterIndex == 2 ? m90.q1 : m90.curQuarterIndex == 3 ? m90.q2 : m90.q3
+    float hcur = f_qr_ready(qcur) ? qcur.h : na
+    int   hcurTs = f_qr_ready(qcur) ? qcur.hTs : na
+    float hprev = f_qr_ready(qprev) ? qprev.h : na
+    int   hprevTs = f_qr_ready(qprev) ? qprev.hTs : na
+    float bhcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   bhcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float bhprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   bhprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+    float lcur = f_qr_ready_low(qcur) ? qcur.l : na
+    int   lcurTs = f_qr_ready_low(qcur) ? qcur.lTs : na
+    float lprev = f_qr_ready_low(qprev) ? qprev.l : na
+    int   lprevTs = f_qr_ready_low(qprev) ? qprev.lTs : na
+    float blcur = f_qr_ready_bl(qcur) ? qcur.bl : na
+    int   blcurTs = f_qr_ready_bl(qcur) ? qcur.blTs : na
+    float blprev = f_qr_ready_bl(qprev) ? qprev.bl : na
+    int   blprevTs = f_qr_ready_bl(qprev) ? qprev.blTs : na
+
+    int qcurTs = m90.q1Ts
+    if m90.curQuarterIndex == 2
+        qcurTs := m90.q2Ts
+    else if m90.curQuarterIndex == 3
+        qcurTs := m90.q3Ts
+    else if m90.curQuarterIndex == 4
+        qcurTs := m90.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, lcur, lcurTs, lprev, lprevTs, m90.curQuarterIndex, qcurTs, bhcur, bhcurTs, bhprev, bhprevTs, blcur, blcurTs, blprev, blprevTs]
+
+f_hssmt_micro_highs() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, micro] = qt.qt_micro_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(micro.curQuarterIndex, micro.q1, micro.q2, micro.q3, micro.q4)
+    qt.QuarterRecord qprev = micro.curQuarterIndex == 1 ? st.micro.prev1 : micro.curQuarterIndex == 2 ? micro.q1 : micro.curQuarterIndex == 3 ? micro.q2 : micro.q3
+    float hcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   hcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float hprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   hprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+
+    int qcurTs = micro.q1Ts
+    if micro.curQuarterIndex == 2
+        qcurTs := micro.q2Ts
+    else if micro.curQuarterIndex == 3
+        qcurTs := micro.q3Ts
+    else if micro.curQuarterIndex == 4
+        qcurTs := micro.q4Ts
+
+    [hcur, hcurTs, hprev, hprevTs, micro.curQuarterIndex, qcurTs]
+
+f_hssmt_micro_lows() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, micro] = qt.qt_micro_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(micro.curQuarterIndex, micro.q1, micro.q2, micro.q3, micro.q4)
+    qt.QuarterRecord qprev = micro.curQuarterIndex == 1 ? st.micro.prev1 : micro.curQuarterIndex == 2 ? micro.q1 : micro.curQuarterIndex == 3 ? micro.q2 : micro.q3
+    float lcur = f_qr_ready_bl(qcur) ? qcur.bl : na
+    int   lcurTs = f_qr_ready_bl(qcur) ? qcur.blTs : na
+    float lprev = f_qr_ready_bl(qprev) ? qprev.bl : na
+    int   lprevTs = f_qr_ready_bl(qprev) ? qprev.blTs : na
+
+    int qcurTs = micro.q1Ts
+    if micro.curQuarterIndex == 2
+        qcurTs := micro.q2Ts
+    else if micro.curQuarterIndex == 3
+        qcurTs := micro.q3Ts
+    else if micro.curQuarterIndex == 4
+        qcurTs := micro.q4Ts
+
+    [lcur, lcurTs, lprev, lprevTs, micro.curQuarterIndex, qcurTs]
+
+f_hssmt_micro_extremes() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, micro] = qt.qt_micro_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(micro.curQuarterIndex, micro.q1, micro.q2, micro.q3, micro.q4)
+    qt.QuarterRecord qprev = micro.curQuarterIndex == 1 ? st.micro.prev1 : micro.curQuarterIndex == 2 ? micro.q1 : micro.curQuarterIndex == 3 ? micro.q2 : micro.q3
+
+    float bhcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   bhcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float bhprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   bhprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+
+    float blcur = f_qr_ready_bl(qcur) ? qcur.bl : na
+    int   blcurTs = f_qr_ready_bl(qcur) ? qcur.blTs : na
+    float blprev = f_qr_ready_bl(qprev) ? qprev.bl : na
+    int   blprevTs = f_qr_ready_bl(qprev) ? qprev.blTs : na
+
+    float hcur = f_qr_ready(qcur) ? qcur.h : na
+    int   hcurTs = f_qr_ready(qcur) ? qcur.hTs : na
+    float hprev = f_qr_ready(qprev) ? qprev.h : na
+    int   hprevTs = f_qr_ready(qprev) ? qprev.hTs : na
+
+    float lcur = f_qr_ready_low(qcur) ? qcur.l : na
+    int   lcurTs = f_qr_ready_low(qcur) ? qcur.lTs : na
+    float lprev = f_qr_ready_low(qprev) ? qprev.l : na
+    int   lprevTs = f_qr_ready_low(qprev) ? qprev.lTs : na
+
+    int qcurTs = micro.q1Ts
+    if micro.curQuarterIndex == 2
+        qcurTs := micro.q2Ts
+    else if micro.curQuarterIndex == 3
+        qcurTs := micro.q3Ts
+    else if micro.curQuarterIndex == 4
+        qcurTs := micro.q4Ts
+
+    [bhcur, bhcurTs, bhprev, bhprevTs, blcur, blcurTs, blprev, blprevTs, micro.curQuarterIndex, qcurTs, hcur, hcurTs, hprev, hprevTs, lcur, lcurTs, lprev, lprevTs]
+
+f_hssmt_nano_extremes() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    int t = time
+    int tc = time_close
+    [st0, nano] = qt.qt_nano_update(st, cfg, t, tc)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(nano.curQuarterIndex, nano.q1, nano.q2, nano.q3, nano.q4)
+    qt.QuarterRecord qprev = nano.curQuarterIndex == 1 ? st.nano.prev1 : nano.curQuarterIndex == 2 ? nano.q1 : nano.curQuarterIndex == 3 ? nano.q2 : nano.q3
+
+    float bhcur = f_qr_ready_bh(qcur) ? qcur.bh : na
+    int   bhcurTs = f_qr_ready_bh(qcur) ? qcur.bhTs : na
+    float bhprev = f_qr_ready_bh(qprev) ? qprev.bh : na
+    int   bhprevTs = f_qr_ready_bh(qprev) ? qprev.bhTs : na
+
+    float blcur = f_qr_ready_bl(qcur) ? qcur.bl : na
+    int   blcurTs = f_qr_ready_bl(qcur) ? qcur.blTs : na
+    float blprev = f_qr_ready_bl(qprev) ? qprev.bl : na
+    int   blprevTs = f_qr_ready_bl(qprev) ? qprev.blTs : na
+
+    float hcur = f_qr_ready(qcur) ? qcur.h : na
+    int   hcurTs = f_qr_ready(qcur) ? qcur.hTs : na
+    float hprev = f_qr_ready(qprev) ? qprev.h : na
+    int   hprevTs = f_qr_ready(qprev) ? qprev.hTs : na
+
+    float lcur = f_qr_ready_low(qcur) ? qcur.l : na
+    int   lcurTs = f_qr_ready_low(qcur) ? qcur.lTs : na
+    float lprev = f_qr_ready_low(qprev) ? qprev.l : na
+    int   lprevTs = f_qr_ready_low(qprev) ? qprev.lTs : na
+
+    int qcurTs = nano.q1Ts
+    if nano.curQuarterIndex == 2
+        qcurTs := nano.q2Ts
+    else if nano.curQuarterIndex == 3
+        qcurTs := nano.q3Ts
+    else if nano.curQuarterIndex == 4
+        qcurTs := nano.q4Ts
+
+    [bhcur, bhcurTs, bhprev, bhprevTs, blcur, blcurTs, blprev, blprevTs, nano.curQuarterIndex, qcurTs, hcur, hcurTs, hprev, hprevTs, lcur, lcurTs, lprev, lprevTs]
 
 f_ssmt_sym_ticker(string sym) =>
     string s = str.upper(sym)
@@ -604,6 +866,62 @@ else if not showAlignedOhlc and not na(aligned_tbl)
     table.delete(aligned_tbl)
     aligned_tbl := na
 
+// -----------------------------------------------------------------------------
+// Daily aligned open debug (m15) — compare chart vs 15m
+// -----------------------------------------------------------------------------
+var table daily_align_tbl = na
+if showDailyAlignDbg and barstate.islast
+    [aO, aOTs, aPrevO, aPrevOTs, aQi, aQ1Ts, aQ2Ts, aQ3Ts, aQ4Ts] = request.security(syminfo.tickerid, "15", f_daily_aligned_open_debug(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+    qt.QuarterRecord chartQ = f_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
+    qt.QuarterRecord chartPrevQ = d.curQuarterIndex == 1 ? st.daily.prev1 : d.curQuarterIndex == 2 ? d.q1 : d.curQuarterIndex == 3 ? d.q2 : d.q3
+    float chartO = chartQ.o
+    int   chartOTs = chartQ.oTs
+    float chartPrevO = chartPrevQ.o
+    int   chartPrevOTs = chartPrevQ.oTs
+    int   chartQTs = d.curQuarterIndex == 1 ? d.q1Ts : d.curQuarterIndex == 2 ? d.q2Ts : d.curQuarterIndex == 3 ? d.q3Ts : d.q4Ts
+    int   alignQTs = aQi == 1 ? aQ1Ts : aQi == 2 ? aQ2Ts : aQi == 3 ? aQ3Ts : aQ4Ts
+
+    float oDelta = (not na(chartO) and not na(aO)) ? (chartO - aO) : na
+    float prevODelta = (not na(chartPrevO) and not na(aPrevO)) ? (chartPrevO - aPrevO) : na
+    float tsDeltaSec = (not na(chartOTs) and not na(aOTs)) ? (chartOTs - aOTs) / 1000.0 : na
+    float prevTsDeltaSec = (not na(chartPrevOTs) and not na(aPrevOTs)) ? (chartPrevOTs - aPrevOTs) / 1000.0 : na
+    float qtsDeltaSec = (not na(chartQTs) and not na(alignQTs)) ? (chartQTs - alignQTs) / 1000.0 : na
+
+    if na(daily_align_tbl)
+        daily_align_tbl := table.new(position.top_left, 4, 6, border_width=1, border_color=color.gray)
+    table.cell(daily_align_tbl, 0, 0, "Field", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(daily_align_tbl, 1, 0, "Chart", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(daily_align_tbl, 2, 0, "15m", text_color=color.black, bgcolor=color.new(color.black, 85))
+    table.cell(daily_align_tbl, 3, 0, "Δ", text_color=color.black, bgcolor=color.new(color.black, 85))
+
+    table.cell(daily_align_tbl, 0, 1, "QOpen", text_color=color.black)
+    table.cell(daily_align_tbl, 1, 1, f_fmt(chartO), text_color=color.black)
+    table.cell(daily_align_tbl, 2, 1, f_fmt(aO), text_color=color.black)
+    table.cell(daily_align_tbl, 3, 1, f_fmt(oDelta), text_color=color.black)
+
+    table.cell(daily_align_tbl, 0, 2, "OTs", text_color=color.black)
+    table.cell(daily_align_tbl, 1, 2, f_fmt_time(chartOTs, cfg.tz), text_color=color.black)
+    table.cell(daily_align_tbl, 2, 2, f_fmt_time(aOTs, cfg.tz), text_color=color.black)
+    table.cell(daily_align_tbl, 3, 2, f_fmt(tsDeltaSec), text_color=color.black)
+
+    table.cell(daily_align_tbl, 0, 3, "PrevQOpen", text_color=color.black)
+    table.cell(daily_align_tbl, 1, 3, f_fmt(chartPrevO), text_color=color.black)
+    table.cell(daily_align_tbl, 2, 3, f_fmt(aPrevO), text_color=color.black)
+    table.cell(daily_align_tbl, 3, 3, f_fmt(prevODelta), text_color=color.black)
+
+    table.cell(daily_align_tbl, 0, 4, "PrevOTs", text_color=color.black)
+    table.cell(daily_align_tbl, 1, 4, f_fmt_time(chartPrevOTs, cfg.tz), text_color=color.black)
+    table.cell(daily_align_tbl, 2, 4, f_fmt_time(aPrevOTs, cfg.tz), text_color=color.black)
+    table.cell(daily_align_tbl, 3, 4, f_fmt(prevTsDeltaSec), text_color=color.black)
+
+    table.cell(daily_align_tbl, 0, 5, "QStart", text_color=color.black)
+    table.cell(daily_align_tbl, 1, 5, f_fmt_time(chartQTs, cfg.tz), text_color=color.black)
+    table.cell(daily_align_tbl, 2, 5, f_fmt_time(alignQTs, cfg.tz), text_color=color.black)
+    table.cell(daily_align_tbl, 3, 5, f_fmt(qtsDeltaSec), text_color=color.black)
+else if not showDailyAlignDbg and not na(daily_align_tbl)
+    table.delete(daily_align_tbl)
+    daily_align_tbl := na
+
 plot(showNanoTf and dwNanoStep2 ? n.q1.o : na, "Nano QR q1.o", display=display.data_window)
 plot(showNanoTf and dwNanoStep2 ? n.q1.h : na, "Nano QR q1.h", display=display.data_window)
 plot(showNanoTf and dwNanoStep2 ? n.q1.l : na, "Nano QR q1.l", display=display.data_window)
@@ -631,683 +949,3006 @@ plot(showNanoTf and dwNanoStep2 ? n.q4.c : na, "Nano QR q4.c", display=display.d
 plot(showNanoTf and dwNanoStep2 ? n_q4_o_hhmmss : na, "Nano QR q4.oTs (HHMMSS)", display=display.data_window)
 
 
-// -----------------------------------------------------------------------------
-// Bearish Daily SSMT (ES/NQ) — test-only
-// Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
-// -----------------------------------------------------------------------------
-var table ssmtDbgTbl = na
-var line[] ssmtHistLines = array.new_line()
-var label[] ssmtHistLbls = array.new_label()
-var line ssmtLine = na
-var int  ssmtEventKey = na
-var label ssmtLbl = na
-var int  ssmtExtendTier = 0
-int SSmtQLen = 6 * 60 * 60 * 1000
+f_run_ssmt_hssmt() =>
+    // -----------------------------------------------------------------------------
+    // Bearish Daily SSMT (ES/NQ) — test-only
+    // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var table ssmtDbgTbl = na
+    var line[] ssmtHistLines = array.new_line()
+    var label[] ssmtHistLbls = array.new_label()
+    var line ssmtLine = na
+    var int  ssmtEventKey = na
+    var label ssmtLbl = na
+    var int  ssmtExtendTier = 0
+    int SSmtQLen = 6 * 60 * 60 * 1000
 
-bool ssmtTfOk = visDailyTf
-if showDailyBearSSMT and ssmtTfOk
-    string esSym = f_ssmt_norm_sym(ssmtSymES)
-    string nqSym = f_ssmt_norm_sym(ssmtSymNQ)
+    bool ssmtTfOk = visDailyTf or (ssmtDebug and visMicroTf)
+    bool ssmtDailyAny = ssmtTfOk and (showDailyBearSSMT or showDailyBullSSMT or showDailyBearHSSMT or showDailyBullHSSMT)
+    bool dailyBearSplit = false
+    bool dailyBullSplit = false
 
-    [esHcur, esHcurTs, esHprev, esHprevTs, esQi, esQts] = request.security(esSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-    [nqHcur, nqHcurTs, nqHprev, nqHprevTs, nqQi, nqQts] = request.security(nqSym, timeframe.period, f_ssmt_daily_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    float esHcur = na
+    int   esHcurTs = na
+    float esHprev = na
+    int   esHprevTs = na
+    float esBHcur = na
+    int   esBHcurTs = na
+    float esBHprev = na
+    int   esBHprevTs = na
+    float esBLcur = na
+    int   esBLcurTs = na
+    float esBLprev = na
+    int   esBLprevTs = na
+    float esLcur = na
+    int   esLcurTs = na
+    float esLprev = na
+    int   esLprevTs = na
+    int   esQi = na
+    int   esQts = na
 
-    string chartTag = f_ssmt_tag(syminfo.tickerid)
-    bool isChartES = chartTag == "ES"
-    bool isChartNQ = chartTag == "NQ"
-    bool isPairChart = isChartES or isChartNQ
+    float nqHcur = na
+    int   nqHcurTs = na
+    float nqHprev = na
+    int   nqHprevTs = na
+    float nqBHcur = na
+    int   nqBHcurTs = na
+    float nqBHprev = na
+    int   nqBHprevTs = na
+    float nqBLcur = na
+    int   nqBLcurTs = na
+    float nqBLprev = na
+    int   nqBLprevTs = na
+    float nqLcur = na
+    int   nqLcurTs = na
+    float nqLprev = na
+    int   nqLprevTs = na
+    int   nqQi = na
+    int   nqQts = na
 
-    bool ssmtReady = not na(esHcur) and not na(esHprev) and not na(nqHcur) and not na(nqHprev)
-    if ssmtDebug and barstate.islast
-        if na(ssmtDbgTbl)
-            ssmtDbgTbl := table.new(position.top_right, 4, 4, border_width=1, border_color=color.gray)
-        table.cell(ssmtDbgTbl, 0, 0, "Sym", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtDbgTbl, 1, 0, "Hprev", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtDbgTbl, 2, 0, "Hcur", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtDbgTbl, 3, 0, "Sweep", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtDbgTbl, 0, 1, f_ssmt_tag(ssmtSymES), text_color=color.black)
-        table.cell(ssmtDbgTbl, 1, 1, f_fmt(esHprev), text_color=color.black)
-        table.cell(ssmtDbgTbl, 2, 1, f_fmt(esHcur), text_color=color.black)
-        table.cell(ssmtDbgTbl, 3, 1, esHcur > esHprev ? "Y" : "N", text_color=color.black)
-        table.cell(ssmtDbgTbl, 0, 2, f_ssmt_tag(ssmtSymNQ), text_color=color.black)
-        table.cell(ssmtDbgTbl, 1, 2, f_fmt(nqHprev), text_color=color.black)
-        table.cell(ssmtDbgTbl, 2, 2, f_fmt(nqHcur), text_color=color.black)
-        table.cell(ssmtDbgTbl, 3, 2, nqHcur > nqHprev ? "Y" : "N", text_color=color.black)
-        table.cell(ssmtDbgTbl, 0, 3, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtDbgTbl, 1, 3, f_fmt_time(esQts, cfg.tz), text_color=color.black)
-        table.cell(ssmtDbgTbl, 2, 3, f_fmt_time(nqQts, cfg.tz), text_color=color.black)
-        table.cell(ssmtDbgTbl, 3, 3, "", text_color=color.black)
-    else if not ssmtDebug and not na(ssmtDbgTbl)
-        table.delete(ssmtDbgTbl)
-        ssmtDbgTbl := na
+    if ssmtDailyAny
+        string esSym = f_ssmt_norm_sym(ssmtSymES)
+        string nqSym = f_ssmt_norm_sym(ssmtSymNQ)
 
-    if ssmtReady
-        bool esSweep = esHcur > esHprev
-        bool nqSweep = nqHcur > nqHprev
-        bool split = esSweep != nqSweep
+        [tmpEsHcur, tmpEsHcurTs, tmpEsHprev, tmpEsHprevTs, tmpEsBHcur, tmpEsBHcurTs, tmpEsBHprev, tmpEsBHprevTs, tmpEsLcur, tmpEsLcurTs, tmpEsLprev, tmpEsLprevTs, tmpEsQi, tmpEsQts, tmpEsBLcur, tmpEsBLcurTs, tmpEsBLprev, tmpEsBLprevTs] = request.security(esSym, "15", f_ssmt_daily_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [tmpNqHcur, tmpNqHcurTs, tmpNqHprev, tmpNqHprevTs, tmpNqBHcur, tmpNqBHcurTs, tmpNqBHprev, tmpNqBHprevTs, tmpNqLcur, tmpNqLcurTs, tmpNqLprev, tmpNqLprevTs, tmpNqQi, tmpNqQts, tmpNqBLcur, tmpNqBLcurTs, tmpNqBLprev, tmpNqBLprevTs] = request.security(nqSym, "15", f_ssmt_daily_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
 
-        bool crackedES = split and (not esSweep)
-        bool crackedNQ = split and (not nqSweep)
-        string cracked = ""
-        if crackedES
-            cracked := "ES"
-        if crackedNQ
-            cracked := cracked == "" ? "NQ" : cracked + ",NQ"
+        esHcur := tmpEsHcur
+        esHcurTs := tmpEsHcurTs
+        esHprev := tmpEsHprev
+        esHprevTs := tmpEsHprevTs
+        esBHcur := tmpEsBHcur
+        esBHcurTs := tmpEsBHcurTs
+        esBHprev := tmpEsBHprev
+        esBHprevTs := tmpEsBHprevTs
+        esBLcur := tmpEsBLcur
+        esBLcurTs := tmpEsBLcurTs
+        esBLprev := tmpEsBLprev
+        esBLprevTs := tmpEsBLprevTs
+        esLcur := tmpEsLcur
+        esLcurTs := tmpEsLcurTs
+        esLprev := tmpEsLprev
+        esLprevTs := tmpEsLprevTs
+        esQi := tmpEsQi
+        esQts := tmpEsQts
 
-        float curH = na
-        int   curHTs = na
-        float prevH = na
-        int   prevHTs = na
-        int   curQTs = na
-        bool  curSweep = false
-        if isChartES
-            curH := esHcur
-            curHTs := esHcurTs
-            prevH := esHprev
-            prevHTs := esHprevTs
-            curQTs := esQts
-            curSweep := esSweep
-        else if isChartNQ
-            curH := nqHcur
-            curHTs := nqHcurTs
-            prevH := nqHprev
-            prevHTs := nqHprevTs
-            curQTs := nqQts
-            curSweep := nqSweep
+        nqHcur := tmpNqHcur
+        nqHcurTs := tmpNqHcurTs
+        nqHprev := tmpNqHprev
+        nqHprevTs := tmpNqHprevTs
+        nqBHcur := tmpNqBHcur
+        nqBHcurTs := tmpNqBHcurTs
+        nqBHprev := tmpNqBHprev
+        nqBHprevTs := tmpNqBHprevTs
+        nqBLcur := tmpNqBLcur
+        nqBLcurTs := tmpNqBLcurTs
+        nqBLprev := tmpNqBLprev
+        nqBLprevTs := tmpNqBLprevTs
+        nqLcur := tmpNqLcur
+        nqLcurTs := tmpNqLcurTs
+        nqLprev := tmpNqLprev
+        nqLprevTs := tmpNqLprevTs
+        nqQi := tmpNqQi
+        nqQts := tmpNqQts
 
-        int eventKey = prevHTs
-        bool eventChanged = not na(eventKey) and (na(ssmtEventKey) or eventKey != ssmtEventKey)
-        if eventChanged
-            f_ssmt_hist_push(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtKeep)
-            ssmtLine := na
-            ssmtLbl := na
-            ssmtExtendTier := 0
-            ssmtEventKey := eventKey
+    int esHprevTsSnap = f_snap_to_chart_bar(esHprevTs)
+    int nqHprevTsSnap = f_snap_to_chart_bar(nqHprevTs)
+    int esLprevTsSnap = f_snap_to_chart_bar(esLprevTs)
+    int nqLprevTsSnap = f_snap_to_chart_bar(nqLprevTs)
+    int esBHprevTsSnap = f_snap_to_chart_bar(esBHprevTs)
+    int nqBHprevTsSnap = f_snap_to_chart_bar(nqBHprevTs)
+    int esBLprevTsSnap = f_snap_to_chart_bar(esBLprevTs)
+    int nqBLprevTsSnap = f_snap_to_chart_bar(nqBLprevTs)
+    if showDailyBearSSMT and ssmtTfOk
+        string chartTag = f_ssmt_tag(syminfo.tickerid)
+        bool isChartES = chartTag == "ES"
+        bool isChartNQ = chartTag == "NQ"
+        bool isPairChart = isChartES or isChartNQ
 
-        if not split or not isPairChart
-            if not na(ssmtLine)
-                line.delete(ssmtLine)
-                ssmtLine := na
-            if not na(ssmtLbl)
-                label.delete(ssmtLbl)
-                ssmtLbl := na
-            ssmtExtendTier := 0
-        else
-            bool hasPoints = not na(prevH) and not na(prevHTs) and not na(curQTs)
-            if hasPoints and curSweep
-                int thirdLen = int(SSmtQLen / 3)
-                int q1End = curQTs + thirdLen
-                int q2End = curQTs + (thirdLen * 2)
-                int q3End = curQTs + SSmtQLen
+        bool ssmtReady = not na(esHcur) and not na(esHprev) and not na(nqHcur) and not na(nqHprev)
+        if ssmtDebug and barstate.islast
+            if na(ssmtDbgTbl)
+                ssmtDbgTbl := table.new(position.top_right, 6, 6, border_width=1, border_color=color.gray)
+            table.cell(ssmtDbgTbl, 0, 0, "Sym", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 1, 0, "Hprev", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 2, 0, "Hcur", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 3, 0, "BHprev", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 4, 0, "BHcur", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 5, 0, "Sweep", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 0, 1, f_ssmt_tag(ssmtSymES), text_color=color.black)
+            table.cell(ssmtDbgTbl, 1, 1, f_fmt(esHprev), text_color=color.black)
+            table.cell(ssmtDbgTbl, 2, 1, f_fmt(esHcur), text_color=color.black)
+            table.cell(ssmtDbgTbl, 3, 1, f_fmt(esBHprev), text_color=color.black)
+            table.cell(ssmtDbgTbl, 4, 1, f_fmt(esBHcur), text_color=color.black)
+            table.cell(ssmtDbgTbl, 5, 1, esHcur > esHprev ? "Y" : "N", text_color=color.black)
+            table.cell(ssmtDbgTbl, 0, 2, f_ssmt_tag(ssmtSymNQ), text_color=color.black)
+            table.cell(ssmtDbgTbl, 1, 2, f_fmt(nqHprev), text_color=color.black)
+            table.cell(ssmtDbgTbl, 2, 2, f_fmt(nqHcur), text_color=color.black)
+            table.cell(ssmtDbgTbl, 3, 2, f_fmt(nqBHprev), text_color=color.black)
+            table.cell(ssmtDbgTbl, 4, 2, f_fmt(nqBHcur), text_color=color.black)
+            table.cell(ssmtDbgTbl, 5, 2, nqHcur > nqHprev ? "Y" : "N", text_color=color.black)
+            table.cell(ssmtDbgTbl, 0, 3, "ES HTs", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 1, 3, f_fmt_time(esHprevTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 2, 3, f_fmt_time(esHcurTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 3, 3, f_fmt_time(esBHprevTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 4, 3, f_fmt_time(esBHcurTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 5, 3, "", text_color=color.black)
+            table.cell(ssmtDbgTbl, 0, 4, "NQ HTs", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 1, 4, f_fmt_time(nqHprevTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 2, 4, f_fmt_time(nqHcurTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 3, 4, f_fmt_time(nqBHprevTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 4, 4, f_fmt_time(nqBHcurTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 5, 4, "", text_color=color.black)
+            table.cell(ssmtDbgTbl, 0, 5, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtDbgTbl, 1, 5, f_fmt_time(esQts, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 2, 5, f_fmt_time(nqQts, cfg.tz), text_color=color.black)
+            table.cell(ssmtDbgTbl, 3, 5, "", text_color=color.black)
+            table.cell(ssmtDbgTbl, 4, 5, "", text_color=color.black)
+            table.cell(ssmtDbgTbl, 5, 5, "", text_color=color.black)
+        else if not ssmtDebug and not na(ssmtDbgTbl)
+            table.delete(ssmtDbgTbl)
+            ssmtDbgTbl := na
 
-                int sweepTier = 1
-                if not na(curHTs)
-                    if curHTs >= q2End
-                        sweepTier := 3
-                    else if curHTs >= q1End
-                        sweepTier := 2
+        if ssmtReady
+            bool esSweep = esHcur > esHprev
+            bool nqSweep = nqHcur > nqHprev
+            bool split = esSweep != nqSweep
+            dailyBearSplit := split and isPairChart
 
-                int barTier = 1
-                if time_close >= q2End
-                    barTier := 3
-                else if time_close >= q1End
-                    barTier := 2
+            bool crackedES = split and (not esSweep)
+            bool crackedNQ = split and (not nqSweep)
+            string cracked = ""
+            if crackedES
+                cracked := "ES"
+            if crackedNQ
+                cracked := cracked == "" ? "NQ" : cracked + ",NQ"
 
-                ssmtExtendTier := ssmtExtendTier < sweepTier ? sweepTier : ssmtExtendTier
-                bool touch = high >= prevH
-                if touch
-                    ssmtExtendTier := ssmtExtendTier < barTier ? barTier : ssmtExtendTier
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+            if isChartES
+                curH := esHcur
+                curHTs := esHcurTs
+                prevH := esHprev
+                prevHTs := esHprevTs
+                curQTs := esQts
+                curSweep := esSweep
+            else if isChartNQ
+                curH := nqHcur
+                curHTs := nqHcurTs
+                prevH := nqHprev
+                prevHTs := nqHprevTs
+                curQTs := nqQts
+                curSweep := nqSweep
+            int prevHTsSnap = isChartES ? esHprevTsSnap : isChartNQ ? nqHprevTsSnap : prevHTs
 
-                int x2 = q1End
-                if ssmtExtendTier >= 3
-                    x2 := q3End
-                else if ssmtExtendTier == 2
-                    x2 := q2End
-
-                ssmtLine := f_set_or_make_hline_w(ssmtLine, prevHTs, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
-            else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
-                ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
-
-            bool showLabel = (isChartES and crackedES) or (isChartNQ and crackedNQ)
-            if hasPoints and cracked != "" and showLabel
-                string lblText = "D " + cracked
-                if na(ssmtLbl)
-                    ssmtLbl := label.new(prevHTs, prevH, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
-                else
-                    label.set_xy(ssmtLbl, prevHTs, prevH)
-                    label.set_text(ssmtLbl, lblText)
-                    label.set_textcolor(ssmtLbl, color.black)
-                    label.set_color(ssmtLbl, color.new(color.black, 100))
-            else if not showLabel and not na(ssmtLbl)
-                label.delete(ssmtLbl)
-                ssmtLbl := na
-    f_ssmt_hist_trim(ssmtHistLines, ssmtHistLbls, ssmtKeep)
-else
-    if not na(ssmtLine)
-        line.delete(ssmtLine)
-        ssmtLine := na
-    if not na(ssmtLbl)
-        label.delete(ssmtLbl)
-        ssmtLbl := na
-    f_ssmt_hist_clear(ssmtHistLines, ssmtHistLbls)
-    if not na(ssmtDbgTbl)
-        table.delete(ssmtDbgTbl)
-        ssmtDbgTbl := na
-    ssmtEventKey := na
-    ssmtExtendTier := 0
-
-// -----------------------------------------------------------------------------
-// Bullish Daily SSMT (ES/NQ) — test-only
-// Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
-// -----------------------------------------------------------------------------
-var table ssmtBDbgTbl = na
-var line[] ssmtBHistLines = array.new_line()
-var label[] ssmtBHistLbls = array.new_label()
-var line ssmtBLine = na
-var int  ssmtBEventKey = na
-var label ssmtBLbl = na
-var int  ssmtBExtendTier = 0
-
-bool ssmtBullTfOk = visDailyTf
-if showDailyBullSSMT and ssmtBullTfOk
-    string esSymB = f_ssmt_norm_sym(ssmtSymES)
-    string nqSymB = f_ssmt_norm_sym(ssmtSymNQ)
-
-    [esLcur, esLcurTs, esLprev, esLprevTs, esQiB, esQtsB] = request.security(esSymB, timeframe.period, f_ssmt_daily_lows(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-    [nqLcur, nqLcurTs, nqLprev, nqLprevTs, nqQiB, nqQtsB] = request.security(nqSymB, timeframe.period, f_ssmt_daily_lows(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-
-    string chartTagB = f_ssmt_tag(syminfo.tickerid)
-    bool isChartESB = chartTagB == "ES"
-    bool isChartNQB = chartTagB == "NQ"
-    bool isPairChartB = isChartESB or isChartNQB
-
-    bool ssmtBReady = not na(esLcur) and not na(esLprev) and not na(nqLcur) and not na(nqLprev)
-    if ssmtDebug and barstate.islast
-        if na(ssmtBDbgTbl)
-            ssmtBDbgTbl := table.new(position.bottom_right, 4, 4, border_width=1, border_color=color.gray)
-        table.cell(ssmtBDbgTbl, 0, 0, "Sym", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtBDbgTbl, 1, 0, "Lprev", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtBDbgTbl, 2, 0, "Lcur", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtBDbgTbl, 3, 0, "Sweep", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtBDbgTbl, 0, 1, f_ssmt_tag(ssmtSymES), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 1, 1, f_fmt(esLprev), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 2, 1, f_fmt(esLcur), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 3, 1, esLcur < esLprev ? "Y" : "N", text_color=color.black)
-        table.cell(ssmtBDbgTbl, 0, 2, f_ssmt_tag(ssmtSymNQ), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 1, 2, f_fmt(nqLprev), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 2, 2, f_fmt(nqLcur), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 3, 2, nqLcur < nqLprev ? "Y" : "N", text_color=color.black)
-        table.cell(ssmtBDbgTbl, 0, 3, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
-        table.cell(ssmtBDbgTbl, 1, 3, f_fmt_time(esQtsB, cfg.tz), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 2, 3, f_fmt_time(nqQtsB, cfg.tz), text_color=color.black)
-        table.cell(ssmtBDbgTbl, 3, 3, "", text_color=color.black)
-    else if not ssmtDebug and not na(ssmtBDbgTbl)
-        table.delete(ssmtBDbgTbl)
-        ssmtBDbgTbl := na
-
-    if ssmtBReady
-        bool esSweepB = esLcur < esLprev
-        bool nqSweepB = nqLcur < nqLprev
-        bool splitB = esSweepB != nqSweepB
-
-        bool crackedESB = splitB and (not esSweepB)
-        bool crackedNQB = splitB and (not nqSweepB)
-        string crackedB = ""
-        if crackedESB
-            crackedB := "ES"
-        if crackedNQB
-            crackedB := crackedB == "" ? "NQ" : crackedB + ",NQ"
-
-        float curL = na
-        int   curLTs = na
-        float prevL = na
-        int   prevLTs = na
-        int   curQTs = na
-        bool  curSweep = false
-        if isChartESB
-            curL := esLcur
-            curLTs := esLcurTs
-            prevL := esLprev
-            prevLTs := esLprevTs
-            curQTs := esQtsB
-            curSweep := esSweepB
-        else if isChartNQB
-            curL := nqLcur
-            curLTs := nqLcurTs
-            prevL := nqLprev
-            prevLTs := nqLprevTs
-            curQTs := nqQtsB
-            curSweep := nqSweepB
-
-        int eventKeyB = prevLTs
-        bool eventChangedB = not na(eventKeyB) and (na(ssmtBEventKey) or eventKeyB != ssmtBEventKey)
-        if eventChangedB
-            f_ssmt_hist_push(ssmtBLine, ssmtBLbl, ssmtBHistLines, ssmtBHistLbls, ssmtKeep)
-            ssmtBLine := na
-            ssmtBLbl := na
-            ssmtBExtendTier := 0
-            ssmtBEventKey := eventKeyB
-
-        if not splitB or not isPairChartB
-            if not na(ssmtBLine)
-                line.delete(ssmtBLine)
-                ssmtBLine := na
-            if not na(ssmtBLbl)
-                label.delete(ssmtBLbl)
-                ssmtBLbl := na
-            ssmtBExtendTier := 0
-        else
-            bool hasPointsB = not na(prevL) and not na(prevLTs) and not na(curQTs)
-            if hasPointsB and curSweep
-                int thirdLenB = int(SSmtQLen / 3)
-                int q1EndB = curQTs + thirdLenB
-                int q2EndB = curQTs + (thirdLenB * 2)
-                int q3EndB = curQTs + SSmtQLen
-
-                int sweepTierB = 1
-                if not na(curLTs)
-                    if curLTs >= q2EndB
-                        sweepTierB := 3
-                    else if curLTs >= q1EndB
-                        sweepTierB := 2
-
-                int barTierB = 1
-                if time_close >= q2EndB
-                    barTierB := 3
-                else if time_close >= q1EndB
-                    barTierB := 2
-
-                ssmtBExtendTier := ssmtBExtendTier < sweepTierB ? sweepTierB : ssmtBExtendTier
-                bool touchB = low <= prevL
-                if touchB
-                    ssmtBExtendTier := ssmtBExtendTier < barTierB ? barTierB : ssmtBExtendTier
-
-                int x2B = q1EndB
-                if ssmtBExtendTier >= 3
-                    x2B := q3EndB
-                else if ssmtBExtendTier == 2
-                    x2B := q2EndB
-
-                ssmtBLine := f_set_or_make_hline_w(ssmtBLine, prevLTs, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
-            else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
-                ssmtBLine := f_set_or_make_line(ssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
-
-            bool showLabelB = (isChartESB and crackedESB) or (isChartNQB and crackedNQB)
-            if hasPointsB and crackedB != "" and showLabelB
-                string lblTextB = "D " + crackedB
-                if na(ssmtBLbl)
-                    ssmtBLbl := label.new(prevLTs, prevL, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
-                else
-                    label.set_xy(ssmtBLbl, prevLTs, prevL)
-                    label.set_text(ssmtBLbl, lblTextB)
-                    label.set_textcolor(ssmtBLbl, color.black)
-                    label.set_color(ssmtBLbl, color.new(color.black, 100))
-            else if not showLabelB and not na(ssmtBLbl)
-                label.delete(ssmtBLbl)
-                ssmtBLbl := na
-    f_ssmt_hist_trim(ssmtBHistLines, ssmtBHistLbls, ssmtKeep)
-else
-    if not na(ssmtBLine)
-        line.delete(ssmtBLine)
-        ssmtBLine := na
-    if not na(ssmtBLbl)
-        label.delete(ssmtBLbl)
-        ssmtBLbl := na
-    f_ssmt_hist_clear(ssmtBHistLines, ssmtBHistLbls)
-    if not na(ssmtBDbgTbl)
-        table.delete(ssmtBDbgTbl)
-        ssmtBDbgTbl := na
-    ssmtBEventKey := na
-    ssmtBExtendTier := 0
-
-// -----------------------------------------------------------------------------
-// Bearish m90 SSMT (ES/NQ) — test-only
-// Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
-// -----------------------------------------------------------------------------
-var table m90SsmtDbgTbl = na
-var line[] m90SsmtHistLines = array.new_line()
-var label[] m90SsmtHistLbls = array.new_label()
-var line m90SsmtLine = na
-var int  m90SsmtEventKey = na
-var label m90SsmtLbl = na
-var int  m90SsmtExtendTier = 0
-var int  m90SsmtActiveQTs = na
-int M90SsmtQLen = 90 * 60 * 1000
-
-bool ssmt90mTfOk = vis90mTf
-if show90mBearSSMT and ssmt90mTfOk
-    string esSymM = f_ssmt_norm_sym(ssmtSymES)
-    string nqSymM = f_ssmt_norm_sym(ssmtSymNQ)
-
-    [esHcurM, esHcurTsM, esHprevM, esHprevTsM, esQiM, esQtsM] = request.security(esSymM, timeframe.period, f_ssmt_m90_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-    [nqHcurM, nqHcurTsM, nqHprevM, nqHprevTsM, nqQiM, nqQtsM] = request.security(nqSymM, timeframe.period, f_ssmt_m90_highs(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-
-    string chartTagM = f_ssmt_tag(syminfo.tickerid)
-    bool isChartESM = chartTagM == "ES"
-    bool isChartNQM = chartTagM == "NQ"
-    bool isPairChartM = isChartESM or isChartNQM
-
-    bool ssmtReadyM = not na(esHcurM) and not na(esHprevM) and not na(nqHcurM) and not na(nqHprevM)
-    if ssmtReadyM and isPairChartM
-        bool esSweepM = esHcurM > esHprevM
-        bool nqSweepM = nqHcurM > nqHprevM
-        bool splitM = esSweepM != nqSweepM
-
-        bool crackedESM = splitM and (not esSweepM)
-        bool crackedNQM = splitM and (not nqSweepM)
-        string crackedM = ""
-        if crackedESM
-            crackedM := "ES"
-        if crackedNQM
-            crackedM := crackedM == "" ? "NQ" : crackedM + ",NQ"
-
-        float curH = na
-        int   curHTs = na
-        float prevH = na
-        int   prevHTs = na
-        int   curQTs = na
-        bool  curSweep = false
-
-        if isChartESM
-            curH := esHcurM
-            curHTs := esHcurTsM
-            prevH := esHprevM
-            prevHTs := esHprevTsM
-            curQTs := esQtsM
-            curSweep := esSweepM
-        else if isChartNQM
-            curH := nqHcurM
-            curHTs := nqHcurTsM
-            prevH := nqHprevM
-            prevHTs := nqHprevTsM
-            curQTs := nqQtsM
-            curSweep := nqSweepM
-
-        bool hasPoints = splitM and not na(prevH) and not na(prevHTs) and not na(curQTs)
-        if splitM
             int eventKey = prevHTs
-            if na(m90SsmtEventKey) or m90SsmtEventKey != eventKey
-                f_ssmt_hist_push(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, ssmtKeep)
+            bool eventChanged = not na(eventKey) and (na(ssmtEventKey) or eventKey != ssmtEventKey)
+            if eventChanged
+                f_ssmt_hist_push(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtKeepEff)
+                ssmtLine := na
+                ssmtLbl := na
+                ssmtExtendTier := 0
+                ssmtEventKey := eventKey
+
+            if not split or not isPairChart
+                if not na(ssmtLine)
+                    line.delete(ssmtLine)
+                    ssmtLine := na
+                if not na(ssmtLbl)
+                    label.delete(ssmtLbl)
+                    ssmtLbl := na
+                ssmtExtendTier := 0
+            else
+                bool hasPoints = not na(prevH) and not na(prevHTs) and not na(curQTs)
+                if hasPoints and curSweep
+                    int thirdLen = int(SSmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + SSmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    ssmtExtendTier := ssmtExtendTier < sweepTier ? sweepTier : ssmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        ssmtExtendTier := ssmtExtendTier < barTier ? barTier : ssmtExtendTier
+
+                    int x2 = q1End
+                    if ssmtExtendTier >= 3
+                        x2 := q3End
+                    else if ssmtExtendTier == 2
+                        x2 := q2End
+
+                    ssmtLine := f_set_or_make_hline_w(ssmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+
+                bool showLabel = (isChartES and crackedES) or (isChartNQ and crackedNQ)
+                if hasPoints and cracked != "" and showLabel
+                    string lblText = "D " + cracked
+                    if na(ssmtLbl)
+                        ssmtLbl := label.new(prevHTs, prevH, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                    else
+                        label.set_xy(ssmtLbl, prevHTs, prevH)
+                        label.set_text(ssmtLbl, lblText)
+                        label.set_textcolor(ssmtLbl, color.black)
+                        label.set_color(ssmtLbl, color.new(color.black, 100))
+                else if not showLabel and not na(ssmtLbl)
+                    label.delete(ssmtLbl)
+                    ssmtLbl := na
+        f_ssmt_hist_trim(ssmtHistLines, ssmtHistLbls, ssmtKeepEff)
+    else
+        if not na(ssmtLine)
+            line.delete(ssmtLine)
+            ssmtLine := na
+        if not na(ssmtLbl)
+            label.delete(ssmtLbl)
+            ssmtLbl := na
+        f_ssmt_hist_clear(ssmtHistLines, ssmtHistLbls)
+        if not na(ssmtDbgTbl)
+            table.delete(ssmtDbgTbl)
+            ssmtDbgTbl := na
+        ssmtEventKey := na
+        ssmtExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bullish Daily SSMT (ES/NQ) — test-only
+    // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var table ssmtBDbgTbl = na
+    var line[] ssmtBHistLines = array.new_line()
+    var label[] ssmtBHistLbls = array.new_label()
+    var line ssmtBLine = na
+    var int  ssmtBEventKey = na
+    var label ssmtBLbl = na
+    var int  ssmtBExtendTier = 0
+
+    bool ssmtBullTfOk = visDailyTf
+    if showDailyBullSSMT and ssmtBullTfOk
+        string chartTagB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESB = chartTagB == "ES"
+        bool isChartNQB = chartTagB == "NQ"
+        bool isPairChartB = isChartESB or isChartNQB
+
+        bool ssmtBReady = not na(esLcur) and not na(esLprev) and not na(nqLcur) and not na(nqLprev)
+        if ssmtDebug and barstate.islast
+            if na(ssmtBDbgTbl)
+                ssmtBDbgTbl := table.new(position.bottom_right, 4, 6, border_width=1, border_color=color.gray)
+            table.cell(ssmtBDbgTbl, 0, 0, "Sym", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtBDbgTbl, 1, 0, "Lprev", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtBDbgTbl, 2, 0, "Lcur", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtBDbgTbl, 3, 0, "Sweep", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtBDbgTbl, 0, 1, f_ssmt_tag(ssmtSymES), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 1, 1, f_fmt(esLprev), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 2, 1, f_fmt(esLcur), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 3, 1, esLcur < esLprev ? "Y" : "N", text_color=color.black)
+            table.cell(ssmtBDbgTbl, 0, 2, f_ssmt_tag(ssmtSymNQ), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 1, 2, f_fmt(nqLprev), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 2, 2, f_fmt(nqLcur), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 3, 2, nqLcur < nqLprev ? "Y" : "N", text_color=color.black)
+            table.cell(ssmtBDbgTbl, 0, 3, "ES LTs", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtBDbgTbl, 1, 3, f_fmt_time(esLprevTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 2, 3, f_fmt_time(esLcurTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 3, 3, "", text_color=color.black)
+            table.cell(ssmtBDbgTbl, 0, 4, "NQ LTs", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtBDbgTbl, 1, 4, f_fmt_time(nqLprevTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 2, 4, f_fmt_time(nqLcurTs, cfg.tz), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 3, 4, "", text_color=color.black)
+            table.cell(ssmtBDbgTbl, 0, 5, "QStart", text_color=color.black, bgcolor=color.new(color.black, 85))
+            table.cell(ssmtBDbgTbl, 1, 5, f_fmt_time(esQts, cfg.tz), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 2, 5, f_fmt_time(nqQts, cfg.tz), text_color=color.black)
+            table.cell(ssmtBDbgTbl, 3, 5, "", text_color=color.black)
+        else if not ssmtDebug and not na(ssmtBDbgTbl)
+            table.delete(ssmtBDbgTbl)
+            ssmtBDbgTbl := na
+
+        if ssmtBReady
+            bool esSweepB = esLcur < esLprev
+            bool nqSweepB = nqLcur < nqLprev
+            bool splitB = esSweepB != nqSweepB
+            dailyBullSplit := splitB and isPairChartB
+
+            bool crackedESB = splitB and (not esSweepB)
+            bool crackedNQB = splitB and (not nqSweepB)
+            string crackedB = ""
+            if crackedESB
+                crackedB := "ES"
+            if crackedNQB
+                crackedB := crackedB == "" ? "NQ" : crackedB + ",NQ"
+
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweep = false
+            if isChartESB
+                curL := esLcur
+                curLTs := esLcurTs
+                prevL := esLprev
+                prevLTs := esLprevTs
+                curQTs := esQts
+                curSweep := esSweepB
+            else if isChartNQB
+                curL := nqLcur
+                curLTs := nqLcurTs
+                prevL := nqLprev
+                prevLTs := nqLprevTs
+                curQTs := nqQts
+                curSweep := nqSweepB
+            int prevLTsSnap = isChartESB ? esLprevTsSnap : isChartNQB ? nqLprevTsSnap : prevLTs
+
+            int eventKeyB = prevLTs
+            bool eventChangedB = not na(eventKeyB) and (na(ssmtBEventKey) or eventKeyB != ssmtBEventKey)
+            if eventChangedB
+                f_ssmt_hist_push(ssmtBLine, ssmtBLbl, ssmtBHistLines, ssmtBHistLbls, ssmtKeepEff)
+                ssmtBLine := na
+                ssmtBLbl := na
+                ssmtBExtendTier := 0
+                ssmtBEventKey := eventKeyB
+
+            if not splitB or not isPairChartB
+                if not na(ssmtBLine)
+                    line.delete(ssmtBLine)
+                    ssmtBLine := na
+                if not na(ssmtBLbl)
+                    label.delete(ssmtBLbl)
+                    ssmtBLbl := na
+                ssmtBExtendTier := 0
+            else
+                bool hasPointsB = not na(prevL) and not na(prevLTs) and not na(curQTs)
+                if hasPointsB and curSweep
+                    int thirdLenB = int(SSmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + SSmtQLen
+
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    ssmtBExtendTier := ssmtBExtendTier < sweepTierB ? sweepTierB : ssmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        ssmtBExtendTier := ssmtBExtendTier < barTierB ? barTierB : ssmtBExtendTier
+
+                    int x2B = q1EndB
+                    if ssmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if ssmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    ssmtBLine := f_set_or_make_hline_w(ssmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
+                    ssmtBLine := f_set_or_make_line(ssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+
+                bool showLabelB = (isChartESB and crackedESB) or (isChartNQB and crackedNQB)
+                if hasPointsB and crackedB != "" and showLabelB
+                    string lblTextB = "D " + crackedB
+                    if na(ssmtBLbl)
+                        ssmtBLbl := label.new(prevLTs, prevL, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                    else
+                        label.set_xy(ssmtBLbl, prevLTs, prevL)
+                        label.set_text(ssmtBLbl, lblTextB)
+                        label.set_textcolor(ssmtBLbl, color.black)
+                        label.set_color(ssmtBLbl, color.new(color.black, 100))
+                else if not showLabelB and not na(ssmtBLbl)
+                    label.delete(ssmtBLbl)
+                    ssmtBLbl := na
+        f_ssmt_hist_trim(ssmtBHistLines, ssmtBHistLbls, ssmtKeepEff)
+    else
+        if not na(ssmtBLine)
+            line.delete(ssmtBLine)
+            ssmtBLine := na
+        if not na(ssmtBLbl)
+            label.delete(ssmtBLbl)
+            ssmtBLbl := na
+        f_ssmt_hist_clear(ssmtBHistLines, ssmtBHistLbls)
+        if not na(ssmtBDbgTbl)
+            table.delete(ssmtBDbgTbl)
+            ssmtBDbgTbl := na
+        ssmtBEventKey := na
+        ssmtBExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bearish Daily HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] dailyHssmtHistLines = array.new_line()
+    var label[] dailyHssmtHistLbls = array.new_label()
+    var line dailyHssmtLine = na
+    var int  dailyHssmtEventKey = na
+    var label dailyHssmtLbl = na
+    var int  dailyHssmtExtendTier = 0
+    var int  dailyHssmtActiveQTs = na
+
+    bool hssmtDailyTfOk = visDailyTf
+    if showDailyBearHSSMT and hssmtDailyTfOk and not dailyBearSplit
+        string chartTagDH = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESDH = chartTagDH == "ES"
+        bool isChartNQDH = chartTagDH == "NQ"
+        bool isPairChartDH = isChartESDH or isChartNQDH
+
+        bool hssmtReadyDH = not na(esBHcur) and not na(esBHprev) and not na(nqBHcur) and not na(nqBHprev)
+        if hssmtReadyDH and isPairChartDH
+            bool esSweepDH = esBHcur > esBHprev
+            bool nqSweepDH = nqBHcur > nqBHprev
+            bool splitDH = esSweepDH != nqSweepDH
+
+            bool crackedESDH = splitDH and (not esSweepDH)
+            bool crackedNQDH = splitDH and (not nqSweepDH)
+            string crackedDH = ""
+            if crackedESDH
+                crackedDH := "ES"
+            if crackedNQDH
+                crackedDH := crackedDH == "" ? "NQ" : crackedDH + ",NQ"
+
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESDH
+                curH := esBHcur
+                curHTs := esBHcurTs
+                prevH := esBHprev
+                prevHTs := esBHprevTs
+                curQTs := esQts
+                curSweep := esSweepDH
+            else if isChartNQDH
+                curH := nqBHcur
+                curHTs := nqBHcurTs
+                prevH := nqBHprev
+                prevHTs := nqBHprevTs
+                curQTs := nqQts
+                curSweep := nqSweepDH
+            int prevHTsSnap = isChartESDH ? esBHprevTsSnap : isChartNQDH ? nqBHprevTsSnap : prevHTs
+
+            bool hasPoints = splitDH and not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if splitDH
+                int eventKey = prevHTs
+                if na(dailyHssmtEventKey) or dailyHssmtEventKey != eventKey
+                    f_ssmt_hist_push(dailyHssmtLine, dailyHssmtLbl, dailyHssmtHistLines, dailyHssmtHistLbls, ssmtKeepEff)
+                    dailyHssmtLine := na
+                    dailyHssmtLbl := na
+                    dailyHssmtEventKey := eventKey
+                    dailyHssmtActiveQTs := curQTs
+                    dailyHssmtExtendTier := 0
+
+                if hasPoints and curSweep
+                    int thirdLen = int(SSmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + SSmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    dailyHssmtExtendTier := dailyHssmtExtendTier < sweepTier ? sweepTier : dailyHssmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        dailyHssmtExtendTier := dailyHssmtExtendTier < barTier ? barTier : dailyHssmtExtendTier
+
+                    int x2 = q1End
+                    if dailyHssmtExtendTier >= 3
+                        x2 := q3End
+                    else if dailyHssmtExtendTier == 2
+                        x2 := q2End
+
+                    dailyHssmtLine := f_set_or_make_hline_w(dailyHssmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    dailyHssmtLine := f_set_or_make_line(dailyHssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                bool showLabel = (isChartESDH and crackedESDH) or (isChartNQDH and crackedNQDH)
+                if hasPoints and crackedDH != "" and showLabel
+                    string lblText = "(H) Daily " + crackedDH
+
+                    int xMid = prevHTs
+                    float yMid = prevH
+                    if not na(dailyHssmtLine)
+                        int x1 = line.get_x1(dailyHssmtLine)
+                        int x2 = line.get_x2(dailyHssmtLine)
+                        xMid := x1 + int((x2 - x1) / 2)
+                        yMid := (line.get_y1(dailyHssmtLine) + line.get_y2(dailyHssmtLine)) / 2
+                    float yLbl = yMid + syminfo.mintick
+
+                    if na(dailyHssmtLbl)
+                        dailyHssmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(dailyHssmtLbl, xMid, yLbl)
+                        label.set_text(dailyHssmtLbl, lblText)
+                        label.set_textcolor(dailyHssmtLbl, color.black)
+                else if not showLabel and not na(dailyHssmtLbl)
+                    label.delete(dailyHssmtLbl)
+                    dailyHssmtLbl := na
+            if not splitDH and not na(dailyHssmtEventKey)
+                bool rolled = not na(dailyHssmtActiveQTs) and not na(curQTs) and curQTs != dailyHssmtActiveQTs
+                if rolled
+                    f_ssmt_hist_push(dailyHssmtLine, dailyHssmtLbl, dailyHssmtHistLines, dailyHssmtHistLbls, ssmtKeepEff)
+                else
+                    if not na(dailyHssmtLine)
+                        line.delete(dailyHssmtLine)
+                    if not na(dailyHssmtLbl)
+                        label.delete(dailyHssmtLbl)
+                dailyHssmtLine := na
+                dailyHssmtLbl := na
+                dailyHssmtEventKey := na
+                dailyHssmtActiveQTs := na
+                dailyHssmtExtendTier := 0
+        if not (hssmtReadyDH and isPairChartDH)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(dailyHssmtLine)
+                line.delete(dailyHssmtLine)
+                dailyHssmtLine := na
+            if not na(dailyHssmtLbl)
+                label.delete(dailyHssmtLbl)
+                dailyHssmtLbl := na
+            dailyHssmtEventKey := na
+            dailyHssmtExtendTier := 0
+        f_ssmt_hist_trim(dailyHssmtHistLines, dailyHssmtHistLbls, ssmtKeepEff)
+    else
+        if not na(dailyHssmtLine)
+            line.delete(dailyHssmtLine)
+            dailyHssmtLine := na
+        if not na(dailyHssmtLbl)
+            label.delete(dailyHssmtLbl)
+            dailyHssmtLbl := na
+        f_ssmt_hist_clear(dailyHssmtHistLines, dailyHssmtHistLbls)
+        dailyHssmtEventKey := na
+        dailyHssmtExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bullish Daily HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on Daily-aligned TFs (m15–m30 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] dailyHssmtBHistLines = array.new_line()
+    var label[] dailyHssmtBHistLbls = array.new_label()
+    var line dailyHssmtBLine = na
+    var int  dailyHssmtBEventKey = na
+    var label dailyHssmtBLbl = na
+    var int  dailyHssmtBExtendTier = 0
+    var int  dailyHssmtBActiveQTs = na
+
+    bool hssmtDailyBullTfOk = visDailyTf
+    if showDailyBullHSSMT and hssmtDailyBullTfOk and not dailyBullSplit
+        string chartTagDHB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESDHB = chartTagDHB == "ES"
+        bool isChartNQDHB = chartTagDHB == "NQ"
+        bool isPairChartDHB = isChartESDHB or isChartNQDHB
+
+        bool hssmtReadyDHB = not na(esBLcur) and not na(esBLprev) and not na(nqBLcur) and not na(nqBLprev)
+        if hssmtReadyDHB and isPairChartDHB
+            bool esSweepDHB = esBLcur < esBLprev
+            bool nqSweepDHB = nqBLcur < nqBLprev
+            bool splitDHB = esSweepDHB != nqSweepDHB
+
+            bool crackedESDHB = splitDHB and (not esSweepDHB)
+            bool crackedNQDHB = splitDHB and (not nqSweepDHB)
+            string crackedDHB = ""
+            if crackedESDHB
+                crackedDHB := "ES"
+            if crackedNQDHB
+                crackedDHB := crackedDHB == "" ? "NQ" : crackedDHB + ",NQ"
+
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESDHB
+                curL := esBLcur
+                curLTs := esBLcurTs
+                prevL := esBLprev
+                prevLTs := esBLprevTs
+                curQTs := esQts
+                curSweep := esSweepDHB
+            else if isChartNQDHB
+                curL := nqBLcur
+                curLTs := nqBLcurTs
+                prevL := nqBLprev
+                prevLTs := nqBLprevTs
+                curQTs := nqQts
+                curSweep := nqSweepDHB
+            int prevLTsSnap = isChartESDHB ? esBLprevTsSnap : isChartNQDHB ? nqBLprevTsSnap : prevLTs
+
+            bool hasPointsB = splitDHB and not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if splitDHB
+                int eventKeyB = prevLTs
+                if na(dailyHssmtBEventKey) or dailyHssmtBEventKey != eventKeyB
+                    f_ssmt_hist_push(dailyHssmtBLine, dailyHssmtBLbl, dailyHssmtBHistLines, dailyHssmtBHistLbls, ssmtKeepEff)
+                    dailyHssmtBLine := na
+                    dailyHssmtBLbl := na
+                    dailyHssmtBEventKey := eventKeyB
+                    dailyHssmtBActiveQTs := curQTs
+                    dailyHssmtBExtendTier := 0
+
+                if hasPointsB and curSweep
+                    int thirdLenB = int(SSmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + SSmtQLen
+
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    dailyHssmtBExtendTier := dailyHssmtBExtendTier < sweepTierB ? sweepTierB : dailyHssmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        dailyHssmtBExtendTier := dailyHssmtBExtendTier < barTierB ? barTierB : dailyHssmtBExtendTier
+
+                    int x2B = q1EndB
+                    if dailyHssmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if dailyHssmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    dailyHssmtBLine := f_set_or_make_hline_w(dailyHssmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
+                    dailyHssmtBLine := f_set_or_make_line(dailyHssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                bool showLabelB = (isChartESDHB and crackedESDHB) or (isChartNQDHB and crackedNQDHB)
+                if hasPointsB and crackedDHB != "" and showLabelB
+                    string lblTextB = "(H) Daily " + crackedDHB
+
+                    int xMidB = prevLTs
+                    float yMidB = prevL
+                    if not na(dailyHssmtBLine)
+                        int x1B = line.get_x1(dailyHssmtBLine)
+                        int x2B = line.get_x2(dailyHssmtBLine)
+                        xMidB := x1B + int((x2B - x1B) / 2)
+                        yMidB := (line.get_y1(dailyHssmtBLine) + line.get_y2(dailyHssmtBLine)) / 2
+                    float yLblB = yMidB - syminfo.mintick
+
+                    if na(dailyHssmtBLbl)
+                        dailyHssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(dailyHssmtBLbl, xMidB, yLblB)
+                        label.set_text(dailyHssmtBLbl, lblTextB)
+                        label.set_textcolor(dailyHssmtBLbl, color.black)
+                else if not showLabelB and not na(dailyHssmtBLbl)
+                    label.delete(dailyHssmtBLbl)
+                    dailyHssmtBLbl := na
+            if not splitDHB and not na(dailyHssmtBEventKey)
+                bool rolledB = not na(dailyHssmtBActiveQTs) and not na(curQTs) and curQTs != dailyHssmtBActiveQTs
+                if rolledB
+                    f_ssmt_hist_push(dailyHssmtBLine, dailyHssmtBLbl, dailyHssmtBHistLines, dailyHssmtBHistLbls, ssmtKeepEff)
+                else
+                    if not na(dailyHssmtBLine)
+                        line.delete(dailyHssmtBLine)
+                    if not na(dailyHssmtBLbl)
+                        label.delete(dailyHssmtBLbl)
+                dailyHssmtBLine := na
+                dailyHssmtBLbl := na
+                dailyHssmtBEventKey := na
+                dailyHssmtBActiveQTs := na
+                dailyHssmtBExtendTier := 0
+        if not (hssmtReadyDHB and isPairChartDHB)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(dailyHssmtBLine)
+                line.delete(dailyHssmtBLine)
+                dailyHssmtBLine := na
+            if not na(dailyHssmtBLbl)
+                label.delete(dailyHssmtBLbl)
+                dailyHssmtBLbl := na
+            dailyHssmtBEventKey := na
+            dailyHssmtBExtendTier := 0
+        f_ssmt_hist_trim(dailyHssmtBHistLines, dailyHssmtBHistLbls, ssmtKeepEff)
+    else
+        if not na(dailyHssmtBLine)
+            line.delete(dailyHssmtBLine)
+            dailyHssmtBLine := na
+        if not na(dailyHssmtBLbl)
+            label.delete(dailyHssmtBLbl)
+            dailyHssmtBLbl := na
+        f_ssmt_hist_clear(dailyHssmtBHistLines, dailyHssmtBHistLbls)
+        dailyHssmtBEventKey := na
+        dailyHssmtBExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bearish m90 SSMT (ES/NQ) — test-only
+    // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var table m90SsmtDbgTbl = na
+    var line[] m90SsmtHistLines = array.new_line()
+    var label[] m90SsmtHistLbls = array.new_label()
+    var line m90SsmtLine = na
+    var int  m90SsmtEventKey = na
+    var label m90SsmtLbl = na
+    var int  m90SsmtExtendTier = 0
+    var int  m90SsmtActiveQTs = na
+    int M90SsmtQLen = 90 * 60 * 1000
+
+    bool ssmt90mTfOk = vis90mTf
+    bool ssmt90mAny = ssmt90mTfOk and (show90mBearSSMT or show90mBullSSMT or show90mBearHSSMT or show90mBullHSSMT)
+    bool m90BearSplit = false
+    bool m90BullSplit = false
+
+    float esHcurM = na
+    int   esHcurTsM = na
+    float esHprevM = na
+    int   esHprevTsM = na
+    float esBHcurM = na
+    int   esBHcurTsM = na
+    float esBHprevM = na
+    int   esBHprevTsM = na
+    float esLcurM = na
+    int   esLcurTsM = na
+    float esLprevM = na
+    int   esLprevTsM = na
+    float esBLcurM = na
+    int   esBLcurTsM = na
+    float esBLprevM = na
+    int   esBLprevTsM = na
+    int   esQiM = na
+    int   esQtsM = na
+
+    float nqHcurM = na
+    int   nqHcurTsM = na
+    float nqHprevM = na
+    int   nqHprevTsM = na
+    float nqBHcurM = na
+    int   nqBHcurTsM = na
+    float nqBHprevM = na
+    int   nqBHprevTsM = na
+    float nqLcurM = na
+    int   nqLcurTsM = na
+    float nqLprevM = na
+    int   nqLprevTsM = na
+    float nqBLcurM = na
+    int   nqBLcurTsM = na
+    float nqBLprevM = na
+    int   nqBLprevTsM = na
+    int   nqQiM = na
+    int   nqQtsM = na
+
+    if ssmt90mAny
+        string esSymM = f_ssmt_norm_sym(ssmtSymES)
+        string nqSymM = f_ssmt_norm_sym(ssmtSymNQ)
+
+        [tmpEsHcurM, tmpEsHcurTsM, tmpEsHprevM, tmpEsHprevTsM, tmpEsLcurM, tmpEsLcurTsM, tmpEsLprevM, tmpEsLprevTsM, tmpEsQiM, tmpEsQtsM, tmpEsBHcurM, tmpEsBHcurTsM, tmpEsBHprevM, tmpEsBHprevTsM, tmpEsBLcurM, tmpEsBLcurTsM, tmpEsBLprevM, tmpEsBLprevTsM] = request.security(esSymM, timeframe.period, f_ssmt_m90_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [tmpNqHcurM, tmpNqHcurTsM, tmpNqHprevM, tmpNqHprevTsM, tmpNqLcurM, tmpNqLcurTsM, tmpNqLprevM, tmpNqLprevTsM, tmpNqQiM, tmpNqQtsM, tmpNqBHcurM, tmpNqBHcurTsM, tmpNqBHprevM, tmpNqBHprevTsM, tmpNqBLcurM, tmpNqBLcurTsM, tmpNqBLprevM, tmpNqBLprevTsM] = request.security(nqSymM, timeframe.period, f_ssmt_m90_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+        esHcurM := tmpEsHcurM
+        esHcurTsM := tmpEsHcurTsM
+        esHprevM := tmpEsHprevM
+        esHprevTsM := tmpEsHprevTsM
+        esLcurM := tmpEsLcurM
+        esLcurTsM := tmpEsLcurTsM
+        esLprevM := tmpEsLprevM
+        esLprevTsM := tmpEsLprevTsM
+        esBHcurM := tmpEsBHcurM
+        esBHcurTsM := tmpEsBHcurTsM
+        esBHprevM := tmpEsBHprevM
+        esBHprevTsM := tmpEsBHprevTsM
+        esBLcurM := tmpEsBLcurM
+        esBLcurTsM := tmpEsBLcurTsM
+        esBLprevM := tmpEsBLprevM
+        esBLprevTsM := tmpEsBLprevTsM
+        esQiM := tmpEsQiM
+        esQtsM := tmpEsQtsM
+
+        nqHcurM := tmpNqHcurM
+        nqHcurTsM := tmpNqHcurTsM
+        nqHprevM := tmpNqHprevM
+        nqHprevTsM := tmpNqHprevTsM
+        nqLcurM := tmpNqLcurM
+        nqLcurTsM := tmpNqLcurTsM
+        nqLprevM := tmpNqLprevM
+        nqLprevTsM := tmpNqLprevTsM
+        nqBHcurM := tmpNqBHcurM
+        nqBHcurTsM := tmpNqBHcurTsM
+        nqBHprevM := tmpNqBHprevM
+        nqBHprevTsM := tmpNqBHprevTsM
+        nqBLcurM := tmpNqBLcurM
+        nqBLcurTsM := tmpNqBLcurTsM
+        nqBLprevM := tmpNqBLprevM
+        nqBLprevTsM := tmpNqBLprevTsM
+        nqQiM := tmpNqQiM
+        nqQtsM := tmpNqQtsM
+
+    int esHprevTsMSnap = f_snap_to_chart_bar(esHprevTsM)
+    int nqHprevTsMSnap = f_snap_to_chart_bar(nqHprevTsM)
+    int esLprevTsMSnap = f_snap_to_chart_bar(esLprevTsM)
+    int nqLprevTsMSnap = f_snap_to_chart_bar(nqLprevTsM)
+    int esBHprevTsMSnap = f_snap_to_chart_bar(esBHprevTsM)
+    int nqBHprevTsMSnap = f_snap_to_chart_bar(nqBHprevTsM)
+    int esBLprevTsMSnap = f_snap_to_chart_bar(esBLprevTsM)
+    int nqBLprevTsMSnap = f_snap_to_chart_bar(nqBLprevTsM)
+    if show90mBearSSMT and ssmt90mTfOk
+        string chartTagM = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESM = chartTagM == "ES"
+        bool isChartNQM = chartTagM == "NQ"
+        bool isPairChartM = isChartESM or isChartNQM
+
+        bool ssmtReadyM = not na(esHcurM) and not na(esHprevM) and not na(nqHcurM) and not na(nqHprevM)
+        if ssmtReadyM and isPairChartM
+            bool esSweepM = esHcurM > esHprevM
+            bool nqSweepM = nqHcurM > nqHprevM
+            bool splitM = esSweepM != nqSweepM
+            m90BearSplit := splitM and isPairChartM
+
+            bool crackedESM = splitM and (not esSweepM)
+            bool crackedNQM = splitM and (not nqSweepM)
+            string crackedM = ""
+            if crackedESM
+                crackedM := "ES"
+            if crackedNQM
+                crackedM := crackedM == "" ? "NQ" : crackedM + ",NQ"
+
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESM
+                curH := esHcurM
+                curHTs := esHcurTsM
+                prevH := esHprevM
+                prevHTs := esHprevTsM
+                curQTs := esQtsM
+                curSweep := esSweepM
+            else if isChartNQM
+                curH := nqHcurM
+                curHTs := nqHcurTsM
+                prevH := nqHprevM
+                prevHTs := nqHprevTsM
+                curQTs := nqQtsM
+                curSweep := nqSweepM
+            int prevHTsSnap = isChartESM ? esHprevTsMSnap : isChartNQM ? nqHprevTsMSnap : prevHTs
+
+            bool hasPoints = splitM and not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if splitM
+                int eventKey = prevHTs
+                if na(m90SsmtEventKey) or m90SsmtEventKey != eventKey
+                    f_ssmt_hist_push(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, ssmtKeepEff)
+                    m90SsmtLine := na
+                    m90SsmtLbl := na
+                    m90SsmtEventKey := eventKey
+                    m90SsmtActiveQTs := curQTs
+                    m90SsmtExtendTier := 0
+
+                if hasPoints and curSweep
+                    int thirdLen = int(M90SsmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + M90SsmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    m90SsmtExtendTier := m90SsmtExtendTier < sweepTier ? sweepTier : m90SsmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        m90SsmtExtendTier := m90SsmtExtendTier < barTier ? barTier : m90SsmtExtendTier
+
+                    int x2 = q1End
+                    if m90SsmtExtendTier >= 3
+                        x2 := q3End
+                    else if m90SsmtExtendTier == 2
+                        x2 := q2End
+
+                    m90SsmtLine := f_set_or_make_hline_w(m90SsmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    m90SsmtLine := f_set_or_make_line(m90SsmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                bool showLabel = (isChartESM and crackedESM) or (isChartNQM and crackedNQM)
+                if hasPoints and crackedM != "" and showLabel
+                    string lblText = "m90 " + crackedM
+
+                    int xMid = prevHTs
+                    float yMid = prevH
+                    if not na(m90SsmtLine)
+                        int x1 = line.get_x1(m90SsmtLine)
+                        int x2 = line.get_x2(m90SsmtLine)
+                        xMid := x1 + int((x2 - x1) / 2)
+                        yMid := (line.get_y1(m90SsmtLine) + line.get_y2(m90SsmtLine)) / 2
+                    float yLbl = yMid + syminfo.mintick
+
+                    if na(m90SsmtLbl)
+                        m90SsmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(m90SsmtLbl, xMid, yLbl)
+                        label.set_text(m90SsmtLbl, lblText)
+                        label.set_textcolor(m90SsmtLbl, color.black)
+                else if not showLabel and not na(m90SsmtLbl)
+                    label.delete(m90SsmtLbl)
+                    m90SsmtLbl := na
+            // State-based finalize/cleanup:
+            // - If split resolves within the same quarter: delete active drawings.
+            // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
+            if not splitM and not na(m90SsmtEventKey)
+                bool rolled = not na(m90SsmtActiveQTs) and not na(curQTs) and curQTs != m90SsmtActiveQTs
+                if rolled
+                    f_ssmt_hist_push(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, ssmtKeepEff)
+                else
+                    if not na(m90SsmtLine)
+                        line.delete(m90SsmtLine)
+                    if not na(m90SsmtLbl)
+                        label.delete(m90SsmtLbl)
                 m90SsmtLine := na
                 m90SsmtLbl := na
-                m90SsmtEventKey := eventKey
-                m90SsmtActiveQTs := curQTs
+                m90SsmtEventKey := na
+                m90SsmtActiveQTs := na
                 m90SsmtExtendTier := 0
-
-            if hasPoints and curSweep
-                int thirdLen = int(M90SsmtQLen / 3)
-                int q1End = curQTs + thirdLen
-                int q2End = curQTs + (thirdLen * 2)
-                int q3End = curQTs + M90SsmtQLen
-
-                int sweepTier = 1
-                if not na(curHTs)
-                    if curHTs >= q2End
-                        sweepTier := 3
-                    else if curHTs >= q1End
-                        sweepTier := 2
-
-                int barTier = 1
-                if time_close >= q2End
-                    barTier := 3
-                else if time_close >= q1End
-                    barTier := 2
-
-                m90SsmtExtendTier := m90SsmtExtendTier < sweepTier ? sweepTier : m90SsmtExtendTier
-                bool touch = high >= prevH
-                if touch
-                    m90SsmtExtendTier := m90SsmtExtendTier < barTier ? barTier : m90SsmtExtendTier
-
-                int x2 = q1End
-                if m90SsmtExtendTier >= 3
-                    x2 := q3End
-                else if m90SsmtExtendTier == 2
-                    x2 := q2End
-
-                m90SsmtLine := f_set_or_make_hline_w(m90SsmtLine, prevHTs, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
-            else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
-                m90SsmtLine := f_set_or_make_line(m90SsmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
-            bool showLabel = (isChartESM and crackedESM) or (isChartNQM and crackedNQM)
-            if hasPoints and crackedM != "" and showLabel
-                string lblText = "m90 " + crackedM
-
-                int xMid = prevHTs
-                float yMid = prevH
-                if not na(m90SsmtLine)
-                    int x1 = line.get_x1(m90SsmtLine)
-                    int x2 = line.get_x2(m90SsmtLine)
-                    xMid := x1 + int((x2 - x1) / 2)
-                    yMid := (line.get_y1(m90SsmtLine) + line.get_y2(m90SsmtLine)) / 2
-                float yLbl = yMid + syminfo.mintick
-
-                if na(m90SsmtLbl)
-                    m90SsmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
-                else
-                    label.set_xy(m90SsmtLbl, xMid, yLbl)
-                    label.set_text(m90SsmtLbl, lblText)
-                    label.set_textcolor(m90SsmtLbl, color.black)
-            else if not showLabel and not na(m90SsmtLbl)
+        if not (ssmtReadyM and isPairChartM)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(m90SsmtLine)
+                line.delete(m90SsmtLine)
+                m90SsmtLine := na
+            if not na(m90SsmtLbl)
                 label.delete(m90SsmtLbl)
                 m90SsmtLbl := na
-        // State-based finalize/cleanup:
-        // - If split resolves within the same quarter: delete active drawings.
-        // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
-        if not splitM and not na(m90SsmtEventKey)
-            bool rolled = not na(m90SsmtActiveQTs) and not na(curQTs) and curQTs != m90SsmtActiveQTs
-            if rolled
-                f_ssmt_hist_push(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, ssmtKeep)
-            else
-                if not na(m90SsmtLine)
-                    line.delete(m90SsmtLine)
-                if not na(m90SsmtLbl)
-                    label.delete(m90SsmtLbl)
-            m90SsmtLine := na
-            m90SsmtLbl := na
             m90SsmtEventKey := na
-            m90SsmtActiveQTs := na
             m90SsmtExtendTier := 0
-    if not (ssmtReadyM and isPairChartM)
-        // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+        f_ssmt_hist_trim(m90SsmtHistLines, m90SsmtHistLbls, ssmtKeepEff)
+    else
         if not na(m90SsmtLine)
             line.delete(m90SsmtLine)
             m90SsmtLine := na
         if not na(m90SsmtLbl)
             label.delete(m90SsmtLbl)
             m90SsmtLbl := na
+        f_ssmt_hist_clear(m90SsmtHistLines, m90SsmtHistLbls)
+        if not na(m90SsmtDbgTbl)
+            table.delete(m90SsmtDbgTbl)
+            m90SsmtDbgTbl := na
         m90SsmtEventKey := na
         m90SsmtExtendTier := 0
-    f_ssmt_hist_trim(m90SsmtHistLines, m90SsmtHistLbls, ssmtKeep)
-else
-    if not na(m90SsmtLine)
-        line.delete(m90SsmtLine)
-        m90SsmtLine := na
-    if not na(m90SsmtLbl)
-        label.delete(m90SsmtLbl)
-        m90SsmtLbl := na
-    f_ssmt_hist_clear(m90SsmtHistLines, m90SsmtHistLbls)
-    if not na(m90SsmtDbgTbl)
-        table.delete(m90SsmtDbgTbl)
-        m90SsmtDbgTbl := na
-    m90SsmtEventKey := na
-    m90SsmtExtendTier := 0
 
-// -----------------------------------------------------------------------------
-// Bullish m90 SSMT (ES/NQ) — test-only
-// Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
-// -----------------------------------------------------------------------------
-var table m90SsmtBDbgTbl = na
-var line[] m90SsmtBHistLines = array.new_line()
-var label[] m90SsmtBHistLbls = array.new_label()
-var line m90SsmtBLine = na
-var int  m90SsmtBEventKey = na
-var label m90SsmtBLbl = na
-var int  m90SsmtBExtendTier = 0
-var int  m90SsmtBActiveQTs = na
+    // -----------------------------------------------------------------------------
+    // Bullish m90 SSMT (ES/NQ) — test-only
+    // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var table m90SsmtBDbgTbl = na
+    var line[] m90SsmtBHistLines = array.new_line()
+    var label[] m90SsmtBHistLbls = array.new_label()
+    var line m90SsmtBLine = na
+    var int  m90SsmtBEventKey = na
+    var label m90SsmtBLbl = na
+    var int  m90SsmtBExtendTier = 0
+    var int  m90SsmtBActiveQTs = na
 
-bool ssmt90mBullTfOk = vis90mTf
-if show90mBullSSMT and ssmt90mBullTfOk
-    string esSymMB = f_ssmt_norm_sym(ssmtSymES)
-    string nqSymMB = f_ssmt_norm_sym(ssmtSymNQ)
+    bool ssmt90mBullTfOk = vis90mTf
+    if show90mBullSSMT and ssmt90mBullTfOk
+        string chartTagMB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESMB = chartTagMB == "ES"
+        bool isChartNQMB = chartTagMB == "NQ"
+        bool isPairChartMB = isChartESMB or isChartNQMB
 
-    [esLcurM, esLcurTsM, esLprevM, esLprevTsM, esQiMB, esQtsMB] = request.security(esSymMB, timeframe.period, f_ssmt_m90_lows(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-    [nqLcurM, nqLcurTsM, nqLprevM, nqLprevTsM, nqQiMB, nqQtsMB] = request.security(nqSymMB, timeframe.period, f_ssmt_m90_lows(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        bool ssmtReadyMB = not na(esLcurM) and not na(esLprevM) and not na(nqLcurM) and not na(nqLprevM)
+        if ssmtReadyMB and isPairChartMB
+            bool esSweepMB = esLcurM < esLprevM
+            bool nqSweepMB = nqLcurM < nqLprevM
+            bool splitMB = esSweepMB != nqSweepMB
+            m90BullSplit := splitMB and isPairChartMB
 
-    string chartTagMB = f_ssmt_tag(syminfo.tickerid)
-    bool isChartESMB = chartTagMB == "ES"
-    bool isChartNQMB = chartTagMB == "NQ"
-    bool isPairChartMB = isChartESMB or isChartNQMB
+            bool crackedESMB = splitMB and (not esSweepMB)
+            bool crackedNQMB = splitMB and (not nqSweepMB)
+            string crackedMB = ""
+            if crackedESMB
+                crackedMB := "ES"
+            if crackedNQMB
+                crackedMB := crackedMB == "" ? "NQ" : crackedMB + ",NQ"
 
-    bool ssmtReadyMB = not na(esLcurM) and not na(esLprevM) and not na(nqLcurM) and not na(nqLprevM)
-    if ssmtReadyMB and isPairChartMB
-        bool esSweepMB = esLcurM < esLprevM
-        bool nqSweepMB = nqLcurM < nqLprevM
-        bool splitMB = esSweepMB != nqSweepMB
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweepB = false
 
-        bool crackedESMB = splitMB and (not esSweepMB)
-        bool crackedNQMB = splitMB and (not nqSweepMB)
-        string crackedMB = ""
-        if crackedESMB
-            crackedMB := "ES"
-        if crackedNQMB
-            crackedMB := crackedMB == "" ? "NQ" : crackedMB + ",NQ"
+            if isChartESMB
+                curL := esLcurM
+                curLTs := esLcurTsM
+                prevL := esLprevM
+                prevLTs := esLprevTsM
+                curQTs := esQtsM
+                curSweepB := esSweepMB
+            else if isChartNQMB
+                curL := nqLcurM
+                curLTs := nqLcurTsM
+                prevL := nqLprevM
+                prevLTs := nqLprevTsM
+                curQTs := nqQtsM
+                curSweepB := nqSweepMB
+            int prevLTsSnap = isChartESMB ? esLprevTsMSnap : isChartNQMB ? nqLprevTsMSnap : prevLTs
 
-        float curL = na
-        int   curLTs = na
-        float prevL = na
-        int   prevLTs = na
-        int   curQTs = na
-        bool  curSweepB = false
+            bool hasPointsB = splitMB and not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if splitMB
+                int eventKeyB = prevLTs
+                if na(m90SsmtBEventKey) or m90SsmtBEventKey != eventKeyB
+                    f_ssmt_hist_push(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeepEff)
+                    m90SsmtBLine := na
+                    m90SsmtBLbl := na
+                    m90SsmtBEventKey := eventKeyB
+                    m90SsmtBActiveQTs := curQTs
+                    m90SsmtBExtendTier := 0
 
-        if isChartESMB
-            curL := esLcurM
-            curLTs := esLcurTsM
-            prevL := esLprevM
-            prevLTs := esLprevTsM
-            curQTs := esQtsMB
-            curSweepB := esSweepMB
-        else if isChartNQMB
-            curL := nqLcurM
-            curLTs := nqLcurTsM
-            prevL := nqLprevM
-            prevLTs := nqLprevTsM
-            curQTs := nqQtsMB
-            curSweepB := nqSweepMB
+                if hasPointsB and curSweepB
+                    int thirdLenB = int(M90SsmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + M90SsmtQLen
 
-        bool hasPointsB = splitMB and not na(prevL) and not na(prevLTs) and not na(curQTs)
-        if splitMB
-            int eventKeyB = prevLTs
-            if na(m90SsmtBEventKey) or m90SsmtBEventKey != eventKeyB
-                f_ssmt_hist_push(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeep)
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    m90SsmtBExtendTier := m90SsmtBExtendTier < sweepTierB ? sweepTierB : m90SsmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        m90SsmtBExtendTier := m90SsmtBExtendTier < barTierB ? barTierB : m90SsmtBExtendTier
+
+                    int x2B = q1EndB
+                    if m90SsmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if m90SsmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    m90SsmtBLine := f_set_or_make_hline_w(m90SsmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweepB and not na(curL) and not na(curLTs)
+                    m90SsmtBLine := f_set_or_make_line(m90SsmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                bool showLabelB = (isChartESMB and crackedESMB) or (isChartNQMB and crackedNQMB)
+                if hasPointsB and crackedMB != "" and showLabelB
+                    string lblTextB = "m90 " + crackedMB
+
+                    int xMidB = prevLTs
+                    float yMidB = prevL
+                    if not na(m90SsmtBLine)
+                        int x1B = line.get_x1(m90SsmtBLine)
+                        int x2B = line.get_x2(m90SsmtBLine)
+                        xMidB := x1B + int((x2B - x1B) / 2)
+                        yMidB := (line.get_y1(m90SsmtBLine) + line.get_y2(m90SsmtBLine)) / 2
+                    float yLblB = yMidB - syminfo.mintick
+
+                    if na(m90SsmtBLbl)
+                        m90SsmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(m90SsmtBLbl, xMidB, yLblB)
+                        label.set_text(m90SsmtBLbl, lblTextB)
+                        label.set_textcolor(m90SsmtBLbl, color.black)
+                else if not showLabelB and not na(m90SsmtBLbl)
+                    label.delete(m90SsmtBLbl)
+                    m90SsmtBLbl := na
+            // State-based finalize/cleanup:
+            // - If split resolves within the same quarter: delete active drawings.
+            // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
+            if not splitMB and not na(m90SsmtBEventKey)
+                bool rolled = not na(m90SsmtBActiveQTs) and not na(curQTs) and curQTs != m90SsmtBActiveQTs
+                if rolled
+                    f_ssmt_hist_push(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeepEff)
+                else
+                    if not na(m90SsmtBLine)
+                        line.delete(m90SsmtBLine)
+                    if not na(m90SsmtBLbl)
+                        label.delete(m90SsmtBLbl)
                 m90SsmtBLine := na
                 m90SsmtBLbl := na
-                m90SsmtBEventKey := eventKeyB
-                m90SsmtBActiveQTs := curQTs
+                m90SsmtBEventKey := na
+                m90SsmtBActiveQTs := na
                 m90SsmtBExtendTier := 0
-
-            if hasPointsB and curSweepB
-                int thirdLenB = int(M90SsmtQLen / 3)
-                int q1EndB = curQTs + thirdLenB
-                int q2EndB = curQTs + (thirdLenB * 2)
-                int q3EndB = curQTs + M90SsmtQLen
-
-                int sweepTierB = 1
-                if not na(curLTs)
-                    if curLTs >= q2EndB
-                        sweepTierB := 3
-                    else if curLTs >= q1EndB
-                        sweepTierB := 2
-
-                int barTierB = 1
-                if time_close >= q2EndB
-                    barTierB := 3
-                else if time_close >= q1EndB
-                    barTierB := 2
-
-                m90SsmtBExtendTier := m90SsmtBExtendTier < sweepTierB ? sweepTierB : m90SsmtBExtendTier
-                bool touchB = low <= prevL
-                if touchB
-                    m90SsmtBExtendTier := m90SsmtBExtendTier < barTierB ? barTierB : m90SsmtBExtendTier
-
-                int x2B = q1EndB
-                if m90SsmtBExtendTier >= 3
-                    x2B := q3EndB
-                else if m90SsmtBExtendTier == 2
-                    x2B := q2EndB
-
-                m90SsmtBLine := f_set_or_make_hline_w(m90SsmtBLine, prevLTs, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
-            else if hasPointsB and not curSweepB and not na(curL) and not na(curLTs)
-                m90SsmtBLine := f_set_or_make_line(m90SsmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
-            bool showLabelB = (isChartESMB and crackedESMB) or (isChartNQMB and crackedNQMB)
-            if hasPointsB and crackedMB != "" and showLabelB
-                string lblTextB = "m90 " + crackedMB
-
-                int xMidB = prevLTs
-                float yMidB = prevL
-                if not na(m90SsmtBLine)
-                    int x1B = line.get_x1(m90SsmtBLine)
-                    int x2B = line.get_x2(m90SsmtBLine)
-                    xMidB := x1B + int((x2B - x1B) / 2)
-                    yMidB := (line.get_y1(m90SsmtBLine) + line.get_y2(m90SsmtBLine)) / 2
-                float yLblB = yMidB - syminfo.mintick
-
-                if na(m90SsmtBLbl)
-                    m90SsmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
-                else
-                    label.set_xy(m90SsmtBLbl, xMidB, yLblB)
-                    label.set_text(m90SsmtBLbl, lblTextB)
-                    label.set_textcolor(m90SsmtBLbl, color.black)
-            else if not showLabelB and not na(m90SsmtBLbl)
+        if not (ssmtReadyMB and isPairChartMB)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(m90SsmtBLine)
+                line.delete(m90SsmtBLine)
+                m90SsmtBLine := na
+            if not na(m90SsmtBLbl)
                 label.delete(m90SsmtBLbl)
                 m90SsmtBLbl := na
-        // State-based finalize/cleanup:
-        // - If split resolves within the same quarter: delete active drawings.
-        // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
-        if not splitMB and not na(m90SsmtBEventKey)
-            bool rolled = not na(m90SsmtBActiveQTs) and not na(curQTs) and curQTs != m90SsmtBActiveQTs
-            if rolled
-                f_ssmt_hist_push(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeep)
-            else
-                if not na(m90SsmtBLine)
-                    line.delete(m90SsmtBLine)
-                if not na(m90SsmtBLbl)
-                    label.delete(m90SsmtBLbl)
-            m90SsmtBLine := na
-            m90SsmtBLbl := na
             m90SsmtBEventKey := na
-            m90SsmtBActiveQTs := na
             m90SsmtBExtendTier := 0
-    if not (ssmtReadyMB and isPairChartMB)
-        // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+        f_ssmt_hist_trim(m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeepEff)
+    else
         if not na(m90SsmtBLine)
             line.delete(m90SsmtBLine)
             m90SsmtBLine := na
         if not na(m90SsmtBLbl)
             label.delete(m90SsmtBLbl)
             m90SsmtBLbl := na
+        f_ssmt_hist_clear(m90SsmtBHistLines, m90SsmtBHistLbls)
+        if not na(m90SsmtBDbgTbl)
+            table.delete(m90SsmtBDbgTbl)
+            m90SsmtBDbgTbl := na
         m90SsmtBEventKey := na
         m90SsmtBExtendTier := 0
-    f_ssmt_hist_trim(m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeep)
-else
-    if not na(m90SsmtBLine)
-        line.delete(m90SsmtBLine)
-        m90SsmtBLine := na
-    if not na(m90SsmtBLbl)
-        label.delete(m90SsmtBLbl)
-        m90SsmtBLbl := na
-    f_ssmt_hist_clear(m90SsmtBHistLines, m90SsmtBHistLbls)
-    if not na(m90SsmtBDbgTbl)
-        table.delete(m90SsmtBDbgTbl)
-        m90SsmtBDbgTbl := na
-    m90SsmtBEventKey := na
-    m90SsmtBExtendTier := 0
 
+    // -----------------------------------------------------------------------------
+    // Bearish m90 HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] m90HssmtHistLines = array.new_line()
+    var label[] m90HssmtHistLbls = array.new_label()
+    var line m90HssmtLine = na
+    var int  m90HssmtEventKey = na
+    var label m90HssmtLbl = na
+    var int  m90HssmtExtendTier = 0
+    var int  m90HssmtActiveQTs = na
+
+    bool hssmt90mTfOk = vis90mTf
+    if show90mBearHSSMT and hssmt90mTfOk and not m90BearSplit
+        string chartTagMH = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESMH = chartTagMH == "ES"
+        bool isChartNQMH = chartTagMH == "NQ"
+        bool isPairChartMH = isChartESMH or isChartNQMH
+
+        bool hssmtReadyMH = not na(esBHcurM) and not na(esBHprevM) and not na(nqBHcurM) and not na(nqBHprevM)
+        if hssmtReadyMH and isPairChartMH
+            bool esSweepMH = esBHcurM > esBHprevM
+            bool nqSweepMH = nqBHcurM > nqBHprevM
+            bool splitMH = esSweepMH != nqSweepMH
+
+            bool crackedESMH = splitMH and (not esSweepMH)
+            bool crackedNQMH = splitMH and (not nqSweepMH)
+            string crackedMH = ""
+            if crackedESMH
+                crackedMH := "ES"
+            if crackedNQMH
+                crackedMH := crackedMH == "" ? "NQ" : crackedMH + ",NQ"
+
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESMH
+                curH := esBHcurM
+                curHTs := esBHcurTsM
+                prevH := esBHprevM
+                prevHTs := esBHprevTsM
+                curQTs := esQtsM
+                curSweep := esSweepMH
+            else if isChartNQMH
+                curH := nqBHcurM
+                curHTs := nqBHcurTsM
+                prevH := nqBHprevM
+                prevHTs := nqBHprevTsM
+                curQTs := nqQtsM
+                curSweep := nqSweepMH
+            int prevHTsSnap = isChartESMH ? esBHprevTsMSnap : isChartNQMH ? nqBHprevTsMSnap : prevHTs
+
+            bool hasPoints = splitMH and not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if splitMH
+                int eventKey = prevHTs
+                if na(m90HssmtEventKey) or m90HssmtEventKey != eventKey
+                    f_ssmt_hist_push(m90HssmtLine, m90HssmtLbl, m90HssmtHistLines, m90HssmtHistLbls, ssmtKeepEff)
+                    m90HssmtLine := na
+                    m90HssmtLbl := na
+                    m90HssmtEventKey := eventKey
+                    m90HssmtActiveQTs := curQTs
+                    m90HssmtExtendTier := 0
+
+                if hasPoints and curSweep
+                    int thirdLen = int(M90SsmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + M90SsmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    m90HssmtExtendTier := m90HssmtExtendTier < sweepTier ? sweepTier : m90HssmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        m90HssmtExtendTier := m90HssmtExtendTier < barTier ? barTier : m90HssmtExtendTier
+
+                    int x2 = q1End
+                    if m90HssmtExtendTier >= 3
+                        x2 := q3End
+                    else if m90HssmtExtendTier == 2
+                        x2 := q2End
+
+                    m90HssmtLine := f_set_or_make_hline_w(m90HssmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    m90HssmtLine := f_set_or_make_line(m90HssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                bool showLabel = (isChartESMH and crackedESMH) or (isChartNQMH and crackedNQMH)
+                if hasPoints and crackedMH != "" and showLabel
+                    string lblText = "(H) m90 " + crackedMH
+
+                    int xMid = prevHTs
+                    float yMid = prevH
+                    if not na(m90HssmtLine)
+                        int x1 = line.get_x1(m90HssmtLine)
+                        int x2 = line.get_x2(m90HssmtLine)
+                        xMid := x1 + int((x2 - x1) / 2)
+                        yMid := (line.get_y1(m90HssmtLine) + line.get_y2(m90HssmtLine)) / 2
+                    float yLbl = yMid + syminfo.mintick
+
+                    if na(m90HssmtLbl)
+                        m90HssmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(m90HssmtLbl, xMid, yLbl)
+                        label.set_text(m90HssmtLbl, lblText)
+                        label.set_textcolor(m90HssmtLbl, color.black)
+                else if not showLabel and not na(m90HssmtLbl)
+                    label.delete(m90HssmtLbl)
+                    m90HssmtLbl := na
+            if not splitMH and not na(m90HssmtEventKey)
+                bool rolled = not na(m90HssmtActiveQTs) and not na(curQTs) and curQTs != m90HssmtActiveQTs
+                if rolled
+                    f_ssmt_hist_push(m90HssmtLine, m90HssmtLbl, m90HssmtHistLines, m90HssmtHistLbls, ssmtKeepEff)
+                else
+                    if not na(m90HssmtLine)
+                        line.delete(m90HssmtLine)
+                    if not na(m90HssmtLbl)
+                        label.delete(m90HssmtLbl)
+                m90HssmtLine := na
+                m90HssmtLbl := na
+                m90HssmtEventKey := na
+                m90HssmtActiveQTs := na
+                m90HssmtExtendTier := 0
+        if not (hssmtReadyMH and isPairChartMH)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(m90HssmtLine)
+                line.delete(m90HssmtLine)
+                m90HssmtLine := na
+            if not na(m90HssmtLbl)
+                label.delete(m90HssmtLbl)
+                m90HssmtLbl := na
+            m90HssmtEventKey := na
+            m90HssmtExtendTier := 0
+        f_ssmt_hist_trim(m90HssmtHistLines, m90HssmtHistLbls, ssmtKeepEff)
+    else
+        if not na(m90HssmtLine)
+            line.delete(m90HssmtLine)
+            m90HssmtLine := na
+        if not na(m90HssmtLbl)
+            label.delete(m90HssmtLbl)
+            m90HssmtLbl := na
+        f_ssmt_hist_clear(m90HssmtHistLines, m90HssmtHistLbls)
+        m90HssmtEventKey := na
+        m90HssmtExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bullish m90 HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on 90m-aligned TFs (m5–m15 per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] m90HssmtBHistLines = array.new_line()
+    var label[] m90HssmtBHistLbls = array.new_label()
+    var line m90HssmtBLine = na
+    var int  m90HssmtBEventKey = na
+    var label m90HssmtBLbl = na
+    var int  m90HssmtBExtendTier = 0
+    var int  m90HssmtBActiveQTs = na
+
+    bool hssmt90mBullTfOk = vis90mTf
+    if show90mBullHSSMT and hssmt90mBullTfOk and not m90BullSplit
+        string chartTagMHB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESMHB = chartTagMHB == "ES"
+        bool isChartNQMHB = chartTagMHB == "NQ"
+        bool isPairChartMHB = isChartESMHB or isChartNQMHB
+
+        bool hssmtReadyMHB = not na(esBLcurM) and not na(esBLprevM) and not na(nqBLcurM) and not na(nqBLprevM)
+        if hssmtReadyMHB and isPairChartMHB
+            bool esSweepMHB = esBLcurM < esBLprevM
+            bool nqSweepMHB = nqBLcurM < nqBLprevM
+            bool splitMHB = esSweepMHB != nqSweepMHB
+
+            bool crackedESMHB = splitMHB and (not esSweepMHB)
+            bool crackedNQMHB = splitMHB and (not nqSweepMHB)
+            string crackedMHB = ""
+            if crackedESMHB
+                crackedMHB := "ES"
+            if crackedNQMHB
+                crackedMHB := crackedMHB == "" ? "NQ" : crackedMHB + ",NQ"
+
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESMHB
+                curL := esBLcurM
+                curLTs := esBLcurTsM
+                prevL := esBLprevM
+                prevLTs := esBLprevTsM
+                curQTs := esQtsM
+                curSweep := esSweepMHB
+            else if isChartNQMHB
+                curL := nqBLcurM
+                curLTs := nqBLcurTsM
+                prevL := nqBLprevM
+                prevLTs := nqBLprevTsM
+                curQTs := nqQtsM
+                curSweep := nqSweepMHB
+            int prevLTsSnap = isChartESMHB ? esBLprevTsMSnap : isChartNQMHB ? nqBLprevTsMSnap : prevLTs
+
+            bool hasPointsB = splitMHB and not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if splitMHB
+                int eventKeyB = prevLTs
+                if na(m90HssmtBEventKey) or m90HssmtBEventKey != eventKeyB
+                    f_ssmt_hist_push(m90HssmtBLine, m90HssmtBLbl, m90HssmtBHistLines, m90HssmtBHistLbls, ssmtKeepEff)
+                    m90HssmtBLine := na
+                    m90HssmtBLbl := na
+                    m90HssmtBEventKey := eventKeyB
+                    m90HssmtBActiveQTs := curQTs
+                    m90HssmtBExtendTier := 0
+
+                if hasPointsB and curSweep
+                    int thirdLenB = int(M90SsmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + M90SsmtQLen
+
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    m90HssmtBExtendTier := m90HssmtBExtendTier < sweepTierB ? sweepTierB : m90HssmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        m90HssmtBExtendTier := m90HssmtBExtendTier < barTierB ? barTierB : m90HssmtBExtendTier
+
+                    int x2B = q1EndB
+                    if m90HssmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if m90HssmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    m90HssmtBLine := f_set_or_make_hline_w(m90HssmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
+                    m90HssmtBLine := f_set_or_make_line(m90HssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                bool showLabelB = (isChartESMHB and crackedESMHB) or (isChartNQMHB and crackedNQMHB)
+                if hasPointsB and crackedMHB != "" and showLabelB
+                    string lblTextB = "(H) m90 " + crackedMHB
+
+                    int xMidB = prevLTs
+                    float yMidB = prevL
+                    if not na(m90HssmtBLine)
+                        int x1B = line.get_x1(m90HssmtBLine)
+                        int x2B = line.get_x2(m90HssmtBLine)
+                        xMidB := x1B + int((x2B - x1B) / 2)
+                        yMidB := (line.get_y1(m90HssmtBLine) + line.get_y2(m90HssmtBLine)) / 2
+                    float yLblB = yMidB - syminfo.mintick
+
+                    if na(m90HssmtBLbl)
+                        m90HssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(m90HssmtBLbl, xMidB, yLblB)
+                        label.set_text(m90HssmtBLbl, lblTextB)
+                        label.set_textcolor(m90HssmtBLbl, color.black)
+                else if not showLabelB and not na(m90HssmtBLbl)
+                    label.delete(m90HssmtBLbl)
+                    m90HssmtBLbl := na
+            if not splitMHB and not na(m90HssmtBEventKey)
+                bool rolledB = not na(m90HssmtBActiveQTs) and not na(curQTs) and curQTs != m90HssmtBActiveQTs
+                if rolledB
+                    f_ssmt_hist_push(m90HssmtBLine, m90HssmtBLbl, m90HssmtBHistLines, m90HssmtBHistLbls, ssmtKeepEff)
+                else
+                    if not na(m90HssmtBLine)
+                        line.delete(m90HssmtBLine)
+                    if not na(m90HssmtBLbl)
+                        label.delete(m90HssmtBLbl)
+                m90HssmtBLine := na
+                m90HssmtBLbl := na
+                m90HssmtBEventKey := na
+                m90HssmtBActiveQTs := na
+                m90HssmtBExtendTier := 0
+        if not (hssmtReadyMHB and isPairChartMHB)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(m90HssmtBLine)
+                line.delete(m90HssmtBLine)
+                m90HssmtBLine := na
+            if not na(m90HssmtBLbl)
+                label.delete(m90HssmtBLbl)
+                m90HssmtBLbl := na
+            m90HssmtBEventKey := na
+            m90HssmtBExtendTier := 0
+        f_ssmt_hist_trim(m90HssmtBHistLines, m90HssmtBHistLbls, ssmtKeepEff)
+    else
+        if not na(m90HssmtBLine)
+            line.delete(m90HssmtBLine)
+            m90HssmtBLine := na
+        if not na(m90HssmtBLbl)
+            label.delete(m90HssmtBLbl)
+            m90HssmtBLbl := na
+        f_ssmt_hist_clear(m90HssmtBHistLines, m90HssmtBHistLbls)
+        m90HssmtBEventKey := na
+        m90HssmtBExtendTier := 0
+
+
+    // -----------------------------------------------------------------------------
+    // Bearish Micro HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] microHssmtHistLines = array.new_line()
+    var label[] microHssmtHistLbls = array.new_label()
+    var line microHssmtLine = na
+    var int  microHssmtEventKey = na
+    var label microHssmtLbl = na
+    var int  microHssmtExtendTier = 0
+    var int  microHssmtActiveQTs = na
+    int MicroHssmtQLen = 22 * 60 * 1000 + 30 * 1000
+
+    bool hssmtMicroTfOk = visMicroTf
+    bool hssmtMicroAny = hssmtMicroTfOk and (showMicroBearHSSMT or showMicroBullHSSMT or showMicroBearSSMT or showMicroBullSSMT)
+    bool microBearSplit = false
+    bool microBullSplit = false
+
+    float esHcurU = na
+    int   esHcurTsU = na
+    float esHprevU = na
+    int   esHprevTsU = na
+    float esLcurU = na
+    int   esLcurTsU = na
+    float esLprevU = na
+    int   esLprevTsU = na
+    float esWHcurU = na
+    int   esWHcurTsU = na
+    float esWHprevU = na
+    int   esWHprevTsU = na
+    float esWLcurU = na
+    int   esWLcurTsU = na
+    float esWLprevU = na
+    int   esWLprevTsU = na
+    int   esQiU = na
+    int   esQtsU = na
+
+    float nqHcurU = na
+    int   nqHcurTsU = na
+    float nqHprevU = na
+    int   nqHprevTsU = na
+    float nqLcurU = na
+    int   nqLcurTsU = na
+    float nqLprevU = na
+    int   nqLprevTsU = na
+    float nqWHcurU = na
+    int   nqWHcurTsU = na
+    float nqWHprevU = na
+    int   nqWHprevTsU = na
+    float nqWLcurU = na
+    int   nqWLcurTsU = na
+    float nqWLprevU = na
+    int   nqWLprevTsU = na
+    int   nqQiU = na
+    int   nqQtsU = na
+
+    if hssmtMicroAny
+        string esSymU = f_ssmt_norm_sym(ssmtSymES)
+        string nqSymU = f_ssmt_norm_sym(ssmtSymNQ)
+
+        [tmpEsHcurU, tmpEsHcurTsU, tmpEsHprevU, tmpEsHprevTsU, tmpEsLcurU, tmpEsLcurTsU, tmpEsLprevU, tmpEsLprevTsU, tmpEsQiU, tmpEsQtsU, tmpEsWHcurU, tmpEsWHcurTsU, tmpEsWHprevU, tmpEsWHprevTsU, tmpEsWLcurU, tmpEsWLcurTsU, tmpEsWLprevU, tmpEsWLprevTsU] = request.security(esSymU, timeframe.period, f_hssmt_micro_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [tmpNqHcurU, tmpNqHcurTsU, tmpNqHprevU, tmpNqHprevTsU, tmpNqLcurU, tmpNqLcurTsU, tmpNqLprevU, tmpNqLprevTsU, tmpNqQiU, tmpNqQtsU, tmpNqWHcurU, tmpNqWHcurTsU, tmpNqWHprevU, tmpNqWHprevTsU, tmpNqWLcurU, tmpNqWLcurTsU, tmpNqWLprevU, tmpNqWLprevTsU] = request.security(nqSymU, timeframe.period, f_hssmt_micro_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+        esHcurU := tmpEsHcurU
+        esHcurTsU := tmpEsHcurTsU
+        esHprevU := tmpEsHprevU
+        esHprevTsU := tmpEsHprevTsU
+        esLcurU := tmpEsLcurU
+        esLcurTsU := tmpEsLcurTsU
+        esLprevU := tmpEsLprevU
+        esLprevTsU := tmpEsLprevTsU
+        esWHcurU := tmpEsWHcurU
+        esWHcurTsU := tmpEsWHcurTsU
+        esWHprevU := tmpEsWHprevU
+        esWHprevTsU := tmpEsWHprevTsU
+        esWLcurU := tmpEsWLcurU
+        esWLcurTsU := tmpEsWLcurTsU
+        esWLprevU := tmpEsWLprevU
+        esWLprevTsU := tmpEsWLprevTsU
+        esQiU := tmpEsQiU
+        esQtsU := tmpEsQtsU
+
+        nqHcurU := tmpNqHcurU
+        nqHcurTsU := tmpNqHcurTsU
+        nqHprevU := tmpNqHprevU
+        nqHprevTsU := tmpNqHprevTsU
+        nqLcurU := tmpNqLcurU
+        nqLcurTsU := tmpNqLcurTsU
+        nqLprevU := tmpNqLprevU
+        nqLprevTsU := tmpNqLprevTsU
+        nqWHcurU := tmpNqWHcurU
+        nqWHcurTsU := tmpNqWHcurTsU
+        nqWHprevU := tmpNqWHprevU
+        nqWHprevTsU := tmpNqWHprevTsU
+        nqWLcurU := tmpNqWLcurU
+        nqWLcurTsU := tmpNqWLcurTsU
+        nqWLprevU := tmpNqWLprevU
+        nqWLprevTsU := tmpNqWLprevTsU
+        nqQiU := tmpNqQiU
+        nqQtsU := tmpNqQtsU
+
+    int esHprevTsUSnap = f_snap_to_chart_bar(esHprevTsU)
+    int nqHprevTsUSnap = f_snap_to_chart_bar(nqHprevTsU)
+    int esLprevTsUSnap = f_snap_to_chart_bar(esLprevTsU)
+    int nqLprevTsUSnap = f_snap_to_chart_bar(nqLprevTsU)
+    int esWHprevTsUSnap = f_snap_to_chart_bar(esWHprevTsU)
+    int nqWHprevTsUSnap = f_snap_to_chart_bar(nqWHprevTsU)
+    int esWLprevTsUSnap = f_snap_to_chart_bar(esWLprevTsU)
+    int nqWLprevTsUSnap = f_snap_to_chart_bar(nqWLprevTsU)
+
+    // -----------------------------------------------------------------------------
+    // Bearish Micro SSMT (ES/NQ) — test-only
+    // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] microSsmtHistLines = array.new_line()
+    var label[] microSsmtHistLbls = array.new_label()
+    var line microSsmtLine = na
+    var int  microSsmtEventKey = na
+    var label microSsmtLbl = na
+    var int  microSsmtExtendTier = 0
+    var int  microSsmtActiveQTs = na
+    int MicroSsmtQLen = 22 * 60 * 1000 + 30 * 1000
+
+    bool ssmtMicroTfOk = visMicroTf
+    if showMicroBearSSMT and ssmtMicroTfOk
+        string chartTagU = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESU = chartTagU == "ES"
+        bool isChartNQU = chartTagU == "NQ"
+        bool isPairChartU = isChartESU or isChartNQU
+
+        bool ssmtReadyU = not na(esWHcurU) and not na(esWHprevU) and not na(nqWHcurU) and not na(nqWHprevU)
+        if ssmtReadyU and isPairChartU
+            bool esSweepU = esWHcurU > esWHprevU
+            bool nqSweepU = nqWHcurU > nqWHprevU
+            bool splitU = esSweepU != nqSweepU
+            microBearSplit := splitU and isPairChartU
+
+            bool crackedESU = splitU and (not esSweepU)
+            bool crackedNQU = splitU and (not nqSweepU)
+            string crackedU = ""
+            if crackedESU
+                crackedU := "ES"
+            if crackedNQU
+                crackedU := crackedU == "" ? "NQ" : crackedU + ",NQ"
+
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESU
+                curH := esWHcurU
+                curHTs := esWHcurTsU
+                prevH := esWHprevU
+                prevHTs := esWHprevTsU
+                curQTs := esQtsU
+                curSweep := esSweepU
+            else if isChartNQU
+                curH := nqWHcurU
+                curHTs := nqWHcurTsU
+                prevH := nqWHprevU
+                prevHTs := nqWHprevTsU
+                curQTs := nqQtsU
+                curSweep := nqSweepU
+            int prevHTsSnap = isChartESU ? esWHprevTsUSnap : isChartNQU ? nqWHprevTsUSnap : prevHTs
+
+            bool hasPoints = splitU and not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if splitU
+                int eventKey = prevHTs
+                if na(microSsmtEventKey) or microSsmtEventKey != eventKey
+                    f_ssmt_hist_push(microSsmtLine, microSsmtLbl, microSsmtHistLines, microSsmtHistLbls, ssmtKeepEff)
+                    microSsmtLine := na
+                    microSsmtLbl := na
+                    microSsmtEventKey := eventKey
+                    microSsmtActiveQTs := curQTs
+                    microSsmtExtendTier := 0
+
+                if hasPoints and curSweep
+                    int thirdLen = int(MicroSsmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + MicroSsmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    microSsmtExtendTier := microSsmtExtendTier < sweepTier ? sweepTier : microSsmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        microSsmtExtendTier := microSsmtExtendTier < barTier ? barTier : microSsmtExtendTier
+
+                    int x2 = q1End
+                    if microSsmtExtendTier >= 3
+                        x2 := q3End
+                    else if microSsmtExtendTier == 2
+                        x2 := q2End
+
+                    microSsmtLine := f_set_or_make_hline_w(microSsmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    microSsmtLine := f_set_or_make_line(microSsmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                bool showLabel = (isChartESU and crackedESU) or (isChartNQU and crackedNQU)
+                if hasPoints and crackedU != "" and showLabel
+                    string lblText = "Micro " + crackedU
+
+                    int xMid = prevHTs
+                    float yMid = prevH
+                    if not na(microSsmtLine)
+                        int x1 = line.get_x1(microSsmtLine)
+                        int x2 = line.get_x2(microSsmtLine)
+                        xMid := x1 + int((x2 - x1) / 2)
+                        yMid := (line.get_y1(microSsmtLine) + line.get_y2(microSsmtLine)) / 2
+                    float yLbl = yMid + syminfo.mintick
+
+                    if na(microSsmtLbl)
+                        microSsmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(microSsmtLbl, xMid, yLbl)
+                        label.set_text(microSsmtLbl, lblText)
+                        label.set_textcolor(microSsmtLbl, color.black)
+                else if not showLabel and not na(microSsmtLbl)
+                    label.delete(microSsmtLbl)
+                    microSsmtLbl := na
+            // State-based finalize/cleanup:
+            // - If split resolves within the same quarter: delete active drawings.
+            // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
+            if not splitU and not na(microSsmtEventKey)
+                bool rolled = not na(microSsmtActiveQTs) and not na(curQTs) and curQTs != microSsmtActiveQTs
+                if rolled
+                    f_ssmt_hist_push(microSsmtLine, microSsmtLbl, microSsmtHistLines, microSsmtHistLbls, ssmtKeepEff)
+                else
+                    if not na(microSsmtLine)
+                        line.delete(microSsmtLine)
+                    if not na(microSsmtLbl)
+                        label.delete(microSsmtLbl)
+                microSsmtLine := na
+                microSsmtLbl := na
+                microSsmtEventKey := na
+                microSsmtActiveQTs := na
+                microSsmtExtendTier := 0
+        if not (ssmtReadyU and isPairChartU)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(microSsmtLine)
+                line.delete(microSsmtLine)
+                microSsmtLine := na
+            if not na(microSsmtLbl)
+                label.delete(microSsmtLbl)
+                microSsmtLbl := na
+            microSsmtEventKey := na
+            microSsmtExtendTier := 0
+        f_ssmt_hist_trim(microSsmtHistLines, microSsmtHistLbls, ssmtKeepEff)
+    else
+        if not na(microSsmtLine)
+            line.delete(microSsmtLine)
+            microSsmtLine := na
+        if not na(microSsmtLbl)
+            label.delete(microSsmtLbl)
+            microSsmtLbl := na
+        f_ssmt_hist_clear(microSsmtHistLines, microSsmtHistLbls)
+        microSsmtEventKey := na
+        microSsmtExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bullish Micro SSMT (ES/NQ) — test-only
+    // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] microSsmtBHistLines = array.new_line()
+    var label[] microSsmtBHistLbls = array.new_label()
+    var line microSsmtBLine = na
+    var int  microSsmtBEventKey = na
+    var label microSsmtBLbl = na
+    var int  microSsmtBExtendTier = 0
+    var int  microSsmtBActiveQTs = na
+
+    bool ssmtMicroBullTfOk = visMicroTf
+    if showMicroBullSSMT and ssmtMicroBullTfOk
+        string chartTagUB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESUB = chartTagUB == "ES"
+        bool isChartNQUB = chartTagUB == "NQ"
+        bool isPairChartUB = isChartESUB or isChartNQUB
+
+        bool ssmtReadyUB = not na(esWLcurU) and not na(esWLprevU) and not na(nqWLcurU) and not na(nqWLprevU)
+        if ssmtReadyUB and isPairChartUB
+            bool esSweepUB = esWLcurU < esWLprevU
+            bool nqSweepUB = nqWLcurU < nqWLprevU
+            bool splitUB = esSweepUB != nqSweepUB
+            microBullSplit := splitUB and isPairChartUB
+
+            bool crackedESUB = splitUB and (not esSweepUB)
+            bool crackedNQUB = splitUB and (not nqSweepUB)
+            string crackedUB = ""
+            if crackedESUB
+                crackedUB := "ES"
+            if crackedNQUB
+                crackedUB := crackedUB == "" ? "NQ" : crackedUB + ",NQ"
+
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESUB
+                curL := esWLcurU
+                curLTs := esWLcurTsU
+                prevL := esWLprevU
+                prevLTs := esWLprevTsU
+                curQTs := esQtsU
+                curSweep := esSweepUB
+            else if isChartNQUB
+                curL := nqWLcurU
+                curLTs := nqWLcurTsU
+                prevL := nqWLprevU
+                prevLTs := nqWLprevTsU
+                curQTs := nqQtsU
+                curSweep := nqSweepUB
+            int prevLTsSnap = isChartESUB ? esWLprevTsUSnap : isChartNQUB ? nqWLprevTsUSnap : prevLTs
+
+            bool hasPointsB = splitUB and not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if splitUB
+                int eventKeyB = prevLTs
+                if na(microSsmtBEventKey) or microSsmtBEventKey != eventKeyB
+                    f_ssmt_hist_push(microSsmtBLine, microSsmtBLbl, microSsmtBHistLines, microSsmtBHistLbls, ssmtKeepEff)
+                    microSsmtBLine := na
+                    microSsmtBLbl := na
+                    microSsmtBEventKey := eventKeyB
+                    microSsmtBActiveQTs := curQTs
+                    microSsmtBExtendTier := 0
+
+                if hasPointsB and curSweep
+                    int thirdLenB = int(MicroSsmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + MicroSsmtQLen
+
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    microSsmtBExtendTier := microSsmtBExtendTier < sweepTierB ? sweepTierB : microSsmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        microSsmtBExtendTier := microSsmtBExtendTier < barTierB ? barTierB : microSsmtBExtendTier
+
+                    int x2B = q1EndB
+                    if microSsmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if microSsmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    microSsmtBLine := f_set_or_make_hline_w(microSsmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
+                    microSsmtBLine := f_set_or_make_line(microSsmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                bool showLabelB = (isChartESUB and crackedESUB) or (isChartNQUB and crackedNQUB)
+                if hasPointsB and crackedUB != "" and showLabelB
+                    string lblTextB = "Micro " + crackedUB
+
+                    int xMidB = prevLTs
+                    float yMidB = prevL
+                    if not na(microSsmtBLine)
+                        int x1B = line.get_x1(microSsmtBLine)
+                        int x2B = line.get_x2(microSsmtBLine)
+                        xMidB := x1B + int((x2B - x1B) / 2)
+                        yMidB := (line.get_y1(microSsmtBLine) + line.get_y2(microSsmtBLine)) / 2
+                    float yLblB = yMidB - syminfo.mintick
+
+                    if na(microSsmtBLbl)
+                        microSsmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(microSsmtBLbl, xMidB, yLblB)
+                        label.set_text(microSsmtBLbl, lblTextB)
+                        label.set_textcolor(microSsmtBLbl, color.black)
+                else if not showLabelB and not na(microSsmtBLbl)
+                    label.delete(microSsmtBLbl)
+                    microSsmtBLbl := na
+            // State-based finalize/cleanup:
+            // - If split resolves within the same quarter: delete active drawings.
+            // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
+            if not splitUB and not na(microSsmtBEventKey)
+                bool rolledB = not na(microSsmtBActiveQTs) and not na(curQTs) and curQTs != microSsmtBActiveQTs
+                if rolledB
+                    f_ssmt_hist_push(microSsmtBLine, microSsmtBLbl, microSsmtBHistLines, microSsmtBHistLbls, ssmtKeepEff)
+                else
+                    if not na(microSsmtBLine)
+                        line.delete(microSsmtBLine)
+                    if not na(microSsmtBLbl)
+                        label.delete(microSsmtBLbl)
+                microSsmtBLine := na
+                microSsmtBLbl := na
+                microSsmtBEventKey := na
+                microSsmtBActiveQTs := na
+                microSsmtBExtendTier := 0
+        if not (ssmtReadyUB and isPairChartUB)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(microSsmtBLine)
+                line.delete(microSsmtBLine)
+                microSsmtBLine := na
+            if not na(microSsmtBLbl)
+                label.delete(microSsmtBLbl)
+                microSsmtBLbl := na
+            microSsmtBEventKey := na
+            microSsmtBExtendTier := 0
+        f_ssmt_hist_trim(microSsmtBHistLines, microSsmtBHistLbls, ssmtKeepEff)
+    else
+        if not na(microSsmtBLine)
+            line.delete(microSsmtBLine)
+            microSsmtBLine := na
+        if not na(microSsmtBLbl)
+            label.delete(microSsmtBLbl)
+            microSsmtBLbl := na
+        f_ssmt_hist_clear(microSsmtBHistLines, microSsmtBHistLbls)
+        microSsmtBEventKey := na
+        microSsmtBExtendTier := 0
+
+    if showMicroBearHSSMT and hssmtMicroTfOk and not microBearSplit
+        string chartTagU = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESU = chartTagU == "ES"
+        bool isChartNQU = chartTagU == "NQ"
+        bool isPairChartU = isChartESU or isChartNQU
+
+        bool hssmtReadyU = not na(esHcurU) and not na(esHprevU) and not na(nqHcurU) and not na(nqHprevU)
+        if hssmtReadyU and isPairChartU
+            bool esSweepU = esHcurU > esHprevU
+            bool nqSweepU = nqHcurU > nqHprevU
+            bool splitU = esSweepU != nqSweepU
+
+            bool crackedESU = splitU and (not esSweepU)
+            bool crackedNQU = splitU and (not nqSweepU)
+            string crackedU = ""
+            if crackedESU
+                crackedU := "ES"
+            if crackedNQU
+                crackedU := crackedU == "" ? "NQ" : crackedU + ",NQ"
+
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESU
+                curH := esHcurU
+                curHTs := esHcurTsU
+                prevH := esHprevU
+                prevHTs := esHprevTsU
+                curQTs := esQtsU
+                curSweep := esSweepU
+            else if isChartNQU
+                curH := nqHcurU
+                curHTs := nqHcurTsU
+                prevH := nqHprevU
+                prevHTs := nqHprevTsU
+                curQTs := nqQtsU
+                curSweep := nqSweepU
+            int prevHTsSnap = isChartESU ? esHprevTsUSnap : isChartNQU ? nqHprevTsUSnap : prevHTs
+
+            bool hasPoints = splitU and not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if splitU
+                int eventKey = prevHTs
+                if na(microHssmtEventKey) or microHssmtEventKey != eventKey
+                    f_ssmt_hist_push(microHssmtLine, microHssmtLbl, microHssmtHistLines, microHssmtHistLbls, ssmtKeepEff)
+                    microHssmtLine := na
+                    microHssmtLbl := na
+                    microHssmtEventKey := eventKey
+                    microHssmtActiveQTs := curQTs
+                    microHssmtExtendTier := 0
+
+                if hasPoints and curSweep
+                    int thirdLen = int(MicroHssmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + MicroHssmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    microHssmtExtendTier := microHssmtExtendTier < sweepTier ? sweepTier : microHssmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        microHssmtExtendTier := microHssmtExtendTier < barTier ? barTier : microHssmtExtendTier
+
+                    int x2 = q1End
+                    if microHssmtExtendTier >= 3
+                        x2 := q3End
+                    else if microHssmtExtendTier == 2
+                        x2 := q2End
+
+                    microHssmtLine := f_set_or_make_hline_w(microHssmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    microHssmtLine := f_set_or_make_line(microHssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                bool showLabel = (isChartESU and crackedESU) or (isChartNQU and crackedNQU)
+                if hasPoints and crackedU != "" and showLabel
+                    string lblText = "(H) Micro " + crackedU
+
+                    int xMid = prevHTs
+                    float yMid = prevH
+                    if not na(microHssmtLine)
+                        int x1 = line.get_x1(microHssmtLine)
+                        int x2 = line.get_x2(microHssmtLine)
+                        xMid := x1 + int((x2 - x1) / 2)
+                        yMid := (line.get_y1(microHssmtLine) + line.get_y2(microHssmtLine)) / 2
+                    float yLbl = yMid + syminfo.mintick
+
+                    if na(microHssmtLbl)
+                        microHssmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(microHssmtLbl, xMid, yLbl)
+                        label.set_text(microHssmtLbl, lblText)
+                        label.set_textcolor(microHssmtLbl, color.black)
+                else if not showLabel and not na(microHssmtLbl)
+                    label.delete(microHssmtLbl)
+                    microHssmtLbl := na
+            if not splitU and not na(microHssmtEventKey)
+                bool rolled = not na(microHssmtActiveQTs) and not na(curQTs) and curQTs != microHssmtActiveQTs
+                if rolled
+                    f_ssmt_hist_push(microHssmtLine, microHssmtLbl, microHssmtHistLines, microHssmtHistLbls, ssmtKeepEff)
+                else
+                    if not na(microHssmtLine)
+                        line.delete(microHssmtLine)
+                    if not na(microHssmtLbl)
+                        label.delete(microHssmtLbl)
+                microHssmtLine := na
+                microHssmtLbl := na
+                microHssmtEventKey := na
+                microHssmtActiveQTs := na
+                microHssmtExtendTier := 0
+        if not (hssmtReadyU and isPairChartU)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(microHssmtLine)
+                line.delete(microHssmtLine)
+                microHssmtLine := na
+            if not na(microHssmtLbl)
+                label.delete(microHssmtLbl)
+                microHssmtLbl := na
+            microHssmtEventKey := na
+            microHssmtExtendTier := 0
+        f_ssmt_hist_trim(microHssmtHistLines, microHssmtHistLbls, ssmtKeepEff)
+    else
+        if not na(microHssmtLine)
+            line.delete(microHssmtLine)
+            microHssmtLine := na
+        if not na(microHssmtLbl)
+            label.delete(microHssmtLbl)
+            microHssmtLbl := na
+        f_ssmt_hist_clear(microHssmtHistLines, microHssmtHistLbls)
+        microHssmtEventKey := na
+        microHssmtExtendTier := 0
+
+
+    // -----------------------------------------------------------------------------
+    // Bullish Micro HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on Micro-aligned TFs (30s–4m per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] microHssmtBHistLines = array.new_line()
+    var label[] microHssmtBHistLbls = array.new_label()
+    var line microHssmtBLine = na
+    var int  microHssmtBEventKey = na
+    var label microHssmtBLbl = na
+    var int  microHssmtBExtendTier = 0
+    var int  microHssmtBActiveQTs = na
+
+    bool hssmtMicroBullTfOk = visMicroTf
+    if showMicroBullHSSMT and hssmtMicroBullTfOk and not microBullSplit
+        string chartTagUB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESUB = chartTagUB == "ES"
+        bool isChartNQUB = chartTagUB == "NQ"
+        bool isPairChartUB = isChartESUB or isChartNQUB
+
+        bool hssmtReadyUB = not na(esLcurU) and not na(esLprevU) and not na(nqLcurU) and not na(nqLprevU)
+        if hssmtReadyUB and isPairChartUB
+            bool esSweepUB = esLcurU < esLprevU
+            bool nqSweepUB = nqLcurU < nqLprevU
+            bool splitUB = esSweepUB != nqSweepUB
+
+            bool crackedESUB = splitUB and (not esSweepUB)
+            bool crackedNQUB = splitUB and (not nqSweepUB)
+            string crackedUB = ""
+            if crackedESUB
+                crackedUB := "ES"
+            if crackedNQUB
+                crackedUB := crackedUB == "" ? "NQ" : crackedUB + ",NQ"
+
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESUB
+                curL := esLcurU
+                curLTs := esLcurTsU
+                prevL := esLprevU
+                prevLTs := esLprevTsU
+                curQTs := esQtsU
+                curSweep := esSweepUB
+            else if isChartNQUB
+                curL := nqLcurU
+                curLTs := nqLcurTsU
+                prevL := nqLprevU
+                prevLTs := nqLprevTsU
+                curQTs := nqQtsU
+                curSweep := nqSweepUB
+            int prevLTsSnap = isChartESUB ? esLprevTsUSnap : isChartNQUB ? nqLprevTsUSnap : prevLTs
+
+            bool hasPointsB = splitUB and not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if splitUB
+                int eventKeyB = prevLTs
+                if na(microHssmtBEventKey) or microHssmtBEventKey != eventKeyB
+                    f_ssmt_hist_push(microHssmtBLine, microHssmtBLbl, microHssmtBHistLines, microHssmtBHistLbls, ssmtKeepEff)
+                    microHssmtBLine := na
+                    microHssmtBLbl := na
+                    microHssmtBEventKey := eventKeyB
+                    microHssmtBActiveQTs := curQTs
+                    microHssmtBExtendTier := 0
+
+                if hasPointsB and curSweep
+                    int thirdLenB = int(MicroHssmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + MicroHssmtQLen
+
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    microHssmtBExtendTier := microHssmtBExtendTier < sweepTierB ? sweepTierB : microHssmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        microHssmtBExtendTier := microHssmtBExtendTier < barTierB ? barTierB : microHssmtBExtendTier
+
+                    int x2B = q1EndB
+                    if microHssmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if microHssmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    microHssmtBLine := f_set_or_make_hline_w(microHssmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
+                    microHssmtBLine := f_set_or_make_line(microHssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                bool showLabelB = (isChartESUB and crackedESUB) or (isChartNQUB and crackedNQUB)
+                if hasPointsB and crackedUB != "" and showLabelB
+                    string lblTextB = "(H) Micro " + crackedUB
+
+                    int xMidB = prevLTs
+                    float yMidB = prevL
+                    if not na(microHssmtBLine)
+                        int x1B = line.get_x1(microHssmtBLine)
+                        int x2B = line.get_x2(microHssmtBLine)
+                        xMidB := x1B + int((x2B - x1B) / 2)
+                        yMidB := (line.get_y1(microHssmtBLine) + line.get_y2(microHssmtBLine)) / 2
+                    float yLblB = yMidB - syminfo.mintick
+
+                    if na(microHssmtBLbl)
+                        microHssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(microHssmtBLbl, xMidB, yLblB)
+                        label.set_text(microHssmtBLbl, lblTextB)
+                        label.set_textcolor(microHssmtBLbl, color.black)
+                else if not showLabelB and not na(microHssmtBLbl)
+                    label.delete(microHssmtBLbl)
+                    microHssmtBLbl := na
+            if not splitUB and not na(microHssmtBEventKey)
+                bool rolledB = not na(microHssmtBActiveQTs) and not na(curQTs) and curQTs != microHssmtBActiveQTs
+                if rolledB
+                    f_ssmt_hist_push(microHssmtBLine, microHssmtBLbl, microHssmtBHistLines, microHssmtBHistLbls, ssmtKeepEff)
+                else
+                    if not na(microHssmtBLine)
+                        line.delete(microHssmtBLine)
+                    if not na(microHssmtBLbl)
+                        label.delete(microHssmtBLbl)
+                microHssmtBLine := na
+                microHssmtBLbl := na
+                microHssmtBEventKey := na
+                microHssmtBActiveQTs := na
+                microHssmtBExtendTier := 0
+        if not (hssmtReadyUB and isPairChartUB)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(microHssmtBLine)
+                line.delete(microHssmtBLine)
+                microHssmtBLine := na
+            if not na(microHssmtBLbl)
+                label.delete(microHssmtBLbl)
+                microHssmtBLbl := na
+            microHssmtBEventKey := na
+            microHssmtBExtendTier := 0
+        f_ssmt_hist_trim(microHssmtBHistLines, microHssmtBHistLbls, ssmtKeepEff)
+    else
+        if not na(microHssmtBLine)
+            line.delete(microHssmtBLine)
+            microHssmtBLine := na
+        if not na(microHssmtBLbl)
+            label.delete(microHssmtBLbl)
+            microHssmtBLbl := na
+        f_ssmt_hist_clear(microHssmtBHistLines, microHssmtBHistLbls)
+        microHssmtBEventKey := na
+        microHssmtBExtendTier := 0
+
+
+    // -----------------------------------------------------------------------------
+    // Nano SSMT + HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    int NanoSsmtQLen = 5 * 60 * 1000 + 37500
+
+    bool ssmtNanoTfOk = visNanoTf
+    bool ssmtNanoAny = ssmtNanoTfOk and (showNanoBearSSMT or showNanoBullSSMT or showNanoBearHSSMT or showNanoBullHSSMT)
+    bool nanoBearSplit = false
+    bool nanoBullSplit = false
+
+    float esBHcurN = na
+    int   esBHcurTsN = na
+    float esBHprevN = na
+    int   esBHprevTsN = na
+    float esBLcurN = na
+    int   esBLcurTsN = na
+    float esBLprevN = na
+    int   esBLprevTsN = na
+    float esHcurN = na
+    int   esHcurTsN = na
+    float esHprevN = na
+    int   esHprevTsN = na
+    float esLcurN = na
+    int   esLcurTsN = na
+    float esLprevN = na
+    int   esLprevTsN = na
+    int   esQiN = na
+    int   esQtsN = na
+
+    float nqBHcurN = na
+    int   nqBHcurTsN = na
+    float nqBHprevN = na
+    int   nqBHprevTsN = na
+    float nqBLcurN = na
+    int   nqBLcurTsN = na
+    float nqBLprevN = na
+    int   nqBLprevTsN = na
+    float nqHcurN = na
+    int   nqHcurTsN = na
+    float nqHprevN = na
+    int   nqHprevTsN = na
+    float nqLcurN = na
+    int   nqLcurTsN = na
+    float nqLprevN = na
+    int   nqLprevTsN = na
+    int   nqQiN = na
+    int   nqQtsN = na
+
+    if ssmtNanoAny
+        string esSymN = f_ssmt_norm_sym(ssmtSymES)
+        string nqSymN = f_ssmt_norm_sym(ssmtSymNQ)
+
+        [tmpEsBHcurN, tmpEsBHcurTsN, tmpEsBHprevN, tmpEsBHprevTsN, tmpEsBLcurN, tmpEsBLcurTsN, tmpEsBLprevN, tmpEsBLprevTsN, tmpEsQiN, tmpEsQtsN, tmpEsHcurN, tmpEsHcurTsN, tmpEsHprevN, tmpEsHprevTsN, tmpEsLcurN, tmpEsLcurTsN, tmpEsLprevN, tmpEsLprevTsN] = request.security(esSymN, timeframe.period, f_hssmt_nano_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [tmpNqBHcurN, tmpNqBHcurTsN, tmpNqBHprevN, tmpNqBHprevTsN, tmpNqBLcurN, tmpNqBLcurTsN, tmpNqBLprevN, tmpNqBLprevTsN, tmpNqQiN, tmpNqQtsN, tmpNqHcurN, tmpNqHcurTsN, tmpNqHprevN, tmpNqHprevTsN, tmpNqLcurN, tmpNqLcurTsN, tmpNqLprevN, tmpNqLprevTsN] = request.security(nqSymN, timeframe.period, f_hssmt_nano_extremes(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+        esBHcurN := tmpEsBHcurN
+        esBHcurTsN := tmpEsBHcurTsN
+        esBHprevN := tmpEsBHprevN
+        esBHprevTsN := tmpEsBHprevTsN
+        esBLcurN := tmpEsBLcurN
+        esBLcurTsN := tmpEsBLcurTsN
+        esBLprevN := tmpEsBLprevN
+        esBLprevTsN := tmpEsBLprevTsN
+        esHcurN := tmpEsHcurN
+        esHcurTsN := tmpEsHcurTsN
+        esHprevN := tmpEsHprevN
+        esHprevTsN := tmpEsHprevTsN
+        esLcurN := tmpEsLcurN
+        esLcurTsN := tmpEsLcurTsN
+        esLprevN := tmpEsLprevN
+        esLprevTsN := tmpEsLprevTsN
+        esQiN := tmpEsQiN
+        esQtsN := tmpEsQtsN
+
+        nqBHcurN := tmpNqBHcurN
+        nqBHcurTsN := tmpNqBHcurTsN
+        nqBHprevN := tmpNqBHprevN
+        nqBHprevTsN := tmpNqBHprevTsN
+        nqBLcurN := tmpNqBLcurN
+        nqBLcurTsN := tmpNqBLcurTsN
+        nqBLprevN := tmpNqBLprevN
+        nqBLprevTsN := tmpNqBLprevTsN
+        nqHcurN := tmpNqHcurN
+        nqHcurTsN := tmpNqHcurTsN
+        nqHprevN := tmpNqHprevN
+        nqHprevTsN := tmpNqHprevTsN
+        nqLcurN := tmpNqLcurN
+        nqLcurTsN := tmpNqLcurTsN
+        nqLprevN := tmpNqLprevN
+        nqLprevTsN := tmpNqLprevTsN
+        nqQiN := tmpNqQiN
+        nqQtsN := tmpNqQtsN
+
+    int esBHprevTsNSnap = f_snap_to_chart_bar(esBHprevTsN)
+    int nqBHprevTsNSnap = f_snap_to_chart_bar(nqBHprevTsN)
+    int esBLprevTsNSnap = f_snap_to_chart_bar(esBLprevTsN)
+    int nqBLprevTsNSnap = f_snap_to_chart_bar(nqBLprevTsN)
+    int esHprevTsNSnap = f_snap_to_chart_bar(esHprevTsN)
+    int nqHprevTsNSnap = f_snap_to_chart_bar(nqHprevTsN)
+    int esLprevTsNSnap = f_snap_to_chart_bar(esLprevTsN)
+    int nqLprevTsNSnap = f_snap_to_chart_bar(nqLprevTsN)
+
+    // -----------------------------------------------------------------------------
+    // Bearish Nano SSMT (ES/NQ) — test-only
+    // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] nanoSsmtHistLines = array.new_line()
+    var label[] nanoSsmtHistLbls = array.new_label()
+    var line nanoSsmtLine = na
+    var int  nanoSsmtEventKey = na
+    var label nanoSsmtLbl = na
+    var int  nanoSsmtExtendTier = 0
+    var int  nanoSsmtActiveQTs = na
+
+    if showNanoBearSSMT and ssmtNanoTfOk
+        string chartTagN = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESN = chartTagN == "ES"
+        bool isChartNQN = chartTagN == "NQ"
+        bool isPairChartN = isChartESN or isChartNQN
+
+        bool ssmtReadyN = not na(esHcurN) and not na(esHprevN) and not na(nqHcurN) and not na(nqHprevN)
+        if ssmtReadyN and isPairChartN
+            bool esSweepN = esHcurN > esHprevN
+            bool nqSweepN = nqHcurN > nqHprevN
+            bool splitN = esSweepN != nqSweepN
+            nanoBearSplit := splitN and isPairChartN
+
+            bool crackedESN = splitN and (not esSweepN)
+            bool crackedNQN = splitN and (not nqSweepN)
+            string crackedN = ""
+            if crackedESN
+                crackedN := "ES"
+            if crackedNQN
+                crackedN := crackedN == "" ? "NQ" : crackedN + ",NQ"
+
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESN
+                curH := esHcurN
+                curHTs := esHcurTsN
+                prevH := esHprevN
+                prevHTs := esHprevTsN
+                curQTs := esQtsN
+                curSweep := esSweepN
+            else if isChartNQN
+                curH := nqHcurN
+                curHTs := nqHcurTsN
+                prevH := nqHprevN
+                prevHTs := nqHprevTsN
+                curQTs := nqQtsN
+                curSweep := nqSweepN
+            int prevHTsSnap = isChartESN ? esHprevTsNSnap : isChartNQN ? nqHprevTsNSnap : prevHTs
+
+            bool hasPoints = splitN and not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if splitN
+                int eventKey = prevHTs
+                if na(nanoSsmtEventKey) or nanoSsmtEventKey != eventKey
+                    f_ssmt_hist_push(nanoSsmtLine, nanoSsmtLbl, nanoSsmtHistLines, nanoSsmtHistLbls, ssmtKeepEff)
+                    nanoSsmtLine := na
+                    nanoSsmtLbl := na
+                    nanoSsmtEventKey := eventKey
+                    nanoSsmtActiveQTs := curQTs
+                    nanoSsmtExtendTier := 0
+
+                if hasPoints and curSweep
+                    int thirdLen = int(NanoSsmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + NanoSsmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    nanoSsmtExtendTier := nanoSsmtExtendTier < sweepTier ? sweepTier : nanoSsmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        nanoSsmtExtendTier := nanoSsmtExtendTier < barTier ? barTier : nanoSsmtExtendTier
+
+                    int x2 = q1End
+                    if nanoSsmtExtendTier >= 3
+                        x2 := q3End
+                    else if nanoSsmtExtendTier == 2
+                        x2 := q2End
+
+                    nanoSsmtLine := f_set_or_make_hline_w(nanoSsmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    nanoSsmtLine := f_set_or_make_line(nanoSsmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                bool showLabel = (isChartESN and crackedESN) or (isChartNQN and crackedNQN)
+                if hasPoints and crackedN != "" and showLabel
+                    string lblText = "Nano " + crackedN
+
+                    int xMid = prevHTs
+                    float yMid = prevH
+                    if not na(nanoSsmtLine)
+                        int x1 = line.get_x1(nanoSsmtLine)
+                        int x2 = line.get_x2(nanoSsmtLine)
+                        xMid := x1 + int((x2 - x1) / 2)
+                        yMid := (line.get_y1(nanoSsmtLine) + line.get_y2(nanoSsmtLine)) / 2
+                    float yLbl = yMid + syminfo.mintick
+
+                    if na(nanoSsmtLbl)
+                        nanoSsmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(nanoSsmtLbl, xMid, yLbl)
+                        label.set_text(nanoSsmtLbl, lblText)
+                        label.set_textcolor(nanoSsmtLbl, color.black)
+                else if not showLabel and not na(nanoSsmtLbl)
+                    label.delete(nanoSsmtLbl)
+                    nanoSsmtLbl := na
+            // State-based finalize/cleanup:
+            // - If split resolves within the same quarter: delete active drawings.
+            // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
+            if not splitN and not na(nanoSsmtEventKey)
+                bool rolled = not na(nanoSsmtActiveQTs) and not na(curQTs) and curQTs != nanoSsmtActiveQTs
+                if rolled
+                    f_ssmt_hist_push(nanoSsmtLine, nanoSsmtLbl, nanoSsmtHistLines, nanoSsmtHistLbls, ssmtKeepEff)
+                else
+                    if not na(nanoSsmtLine)
+                        line.delete(nanoSsmtLine)
+                    if not na(nanoSsmtLbl)
+                        label.delete(nanoSsmtLbl)
+                nanoSsmtLine := na
+                nanoSsmtLbl := na
+                nanoSsmtEventKey := na
+                nanoSsmtActiveQTs := na
+                nanoSsmtExtendTier := 0
+        if not (ssmtReadyN and isPairChartN)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(nanoSsmtLine)
+                line.delete(nanoSsmtLine)
+                nanoSsmtLine := na
+            if not na(nanoSsmtLbl)
+                label.delete(nanoSsmtLbl)
+                nanoSsmtLbl := na
+            nanoSsmtEventKey := na
+            nanoSsmtExtendTier := 0
+        f_ssmt_hist_trim(nanoSsmtHistLines, nanoSsmtHistLbls, ssmtKeepEff)
+    else
+        if not na(nanoSsmtLine)
+            line.delete(nanoSsmtLine)
+            nanoSsmtLine := na
+        if not na(nanoSsmtLbl)
+            label.delete(nanoSsmtLbl)
+            nanoSsmtLbl := na
+        f_ssmt_hist_clear(nanoSsmtHistLines, nanoSsmtHistLbls)
+        nanoSsmtEventKey := na
+        nanoSsmtExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bullish Nano SSMT (ES/NQ) — test-only
+    // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] nanoSsmtBHistLines = array.new_line()
+    var label[] nanoSsmtBHistLbls = array.new_label()
+    var line nanoSsmtBLine = na
+    var int  nanoSsmtBEventKey = na
+    var label nanoSsmtBLbl = na
+    var int  nanoSsmtBExtendTier = 0
+    var int  nanoSsmtBActiveQTs = na
+
+    if showNanoBullSSMT and ssmtNanoTfOk
+        string chartTagNB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESNB = chartTagNB == "ES"
+        bool isChartNQNB = chartTagNB == "NQ"
+        bool isPairChartNB = isChartESNB or isChartNQNB
+
+        bool ssmtReadyNB = not na(esLcurN) and not na(esLprevN) and not na(nqLcurN) and not na(nqLprevN)
+        if ssmtReadyNB and isPairChartNB
+            bool esSweepNB = esLcurN < esLprevN
+            bool nqSweepNB = nqLcurN < nqLprevN
+            bool splitNB = esSweepNB != nqSweepNB
+            nanoBullSplit := splitNB and isPairChartNB
+
+            bool crackedESNB = splitNB and (not esSweepNB)
+            bool crackedNQNB = splitNB and (not nqSweepNB)
+            string crackedNB = ""
+            if crackedESNB
+                crackedNB := "ES"
+            if crackedNQNB
+                crackedNB := crackedNB == "" ? "NQ" : crackedNB + ",NQ"
+
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESNB
+                curL := esLcurN
+                curLTs := esLcurTsN
+                prevL := esLprevN
+                prevLTs := esLprevTsN
+                curQTs := esQtsN
+                curSweep := esSweepNB
+            else if isChartNQNB
+                curL := nqLcurN
+                curLTs := nqLcurTsN
+                prevL := nqLprevN
+                prevLTs := nqLprevTsN
+                curQTs := nqQtsN
+                curSweep := nqSweepNB
+            int prevLTsSnap = isChartESNB ? esLprevTsNSnap : isChartNQNB ? nqLprevTsNSnap : prevLTs
+
+            bool hasPointsB = splitNB and not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if splitNB
+                int eventKeyB = prevLTs
+                if na(nanoSsmtBEventKey) or nanoSsmtBEventKey != eventKeyB
+                    f_ssmt_hist_push(nanoSsmtBLine, nanoSsmtBLbl, nanoSsmtBHistLines, nanoSsmtBHistLbls, ssmtKeepEff)
+                    nanoSsmtBLine := na
+                    nanoSsmtBLbl := na
+                    nanoSsmtBEventKey := eventKeyB
+                    nanoSsmtBActiveQTs := curQTs
+                    nanoSsmtBExtendTier := 0
+
+                if hasPointsB and curSweep
+                    int thirdLenB = int(NanoSsmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + NanoSsmtQLen
+
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    nanoSsmtBExtendTier := nanoSsmtBExtendTier < sweepTierB ? sweepTierB : nanoSsmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        nanoSsmtBExtendTier := nanoSsmtBExtendTier < barTierB ? barTierB : nanoSsmtBExtendTier
+
+                    int x2B = q1EndB
+                    if nanoSsmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if nanoSsmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    nanoSsmtBLine := f_set_or_make_hline_w(nanoSsmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
+                    nanoSsmtBLine := f_set_or_make_line(nanoSsmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                bool showLabelB = (isChartESNB and crackedESNB) or (isChartNQNB and crackedNQNB)
+                if hasPointsB and crackedNB != "" and showLabelB
+                    string lblTextB = "Nano " + crackedNB
+
+                    int xMidB = prevLTs
+                    float yMidB = prevL
+                    if not na(nanoSsmtBLine)
+                        int x1B = line.get_x1(nanoSsmtBLine)
+                        int x2B = line.get_x2(nanoSsmtBLine)
+                        xMidB := x1B + int((x2B - x1B) / 2)
+                        yMidB := (line.get_y1(nanoSsmtBLine) + line.get_y2(nanoSsmtBLine)) / 2
+                    float yLblB = yMidB - syminfo.mintick
+
+                    if na(nanoSsmtBLbl)
+                        nanoSsmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(nanoSsmtBLbl, xMidB, yLblB)
+                        label.set_text(nanoSsmtBLbl, lblTextB)
+                        label.set_textcolor(nanoSsmtBLbl, color.black)
+                else if not showLabelB and not na(nanoSsmtBLbl)
+                    label.delete(nanoSsmtBLbl)
+                    nanoSsmtBLbl := na
+            // State-based finalize/cleanup:
+            // - If split resolves within the same quarter: delete active drawings.
+            // - If the quarter rolls while an active split existed: archive into history (SSMT History) then clear.
+            if not splitNB and not na(nanoSsmtBEventKey)
+                bool rolledB = not na(nanoSsmtBActiveQTs) and not na(curQTs) and curQTs != nanoSsmtBActiveQTs
+                if rolledB
+                    f_ssmt_hist_push(nanoSsmtBLine, nanoSsmtBLbl, nanoSsmtBHistLines, nanoSsmtBHistLbls, ssmtKeepEff)
+                else
+                    if not na(nanoSsmtBLine)
+                        line.delete(nanoSsmtBLine)
+                    if not na(nanoSsmtBLbl)
+                        label.delete(nanoSsmtBLbl)
+                nanoSsmtBLine := na
+                nanoSsmtBLbl := na
+                nanoSsmtBEventKey := na
+                nanoSsmtBActiveQTs := na
+                nanoSsmtBExtendTier := 0
+        if not (ssmtReadyNB and isPairChartNB)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(nanoSsmtBLine)
+                line.delete(nanoSsmtBLine)
+                nanoSsmtBLine := na
+            if not na(nanoSsmtBLbl)
+                label.delete(nanoSsmtBLbl)
+                nanoSsmtBLbl := na
+            nanoSsmtBEventKey := na
+            nanoSsmtBExtendTier := 0
+        f_ssmt_hist_trim(nanoSsmtBHistLines, nanoSsmtBHistLbls, ssmtKeepEff)
+    else
+        if not na(nanoSsmtBLine)
+            line.delete(nanoSsmtBLine)
+            nanoSsmtBLine := na
+        if not na(nanoSsmtBLbl)
+            label.delete(nanoSsmtBLbl)
+            nanoSsmtBLbl := na
+        f_ssmt_hist_clear(nanoSsmtBHistLines, nanoSsmtBHistLbls)
+        nanoSsmtBEventKey := na
+        nanoSsmtBExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bearish Nano HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] nanoHssmtHistLines = array.new_line()
+    var label[] nanoHssmtHistLbls = array.new_label()
+    var line nanoHssmtLine = na
+    var int  nanoHssmtEventKey = na
+    var label nanoHssmtLbl = na
+    var int  nanoHssmtExtendTier = 0
+    var int  nanoHssmtActiveQTs = na
+
+    bool hssmtNanoTfOk = visNanoTf
+    if showNanoBearHSSMT and hssmtNanoTfOk and not nanoBearSplit
+        string chartTagNH = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESNH = chartTagNH == "ES"
+        bool isChartNQNH = chartTagNH == "NQ"
+        bool isPairChartNH = isChartESNH or isChartNQNH
+
+        bool hssmtReadyNH = not na(esBHcurN) and not na(esBHprevN) and not na(nqBHcurN) and not na(nqBHprevN)
+        if hssmtReadyNH and isPairChartNH
+            bool esSweepNH = esBHcurN > esBHprevN
+            bool nqSweepNH = nqBHcurN > nqBHprevN
+            bool splitNH = esSweepNH != nqSweepNH
+
+            bool crackedESNH = splitNH and (not esSweepNH)
+            bool crackedNQNH = splitNH and (not nqSweepNH)
+            string crackedNH = ""
+            if crackedESNH
+                crackedNH := "ES"
+            if crackedNQNH
+                crackedNH := crackedNH == "" ? "NQ" : crackedNH + ",NQ"
+
+            float curH = na
+            int   curHTs = na
+            float prevH = na
+            int   prevHTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESNH
+                curH := esBHcurN
+                curHTs := esBHcurTsN
+                prevH := esBHprevN
+                prevHTs := esBHprevTsN
+                curQTs := esQtsN
+                curSweep := esSweepNH
+            else if isChartNQNH
+                curH := nqBHcurN
+                curHTs := nqBHcurTsN
+                prevH := nqBHprevN
+                prevHTs := nqBHprevTsN
+                curQTs := nqQtsN
+                curSweep := nqSweepNH
+            int prevHTsSnap = isChartESNH ? esBHprevTsNSnap : isChartNQNH ? nqBHprevTsNSnap : prevHTs
+
+            bool hasPoints = splitNH and not na(prevH) and not na(prevHTs) and not na(curQTs)
+            if splitNH
+                int eventKey = prevHTs
+                if na(nanoHssmtEventKey) or nanoHssmtEventKey != eventKey
+                    f_ssmt_hist_push(nanoHssmtLine, nanoHssmtLbl, nanoHssmtHistLines, nanoHssmtHistLbls, ssmtKeepEff)
+                    nanoHssmtLine := na
+                    nanoHssmtLbl := na
+                    nanoHssmtEventKey := eventKey
+                    nanoHssmtActiveQTs := curQTs
+                    nanoHssmtExtendTier := 0
+
+                if hasPoints and curSweep
+                    int thirdLen = int(NanoSsmtQLen / 3)
+                    int q1End = curQTs + thirdLen
+                    int q2End = curQTs + (thirdLen * 2)
+                    int q3End = curQTs + NanoSsmtQLen
+
+                    int sweepTier = 1
+                    if not na(curHTs)
+                        if curHTs >= q2End
+                            sweepTier := 3
+                        else if curHTs >= q1End
+                            sweepTier := 2
+
+                    int barTier = 1
+                    if time_close >= q2End
+                        barTier := 3
+                    else if time_close >= q1End
+                        barTier := 2
+
+                    nanoHssmtExtendTier := nanoHssmtExtendTier < sweepTier ? sweepTier : nanoHssmtExtendTier
+                    bool touch = high >= prevH
+                    if touch
+                        nanoHssmtExtendTier := nanoHssmtExtendTier < barTier ? barTier : nanoHssmtExtendTier
+
+                    int x2 = q1End
+                    if nanoHssmtExtendTier >= 3
+                        x2 := q3End
+                    else if nanoHssmtExtendTier == 2
+                        x2 := q2End
+
+                    nanoHssmtLine := f_set_or_make_hline_w(nanoHssmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
+                    nanoHssmtLine := f_set_or_make_line(nanoHssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                bool showLabel = (isChartESNH and crackedESNH) or (isChartNQNH and crackedNQNH)
+                if hasPoints and crackedNH != "" and showLabel
+                    string lblText = "(H) Nano " + crackedNH
+
+                    int xMid = prevHTs
+                    float yMid = prevH
+                    if not na(nanoHssmtLine)
+                        int x1 = line.get_x1(nanoHssmtLine)
+                        int x2 = line.get_x2(nanoHssmtLine)
+                        xMid := x1 + int((x2 - x1) / 2)
+                        yMid := (line.get_y1(nanoHssmtLine) + line.get_y2(nanoHssmtLine)) / 2
+                    float yLbl = yMid + syminfo.mintick
+
+                    if na(nanoHssmtLbl)
+                        nanoHssmtLbl := label.new(xMid, yLbl, lblText, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(nanoHssmtLbl, xMid, yLbl)
+                        label.set_text(nanoHssmtLbl, lblText)
+                        label.set_textcolor(nanoHssmtLbl, color.black)
+                else if not showLabel and not na(nanoHssmtLbl)
+                    label.delete(nanoHssmtLbl)
+                    nanoHssmtLbl := na
+            if not splitNH and not na(nanoHssmtEventKey)
+                bool rolled = not na(nanoHssmtActiveQTs) and not na(curQTs) and curQTs != nanoHssmtActiveQTs
+                if rolled
+                    f_ssmt_hist_push(nanoHssmtLine, nanoHssmtLbl, nanoHssmtHistLines, nanoHssmtHistLbls, ssmtKeepEff)
+                else
+                    if not na(nanoHssmtLine)
+                        line.delete(nanoHssmtLine)
+                    if not na(nanoHssmtLbl)
+                        label.delete(nanoHssmtLbl)
+                nanoHssmtLine := na
+                nanoHssmtLbl := na
+                nanoHssmtEventKey := na
+                nanoHssmtActiveQTs := na
+                nanoHssmtExtendTier := 0
+        if not (hssmtReadyNH and isPairChartNH)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(nanoHssmtLine)
+                line.delete(nanoHssmtLine)
+                nanoHssmtLine := na
+            if not na(nanoHssmtLbl)
+                label.delete(nanoHssmtLbl)
+                nanoHssmtLbl := na
+            nanoHssmtEventKey := na
+            nanoHssmtExtendTier := 0
+        f_ssmt_hist_trim(nanoHssmtHistLines, nanoHssmtHistLbls, ssmtKeepEff)
+    else
+        if not na(nanoHssmtLine)
+            line.delete(nanoHssmtLine)
+            nanoHssmtLine := na
+        if not na(nanoHssmtLbl)
+            label.delete(nanoHssmtLbl)
+            nanoHssmtLbl := na
+        f_ssmt_hist_clear(nanoHssmtHistLines, nanoHssmtHistLbls)
+        nanoHssmtEventKey := na
+        nanoHssmtExtendTier := 0
+
+    // -----------------------------------------------------------------------------
+    // Bullish Nano HSSMT (ES/NQ) — test-only
+    // Visibility: Only show on Nano-aligned TFs (5s–15s per helpers/Alignments.txt)
+    // -----------------------------------------------------------------------------
+    var line[] nanoHssmtBHistLines = array.new_line()
+    var label[] nanoHssmtBHistLbls = array.new_label()
+    var line nanoHssmtBLine = na
+    var int  nanoHssmtBEventKey = na
+    var label nanoHssmtBLbl = na
+    var int  nanoHssmtBExtendTier = 0
+    var int  nanoHssmtBActiveQTs = na
+
+    bool hssmtNanoBullTfOk = visNanoTf
+    if showNanoBullHSSMT and hssmtNanoBullTfOk and not nanoBullSplit
+        string chartTagNHB = f_ssmt_tag(syminfo.tickerid)
+        bool isChartESNHB = chartTagNHB == "ES"
+        bool isChartNQNHB = chartTagNHB == "NQ"
+        bool isPairChartNHB = isChartESNHB or isChartNQNHB
+
+        bool hssmtReadyNHB = not na(esBLcurN) and not na(esBLprevN) and not na(nqBLcurN) and not na(nqBLprevN)
+        if hssmtReadyNHB and isPairChartNHB
+            bool esSweepNHB = esBLcurN < esBLprevN
+            bool nqSweepNHB = nqBLcurN < nqBLprevN
+            bool splitNHB = esSweepNHB != nqSweepNHB
+
+            bool crackedESNHB = splitNHB and (not esSweepNHB)
+            bool crackedNQNHB = splitNHB and (not nqSweepNHB)
+            string crackedNHB = ""
+            if crackedESNHB
+                crackedNHB := "ES"
+            if crackedNQNHB
+                crackedNHB := crackedNHB == "" ? "NQ" : crackedNHB + ",NQ"
+
+            float curL = na
+            int   curLTs = na
+            float prevL = na
+            int   prevLTs = na
+            int   curQTs = na
+            bool  curSweep = false
+
+            if isChartESNHB
+                curL := esBLcurN
+                curLTs := esBLcurTsN
+                prevL := esBLprevN
+                prevLTs := esBLprevTsN
+                curQTs := esQtsN
+                curSweep := esSweepNHB
+            else if isChartNQNHB
+                curL := nqBLcurN
+                curLTs := nqBLcurTsN
+                prevL := nqBLprevN
+                prevLTs := nqBLprevTsN
+                curQTs := nqQtsN
+                curSweep := nqSweepNHB
+            int prevLTsSnap = isChartESNHB ? esBLprevTsNSnap : isChartNQNHB ? nqBLprevTsNSnap : prevLTs
+
+            bool hasPointsB = splitNHB and not na(prevL) and not na(prevLTs) and not na(curQTs)
+            if splitNHB
+                int eventKeyB = prevLTs
+                if na(nanoHssmtBEventKey) or nanoHssmtBEventKey != eventKeyB
+                    f_ssmt_hist_push(nanoHssmtBLine, nanoHssmtBLbl, nanoHssmtBHistLines, nanoHssmtBHistLbls, ssmtKeepEff)
+                    nanoHssmtBLine := na
+                    nanoHssmtBLbl := na
+                    nanoHssmtBEventKey := eventKeyB
+                    nanoHssmtBActiveQTs := curQTs
+                    nanoHssmtBExtendTier := 0
+
+                if hasPointsB and curSweep
+                    int thirdLenB = int(NanoSsmtQLen / 3)
+                    int q1EndB = curQTs + thirdLenB
+                    int q2EndB = curQTs + (thirdLenB * 2)
+                    int q3EndB = curQTs + NanoSsmtQLen
+
+                    int sweepTierB = 1
+                    if not na(curLTs)
+                        if curLTs >= q2EndB
+                            sweepTierB := 3
+                        else if curLTs >= q1EndB
+                            sweepTierB := 2
+
+                    int barTierB = 1
+                    if time_close >= q2EndB
+                        barTierB := 3
+                    else if time_close >= q1EndB
+                        barTierB := 2
+
+                    nanoHssmtBExtendTier := nanoHssmtBExtendTier < sweepTierB ? sweepTierB : nanoHssmtBExtendTier
+                    bool touchB = low <= prevL
+                    if touchB
+                        nanoHssmtBExtendTier := nanoHssmtBExtendTier < barTierB ? barTierB : nanoHssmtBExtendTier
+
+                    int x2B = q1EndB
+                    if nanoHssmtBExtendTier >= 3
+                        x2B := q3EndB
+                    else if nanoHssmtBExtendTier == 2
+                        x2B := q2EndB
+
+                    nanoHssmtBLine := f_set_or_make_hline_w(nanoHssmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
+                else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
+                    nanoHssmtBLine := f_set_or_make_line(nanoHssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                bool showLabelB = (isChartESNHB and crackedESNHB) or (isChartNQNHB and crackedNQNHB)
+                if hasPointsB and crackedNHB != "" and showLabelB
+                    string lblTextB = "(H) Nano " + crackedNHB
+
+                    int xMidB = prevLTs
+                    float yMidB = prevL
+                    if not na(nanoHssmtBLine)
+                        int x1B = line.get_x1(nanoHssmtBLine)
+                        int x2B = line.get_x2(nanoHssmtBLine)
+                        xMidB := x1B + int((x2B - x1B) / 2)
+                        yMidB := (line.get_y1(nanoHssmtBLine) + line.get_y2(nanoHssmtBLine)) / 2
+                    float yLblB = yMidB - syminfo.mintick
+
+                    if na(nanoHssmtBLbl)
+                        nanoHssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
+                    else
+                        label.set_xy(nanoHssmtBLbl, xMidB, yLblB)
+                        label.set_text(nanoHssmtBLbl, lblTextB)
+                        label.set_textcolor(nanoHssmtBLbl, color.black)
+                else if not showLabelB and not na(nanoHssmtBLbl)
+                    label.delete(nanoHssmtBLbl)
+                    nanoHssmtBLbl := na
+            if not splitNHB and not na(nanoHssmtBEventKey)
+                bool rolledB = not na(nanoHssmtBActiveQTs) and not na(curQTs) and curQTs != nanoHssmtBActiveQTs
+                if rolledB
+                    f_ssmt_hist_push(nanoHssmtBLine, nanoHssmtBLbl, nanoHssmtBHistLines, nanoHssmtBHistLbls, ssmtKeepEff)
+                else
+                    if not na(nanoHssmtBLine)
+                        line.delete(nanoHssmtBLine)
+                    if not na(nanoHssmtBLbl)
+                        label.delete(nanoHssmtBLbl)
+                nanoHssmtBLine := na
+                nanoHssmtBLbl := na
+                nanoHssmtBEventKey := na
+                nanoHssmtBActiveQTs := na
+                nanoHssmtBExtendTier := 0
+        if not (hssmtReadyNHB and isPairChartNHB)
+            // Not ready or not on ES/NQ: clear active state to avoid stale drawings
+            if not na(nanoHssmtBLine)
+                line.delete(nanoHssmtBLine)
+                nanoHssmtBLine := na
+            if not na(nanoHssmtBLbl)
+                label.delete(nanoHssmtBLbl)
+                nanoHssmtBLbl := na
+            nanoHssmtBEventKey := na
+            nanoHssmtBExtendTier := 0
+        f_ssmt_hist_trim(nanoHssmtBHistLines, nanoHssmtBHistLbls, ssmtKeepEff)
+    else
+        if not na(nanoHssmtBLine)
+            line.delete(nanoHssmtBLine)
+            nanoHssmtBLine := na
+        if not na(nanoHssmtBLbl)
+            label.delete(nanoHssmtBLbl)
+            nanoHssmtBLbl := na
+        f_ssmt_hist_clear(nanoHssmtBHistLines, nanoHssmtBHistLbls)
+        nanoHssmtBEventKey := na
+        nanoHssmtBExtendTier := 0
+
+
+
+
+    0
+
+f_run_ssmt_hssmt()
 
 // -----------------------------------------------------------------------------
 // Divider + cycle-window management (QTIndicator model)
 // -----------------------------------------------------------------------------
 // TODO Later: Add option to extend all opening lines an entire cycle length
 var int MAX_LINES = 500
-var int STORE_MAX = 800
+var int STORE_MAX = timeframe.isseconds ? STORE_MAX_SEC : 800
 
 // -----------------------------------------------------------------------------
 // Daily cycle storage
@@ -1803,6 +4444,11 @@ int perCycle = showOpens ? 9 : 5
 int maxC = int(math.floor((MAX_LINES - 10) / (perCycle * (enabledCycles * 1.0))))
 maxC := f_clamp_int(maxC, 1, 200)
 int keepEff = f_clamp_int(keepCycles, 1, maxC)
+int keepEffMicro = keepEff
+int keepEffNano = keepEff
+if timeframe.isseconds
+    keepEffMicro := f_clamp_int(keepCycles < MICRO_KEEP_CAP_SEC ? keepCycles : MICRO_KEEP_CAP_SEC, 1, maxC)
+    keepEffNano := f_clamp_int(keepCycles < NANO_KEEP_CAP_SEC ? keepCycles : NANO_KEEP_CAP_SEC, 1, maxC)
 
 if not showDailyTf
     vset_clear(dailyV)
@@ -1943,7 +4589,7 @@ else
 
     int mCutoff = na(m.q1Ts) ? 0 : m.q1Ts
     int mAvail = array.size(microStarts)
-    int mUse   = math.min(keepEff, mAvail)
+    int mUse   = math.min(keepEffMicro, mAvail)
     int mFirst = mAvail - mUse
     if mUse > 0
         mCutoff := array.get(microStarts, mFirst)
@@ -2159,7 +4805,7 @@ else
 
     int cutoff = na(n.q1Ts) ? 0 : n.q1Ts
     int nAvail = array.size(nanoStarts)
-    int nUse   = math.min(keepEff, nAvail)
+    int nUse   = math.min(keepEffNano, nAvail)
     int first  = nAvail - nUse
     if nUse > 0
         cutoff := array.get(nanoStarts, first)
