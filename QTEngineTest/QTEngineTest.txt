@@ -54,6 +54,7 @@ ssmtBullLineCol = input.color(color.rgb(41, 98, 255), "Bullish SSMT Color", grou
 ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
 ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
 ssmtDebug = input.bool(false, "Debug SSMT values", group=groupSSMT)
+ssmtOverride = input.bool(false, "SSMT Override", group=groupSSMT)
 
 groupHSSMT = "HSSMT TEST (ES/NQ)"
 showDailyBearHSSMT = input.bool(false, "Show Bearish Daily HSSMT (Dyad)", group=groupHSSMT)
@@ -113,6 +114,21 @@ f_ceil_5s(int ts) =>
 f_snap_to_chart_bar(int ts) =>
     int snap = ta.valuewhen(time <= ts and time_close > ts, time, 0)
     na(ts) ? ts : (na(snap) ? ts : snap)
+
+// Snap only when chart TF is higher than Daily aligned TF (15m).
+f_snap_daily_draw(int ts) =>
+    int tfSec_ = timeframe.in_seconds(timeframe.period)
+    if na(ts) or na(tfSec_) or tfSec_ <= 900
+        ts
+    else
+        int snapped = na
+        int i = 0
+        int maxLookback = 200
+        while i <= maxLookback and na(snapped)
+            if time[i] <= ts and time_close[i] > ts
+                snapped := time[i]
+            i += 1
+        na(snapped) ? ts : snapped
 
 // -----------------------------------------------------------------------------
 // Visibility Alignments (hardcoded)
@@ -558,6 +574,54 @@ f_ssmt_hist_clear(line[] lines, label[] labels) =>
             label.delete(oldLb)
     0
 
+f_ssmt_hist_push_q(line ln, label lb, line[] lines, label[] labels, int[] qts, int qt, int maxN) =>
+    if not na(ln) or not na(lb)
+        if maxN <= 0
+            if not na(ln)
+                line.delete(ln)
+            if not na(lb)
+                label.delete(lb)
+        else
+            array.push(lines, ln)
+            array.push(labels, lb)
+            array.push(qts, qt)
+            while array.size(lines) > maxN
+                line oldLn = array.shift(lines)
+                if not na(oldLn)
+                    line.delete(oldLn)
+                label oldLb = array.shift(labels)
+                if not na(oldLb)
+                    label.delete(oldLb)
+                if array.size(qts) > 0
+                    array.shift(qts)
+            while array.size(qts) > maxN
+                array.shift(qts)
+    0
+
+f_ssmt_hist_trim_q(int[] qts, int maxN) =>
+    while array.size(qts) > maxN
+        array.shift(qts)
+    0
+
+f_ssmt_hist_clear_q(int[] qts) =>
+    array.clear(qts)
+    0
+
+f_ssmt_hist_purge_q(line[] lines, label[] labels, int[] qts, int[] blockQts) =>
+    int i = array.size(qts) - 1
+    while i >= 0
+        int qtVal = array.get(qts, i)
+        if array.indexof(blockQts, qtVal) != -1
+            line oldLn = array.remove(lines, i)
+            if not na(oldLn)
+                line.delete(oldLn)
+            label oldLb = array.remove(labels, i)
+            if not na(oldLb)
+                label.delete(oldLb)
+            array.remove(qts, i)
+        i -= 1
+    0
+
 // -----------------------------------------------------------------------------
 // Array helpers
 // -----------------------------------------------------------------------------
@@ -957,10 +1021,13 @@ f_run_ssmt_hssmt() =>
     var table ssmtDbgTbl = na
     var line[] ssmtHistLines = array.new_line()
     var label[] ssmtHistLbls = array.new_label()
+    var int[] ssmtHistQTs = array.new_int()
     var line ssmtLine = na
     var int  ssmtEventKey = na
     var label ssmtLbl = na
     var int  ssmtExtendTier = 0
+    var int  ssmtActiveQTs = na
+    var int  dailySsmtBearQTs = na
     int SSmtQLen = 6 * 60 * 60 * 1000
 
     bool ssmtTfOk = visDailyTf or (ssmtDebug and visMicroTf)
@@ -1051,14 +1118,14 @@ f_run_ssmt_hssmt() =>
         nqQi := tmpNqQi
         nqQts := tmpNqQts
 
-    int esHprevTsSnap = f_snap_to_chart_bar(esHprevTs)
-    int nqHprevTsSnap = f_snap_to_chart_bar(nqHprevTs)
-    int esLprevTsSnap = f_snap_to_chart_bar(esLprevTs)
-    int nqLprevTsSnap = f_snap_to_chart_bar(nqLprevTs)
-    int esBHprevTsSnap = f_snap_to_chart_bar(esBHprevTs)
-    int nqBHprevTsSnap = f_snap_to_chart_bar(nqBHprevTs)
-    int esBLprevTsSnap = f_snap_to_chart_bar(esBLprevTs)
-    int nqBLprevTsSnap = f_snap_to_chart_bar(nqBLprevTs)
+    int esHprevTsSnap = f_snap_daily_draw(esHprevTs)
+    int nqHprevTsSnap = f_snap_daily_draw(nqHprevTs)
+    int esLprevTsSnap = f_snap_daily_draw(esLprevTs)
+    int nqLprevTsSnap = f_snap_daily_draw(nqLprevTs)
+    int esBHprevTsSnap = f_snap_daily_draw(esBHprevTs)
+    int nqBHprevTsSnap = f_snap_daily_draw(nqBHprevTs)
+    int esBLprevTsSnap = f_snap_daily_draw(esBLprevTs)
+    int nqBLprevTsSnap = f_snap_daily_draw(nqBLprevTs)
     if showDailyBearSSMT and ssmtTfOk
         string chartTag = f_ssmt_tag(syminfo.tickerid)
         bool isChartES = chartTag == "ES"
@@ -1144,11 +1211,12 @@ f_run_ssmt_hssmt() =>
                 curQTs := nqQts
                 curSweep := nqSweep
             int prevHTsSnap = isChartES ? esHprevTsSnap : isChartNQ ? nqHprevTsSnap : prevHTs
+            int curHTsDraw = f_snap_daily_draw(curHTs)
 
             int eventKey = prevHTs
             bool eventChanged = not na(eventKey) and (na(ssmtEventKey) or eventKey != ssmtEventKey)
             if eventChanged
-                f_ssmt_hist_push(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtKeepEff)
+                f_ssmt_hist_push_q(ssmtLine, ssmtLbl, ssmtHistLines, ssmtHistLbls, ssmtHistQTs, ssmtActiveQTs, ssmtKeepEff)
                 ssmtLine := na
                 ssmtLbl := na
                 ssmtExtendTier := 0
@@ -1164,6 +1232,8 @@ f_run_ssmt_hssmt() =>
                 ssmtExtendTier := 0
             else
                 bool hasPoints = not na(prevH) and not na(prevHTs) and not na(curQTs)
+                ssmtActiveQTs := curQTs
+                dailySsmtBearQTs := curQTs
                 if hasPoints and curSweep
                     int thirdLen = int(SSmtQLen / 3)
                     int q1End = curQTs + thirdLen
@@ -1196,15 +1266,15 @@ f_run_ssmt_hssmt() =>
 
                     ssmtLine := f_set_or_make_hline_w(ssmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
                 else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
-                    ssmtLine := f_set_or_make_line(ssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                    ssmtLine := f_set_or_make_line(ssmtLine, prevHTsSnap, prevH, curHTsDraw, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
 
                 bool showLabel = (isChartES and crackedES) or (isChartNQ and crackedNQ)
                 if hasPoints and cracked != "" and showLabel
                     string lblText = "D " + cracked
                     if na(ssmtLbl)
-                        ssmtLbl := label.new(prevHTs, prevH, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                        ssmtLbl := label.new(prevHTsSnap, prevH, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
                     else
-                        label.set_xy(ssmtLbl, prevHTs, prevH)
+                        label.set_xy(ssmtLbl, prevHTsSnap, prevH)
                         label.set_text(ssmtLbl, lblText)
                         label.set_textcolor(ssmtLbl, color.black)
                         label.set_color(ssmtLbl, color.new(color.black, 100))
@@ -1212,6 +1282,7 @@ f_run_ssmt_hssmt() =>
                     label.delete(ssmtLbl)
                     ssmtLbl := na
         f_ssmt_hist_trim(ssmtHistLines, ssmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(ssmtHistQTs, ssmtKeepEff)
     else
         if not na(ssmtLine)
             line.delete(ssmtLine)
@@ -1220,6 +1291,7 @@ f_run_ssmt_hssmt() =>
             label.delete(ssmtLbl)
             ssmtLbl := na
         f_ssmt_hist_clear(ssmtHistLines, ssmtHistLbls)
+        f_ssmt_hist_clear_q(ssmtHistQTs)
         if not na(ssmtDbgTbl)
             table.delete(ssmtDbgTbl)
             ssmtDbgTbl := na
@@ -1233,10 +1305,13 @@ f_run_ssmt_hssmt() =>
     var table ssmtBDbgTbl = na
     var line[] ssmtBHistLines = array.new_line()
     var label[] ssmtBHistLbls = array.new_label()
+    var int[] ssmtBHistQTs = array.new_int()
     var line ssmtBLine = na
     var int  ssmtBEventKey = na
     var label ssmtBLbl = na
     var int  ssmtBExtendTier = 0
+    var int  ssmtBActiveQTs = na
+    var int  dailySsmtBullQTs = na
 
     bool ssmtBullTfOk = visDailyTf
     if showDailyBullSSMT and ssmtBullTfOk
@@ -1312,11 +1387,12 @@ f_run_ssmt_hssmt() =>
                 curQTs := nqQts
                 curSweep := nqSweepB
             int prevLTsSnap = isChartESB ? esLprevTsSnap : isChartNQB ? nqLprevTsSnap : prevLTs
+            int curLTsDraw = f_snap_daily_draw(curLTs)
 
             int eventKeyB = prevLTs
             bool eventChangedB = not na(eventKeyB) and (na(ssmtBEventKey) or eventKeyB != ssmtBEventKey)
             if eventChangedB
-                f_ssmt_hist_push(ssmtBLine, ssmtBLbl, ssmtBHistLines, ssmtBHistLbls, ssmtKeepEff)
+                f_ssmt_hist_push_q(ssmtBLine, ssmtBLbl, ssmtBHistLines, ssmtBHistLbls, ssmtBHistQTs, ssmtBActiveQTs, ssmtKeepEff)
                 ssmtBLine := na
                 ssmtBLbl := na
                 ssmtBExtendTier := 0
@@ -1332,6 +1408,8 @@ f_run_ssmt_hssmt() =>
                 ssmtBExtendTier := 0
             else
                 bool hasPointsB = not na(prevL) and not na(prevLTs) and not na(curQTs)
+                ssmtBActiveQTs := curQTs
+                dailySsmtBullQTs := curQTs
                 if hasPointsB and curSweep
                     int thirdLenB = int(SSmtQLen / 3)
                     int q1EndB = curQTs + thirdLenB
@@ -1364,15 +1442,15 @@ f_run_ssmt_hssmt() =>
 
                     ssmtBLine := f_set_or_make_hline_w(ssmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
                 else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
-                    ssmtBLine := f_set_or_make_line(ssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                    ssmtBLine := f_set_or_make_line(ssmtBLine, prevLTsSnap, prevL, curLTsDraw, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
 
                 bool showLabelB = (isChartESB and crackedESB) or (isChartNQB and crackedNQB)
                 if hasPointsB and crackedB != "" and showLabelB
                     string lblTextB = "D " + crackedB
                     if na(ssmtBLbl)
-                        ssmtBLbl := label.new(prevLTs, prevL, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                        ssmtBLbl := label.new(prevLTsSnap, prevL - (syminfo.mintick * 6), lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
                     else
-                        label.set_xy(ssmtBLbl, prevLTs, prevL)
+                        label.set_xy(ssmtBLbl, prevLTsSnap, prevL - (syminfo.mintick * 6))
                         label.set_text(ssmtBLbl, lblTextB)
                         label.set_textcolor(ssmtBLbl, color.black)
                         label.set_color(ssmtBLbl, color.new(color.black, 100))
@@ -1380,6 +1458,7 @@ f_run_ssmt_hssmt() =>
                     label.delete(ssmtBLbl)
                     ssmtBLbl := na
         f_ssmt_hist_trim(ssmtBHistLines, ssmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(ssmtBHistQTs, ssmtKeepEff)
     else
         if not na(ssmtBLine)
             line.delete(ssmtBLine)
@@ -1388,6 +1467,7 @@ f_run_ssmt_hssmt() =>
             label.delete(ssmtBLbl)
             ssmtBLbl := na
         f_ssmt_hist_clear(ssmtBHistLines, ssmtBHistLbls)
+        f_ssmt_hist_clear_q(ssmtBHistQTs)
         if not na(ssmtBDbgTbl)
             table.delete(ssmtBDbgTbl)
             ssmtBDbgTbl := na
@@ -1400,14 +1480,16 @@ f_run_ssmt_hssmt() =>
     // -----------------------------------------------------------------------------
     var line[] dailyHssmtHistLines = array.new_line()
     var label[] dailyHssmtHistLbls = array.new_label()
+    var int[] dailyHssmtHistQTs = array.new_int()
     var line dailyHssmtLine = na
     var int  dailyHssmtEventKey = na
     var label dailyHssmtLbl = na
     var int  dailyHssmtExtendTier = 0
     var int  dailyHssmtActiveQTs = na
+    var bool dailyHssmtSuppressed = false
 
     bool hssmtDailyTfOk = visDailyTf
-    if showDailyBearHSSMT and hssmtDailyTfOk and not dailyBearSplit
+    if showDailyBearHSSMT and hssmtDailyTfOk
         string chartTagDH = f_ssmt_tag(syminfo.tickerid)
         bool isChartESDH = chartTagDH == "ES"
         bool isChartNQDH = chartTagDH == "NQ"
@@ -1449,14 +1531,24 @@ f_run_ssmt_hssmt() =>
                 curQTs := nqQts
                 curSweep := nqSweepDH
             int prevHTsSnap = isChartESDH ? esBHprevTsSnap : isChartNQDH ? nqBHprevTsSnap : prevHTs
+            int curHTsDraw = f_snap_daily_draw(curHTs)
 
             bool hasPoints = splitDH and not na(prevH) and not na(prevHTs) and not na(curQTs)
             if splitDH
                 int eventKey = prevHTs
                 if na(dailyHssmtEventKey) or dailyHssmtEventKey != eventKey
-                    f_ssmt_hist_push(dailyHssmtLine, dailyHssmtLbl, dailyHssmtHistLines, dailyHssmtHistLbls, ssmtKeepEff)
-                    dailyHssmtLine := na
-                    dailyHssmtLbl := na
+                    if dailyHssmtSuppressed
+                        if not na(dailyHssmtLine)
+                            line.delete(dailyHssmtLine)
+                        if not na(dailyHssmtLbl)
+                            label.delete(dailyHssmtLbl)
+                        dailyHssmtLine := na
+                        dailyHssmtLbl := na
+                        dailyHssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(dailyHssmtLine, dailyHssmtLbl, dailyHssmtHistLines, dailyHssmtHistLbls, dailyHssmtHistQTs, dailyHssmtActiveQTs, ssmtKeepEff)
+                        dailyHssmtLine := na
+                        dailyHssmtLbl := na
                     dailyHssmtEventKey := eventKey
                     dailyHssmtActiveQTs := curQTs
                     dailyHssmtExtendTier := 0
@@ -1493,12 +1585,12 @@ f_run_ssmt_hssmt() =>
 
                     dailyHssmtLine := f_set_or_make_hline_w(dailyHssmtLine, prevHTsSnap, x2, prevH, color.new(ssmtBearLineCol, 50), line.style_solid, ssmtLineWidth)
                 else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
-                    dailyHssmtLine := f_set_or_make_line(dailyHssmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+                    dailyHssmtLine := f_set_or_make_line(dailyHssmtLine, prevHTsSnap, prevH, curHTsDraw, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
                 bool showLabel = (isChartESDH and crackedESDH) or (isChartNQDH and crackedNQDH)
                 if hasPoints and crackedDH != "" and showLabel
                     string lblText = "(H) Daily " + crackedDH
 
-                    int xMid = prevHTs
+                    int xMid = prevHTsSnap
                     float yMid = prevH
                     if not na(dailyHssmtLine)
                         int x1 = line.get_x1(dailyHssmtLine)
@@ -1516,10 +1608,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabel and not na(dailyHssmtLbl)
                     label.delete(dailyHssmtLbl)
                     dailyHssmtLbl := na
+                bool suppressDH = ssmtOverride and not na(dailySsmtBearQTs) and dailySsmtBearQTs == curQTs
+                dailyHssmtSuppressed := suppressDH
+                if dailyHssmtSuppressed
+                    if not na(dailyHssmtLine)
+                        line.set_color(dailyHssmtLine, color.new(ssmtBearLineCol, 100))
+                    if not na(dailyHssmtLbl)
+                        label.set_textcolor(dailyHssmtLbl, color.new(color.black, 100))
             if not splitDH and not na(dailyHssmtEventKey)
                 bool rolled = not na(dailyHssmtActiveQTs) and not na(curQTs) and curQTs != dailyHssmtActiveQTs
                 if rolled
-                    f_ssmt_hist_push(dailyHssmtLine, dailyHssmtLbl, dailyHssmtHistLines, dailyHssmtHistLbls, ssmtKeepEff)
+                    if dailyHssmtSuppressed
+                        if not na(dailyHssmtLine)
+                            line.delete(dailyHssmtLine)
+                        if not na(dailyHssmtLbl)
+                            label.delete(dailyHssmtLbl)
+                        dailyHssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(dailyHssmtLine, dailyHssmtLbl, dailyHssmtHistLines, dailyHssmtHistLbls, dailyHssmtHistQTs, dailyHssmtActiveQTs, ssmtKeepEff)
                 else
                     if not na(dailyHssmtLine)
                         line.delete(dailyHssmtLine)
@@ -1540,7 +1646,11 @@ f_run_ssmt_hssmt() =>
                 dailyHssmtLbl := na
             dailyHssmtEventKey := na
             dailyHssmtExtendTier := 0
+            dailyHssmtSuppressed := false
         f_ssmt_hist_trim(dailyHssmtHistLines, dailyHssmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(dailyHssmtHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(dailyHssmtHistLines, dailyHssmtHistLbls, dailyHssmtHistQTs, ssmtHistQTs)
     else
         if not na(dailyHssmtLine)
             line.delete(dailyHssmtLine)
@@ -1549,8 +1659,10 @@ f_run_ssmt_hssmt() =>
             label.delete(dailyHssmtLbl)
             dailyHssmtLbl := na
         f_ssmt_hist_clear(dailyHssmtHistLines, dailyHssmtHistLbls)
+        f_ssmt_hist_clear_q(dailyHssmtHistQTs)
         dailyHssmtEventKey := na
         dailyHssmtExtendTier := 0
+        dailyHssmtSuppressed := false
 
     // -----------------------------------------------------------------------------
     // Bullish Daily HSSMT (ES/NQ) — test-only
@@ -1558,14 +1670,16 @@ f_run_ssmt_hssmt() =>
     // -----------------------------------------------------------------------------
     var line[] dailyHssmtBHistLines = array.new_line()
     var label[] dailyHssmtBHistLbls = array.new_label()
+    var int[] dailyHssmtBHistQTs = array.new_int()
     var line dailyHssmtBLine = na
     var int  dailyHssmtBEventKey = na
     var label dailyHssmtBLbl = na
     var int  dailyHssmtBExtendTier = 0
     var int  dailyHssmtBActiveQTs = na
+    var bool dailyHssmtBSuppressed = false
 
     bool hssmtDailyBullTfOk = visDailyTf
-    if showDailyBullHSSMT and hssmtDailyBullTfOk and not dailyBullSplit
+    if showDailyBullHSSMT and hssmtDailyBullTfOk
         string chartTagDHB = f_ssmt_tag(syminfo.tickerid)
         bool isChartESDHB = chartTagDHB == "ES"
         bool isChartNQDHB = chartTagDHB == "NQ"
@@ -1607,14 +1721,24 @@ f_run_ssmt_hssmt() =>
                 curQTs := nqQts
                 curSweep := nqSweepDHB
             int prevLTsSnap = isChartESDHB ? esBLprevTsSnap : isChartNQDHB ? nqBLprevTsSnap : prevLTs
+            int curLTsDraw = f_snap_daily_draw(curLTs)
 
             bool hasPointsB = splitDHB and not na(prevL) and not na(prevLTs) and not na(curQTs)
             if splitDHB
                 int eventKeyB = prevLTs
                 if na(dailyHssmtBEventKey) or dailyHssmtBEventKey != eventKeyB
-                    f_ssmt_hist_push(dailyHssmtBLine, dailyHssmtBLbl, dailyHssmtBHistLines, dailyHssmtBHistLbls, ssmtKeepEff)
-                    dailyHssmtBLine := na
-                    dailyHssmtBLbl := na
+                    if dailyHssmtBSuppressed
+                        if not na(dailyHssmtBLine)
+                            line.delete(dailyHssmtBLine)
+                        if not na(dailyHssmtBLbl)
+                            label.delete(dailyHssmtBLbl)
+                        dailyHssmtBLine := na
+                        dailyHssmtBLbl := na
+                        dailyHssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(dailyHssmtBLine, dailyHssmtBLbl, dailyHssmtBHistLines, dailyHssmtBHistLbls, dailyHssmtBHistQTs, dailyHssmtBActiveQTs, ssmtKeepEff)
+                        dailyHssmtBLine := na
+                        dailyHssmtBLbl := na
                     dailyHssmtBEventKey := eventKeyB
                     dailyHssmtBActiveQTs := curQTs
                     dailyHssmtBExtendTier := 0
@@ -1651,19 +1775,19 @@ f_run_ssmt_hssmt() =>
 
                     dailyHssmtBLine := f_set_or_make_hline_w(dailyHssmtBLine, prevLTsSnap, x2B, prevL, color.new(ssmtBullLineCol, 50), line.style_solid, ssmtLineWidth)
                 else if hasPointsB and not curSweep and not na(curL) and not na(curLTs)
-                    dailyHssmtBLine := f_set_or_make_line(dailyHssmtBLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+                    dailyHssmtBLine := f_set_or_make_line(dailyHssmtBLine, prevLTsSnap, prevL, curLTsDraw, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
                 bool showLabelB = (isChartESDHB and crackedESDHB) or (isChartNQDHB and crackedNQDHB)
                 if hasPointsB and crackedDHB != "" and showLabelB
                     string lblTextB = "(H) Daily " + crackedDHB
 
-                    int xMidB = prevLTs
+                    int xMidB = prevLTsSnap
                     float yMidB = prevL
                     if not na(dailyHssmtBLine)
                         int x1B = line.get_x1(dailyHssmtBLine)
                         int x2B = line.get_x2(dailyHssmtBLine)
                         xMidB := x1B + int((x2B - x1B) / 2)
                         yMidB := (line.get_y1(dailyHssmtBLine) + line.get_y2(dailyHssmtBLine)) / 2
-                    float yLblB = yMidB - syminfo.mintick
+                    float yLblB = yMidB - (syminfo.mintick * 6)
 
                     if na(dailyHssmtBLbl)
                         dailyHssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
@@ -1674,10 +1798,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabelB and not na(dailyHssmtBLbl)
                     label.delete(dailyHssmtBLbl)
                     dailyHssmtBLbl := na
+                bool suppressDHB = ssmtOverride and not na(dailySsmtBullQTs) and dailySsmtBullQTs == curQTs
+                dailyHssmtBSuppressed := suppressDHB
+                if dailyHssmtBSuppressed
+                    if not na(dailyHssmtBLine)
+                        line.set_color(dailyHssmtBLine, color.new(ssmtBullLineCol, 100))
+                    if not na(dailyHssmtBLbl)
+                        label.set_textcolor(dailyHssmtBLbl, color.new(color.black, 100))
             if not splitDHB and not na(dailyHssmtBEventKey)
                 bool rolledB = not na(dailyHssmtBActiveQTs) and not na(curQTs) and curQTs != dailyHssmtBActiveQTs
                 if rolledB
-                    f_ssmt_hist_push(dailyHssmtBLine, dailyHssmtBLbl, dailyHssmtBHistLines, dailyHssmtBHistLbls, ssmtKeepEff)
+                    if dailyHssmtBSuppressed
+                        if not na(dailyHssmtBLine)
+                            line.delete(dailyHssmtBLine)
+                        if not na(dailyHssmtBLbl)
+                            label.delete(dailyHssmtBLbl)
+                        dailyHssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(dailyHssmtBLine, dailyHssmtBLbl, dailyHssmtBHistLines, dailyHssmtBHistLbls, dailyHssmtBHistQTs, dailyHssmtBActiveQTs, ssmtKeepEff)
                 else
                     if not na(dailyHssmtBLine)
                         line.delete(dailyHssmtBLine)
@@ -1698,7 +1836,11 @@ f_run_ssmt_hssmt() =>
                 dailyHssmtBLbl := na
             dailyHssmtBEventKey := na
             dailyHssmtBExtendTier := 0
+            dailyHssmtBSuppressed := false
         f_ssmt_hist_trim(dailyHssmtBHistLines, dailyHssmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(dailyHssmtBHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(dailyHssmtBHistLines, dailyHssmtBHistLbls, dailyHssmtBHistQTs, ssmtBHistQTs)
     else
         if not na(dailyHssmtBLine)
             line.delete(dailyHssmtBLine)
@@ -1707,8 +1849,10 @@ f_run_ssmt_hssmt() =>
             label.delete(dailyHssmtBLbl)
             dailyHssmtBLbl := na
         f_ssmt_hist_clear(dailyHssmtBHistLines, dailyHssmtBHistLbls)
+        f_ssmt_hist_clear_q(dailyHssmtBHistQTs)
         dailyHssmtBEventKey := na
         dailyHssmtBExtendTier := 0
+        dailyHssmtBSuppressed := false
 
     // -----------------------------------------------------------------------------
     // Bearish m90 SSMT (ES/NQ) — test-only
@@ -1717,11 +1861,13 @@ f_run_ssmt_hssmt() =>
     var table m90SsmtDbgTbl = na
     var line[] m90SsmtHistLines = array.new_line()
     var label[] m90SsmtHistLbls = array.new_label()
+    var int[] m90SsmtHistQTs = array.new_int()
     var line m90SsmtLine = na
     var int  m90SsmtEventKey = na
     var label m90SsmtLbl = na
     var int  m90SsmtExtendTier = 0
     var int  m90SsmtActiveQTs = na
+    var int  m90SsmtBearQTs = na
     int M90SsmtQLen = 90 * 60 * 1000
 
     bool ssmt90mTfOk = vis90mTf
@@ -1868,11 +2014,12 @@ f_run_ssmt_hssmt() =>
             if splitM
                 int eventKey = prevHTs
                 if na(m90SsmtEventKey) or m90SsmtEventKey != eventKey
-                    f_ssmt_hist_push(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, m90SsmtHistQTs, m90SsmtActiveQTs, ssmtKeepEff)
                     m90SsmtLine := na
                     m90SsmtLbl := na
                     m90SsmtEventKey := eventKey
                     m90SsmtActiveQTs := curQTs
+                    m90SsmtBearQTs := curQTs
                     m90SsmtExtendTier := 0
 
                 if hasPoints and curSweep
@@ -1936,7 +2083,7 @@ f_run_ssmt_hssmt() =>
             if not splitM and not na(m90SsmtEventKey)
                 bool rolled = not na(m90SsmtActiveQTs) and not na(curQTs) and curQTs != m90SsmtActiveQTs
                 if rolled
-                    f_ssmt_hist_push(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(m90SsmtLine, m90SsmtLbl, m90SsmtHistLines, m90SsmtHistLbls, m90SsmtHistQTs, m90SsmtActiveQTs, ssmtKeepEff)
                 else
                     if not na(m90SsmtLine)
                         line.delete(m90SsmtLine)
@@ -1958,6 +2105,7 @@ f_run_ssmt_hssmt() =>
             m90SsmtEventKey := na
             m90SsmtExtendTier := 0
         f_ssmt_hist_trim(m90SsmtHistLines, m90SsmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(m90SsmtHistQTs, ssmtKeepEff)
     else
         if not na(m90SsmtLine)
             line.delete(m90SsmtLine)
@@ -1966,6 +2114,7 @@ f_run_ssmt_hssmt() =>
             label.delete(m90SsmtLbl)
             m90SsmtLbl := na
         f_ssmt_hist_clear(m90SsmtHistLines, m90SsmtHistLbls)
+        f_ssmt_hist_clear_q(m90SsmtHistQTs)
         if not na(m90SsmtDbgTbl)
             table.delete(m90SsmtDbgTbl)
             m90SsmtDbgTbl := na
@@ -1979,11 +2128,13 @@ f_run_ssmt_hssmt() =>
     var table m90SsmtBDbgTbl = na
     var line[] m90SsmtBHistLines = array.new_line()
     var label[] m90SsmtBHistLbls = array.new_label()
+    var int[] m90SsmtBHistQTs = array.new_int()
     var line m90SsmtBLine = na
     var int  m90SsmtBEventKey = na
     var label m90SsmtBLbl = na
     var int  m90SsmtBExtendTier = 0
     var int  m90SsmtBActiveQTs = na
+    var int  m90SsmtBullQTs = na
 
     bool ssmt90mBullTfOk = vis90mTf
     if show90mBullSSMT and ssmt90mBullTfOk
@@ -2034,11 +2185,12 @@ f_run_ssmt_hssmt() =>
             if splitMB
                 int eventKeyB = prevLTs
                 if na(m90SsmtBEventKey) or m90SsmtBEventKey != eventKeyB
-                    f_ssmt_hist_push(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, m90SsmtBHistQTs, m90SsmtBActiveQTs, ssmtKeepEff)
                     m90SsmtBLine := na
                     m90SsmtBLbl := na
                     m90SsmtBEventKey := eventKeyB
                     m90SsmtBActiveQTs := curQTs
+                    m90SsmtBullQTs := curQTs
                     m90SsmtBExtendTier := 0
 
                 if hasPointsB and curSweepB
@@ -2085,7 +2237,7 @@ f_run_ssmt_hssmt() =>
                         int x2B = line.get_x2(m90SsmtBLine)
                         xMidB := x1B + int((x2B - x1B) / 2)
                         yMidB := (line.get_y1(m90SsmtBLine) + line.get_y2(m90SsmtBLine)) / 2
-                    float yLblB = yMidB - syminfo.mintick
+                    float yLblB = yMidB - (syminfo.mintick * 6)
 
                     if na(m90SsmtBLbl)
                         m90SsmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
@@ -2102,7 +2254,7 @@ f_run_ssmt_hssmt() =>
             if not splitMB and not na(m90SsmtBEventKey)
                 bool rolled = not na(m90SsmtBActiveQTs) and not na(curQTs) and curQTs != m90SsmtBActiveQTs
                 if rolled
-                    f_ssmt_hist_push(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeepEff)
+                    f_ssmt_hist_push_q(m90SsmtBLine, m90SsmtBLbl, m90SsmtBHistLines, m90SsmtBHistLbls, m90SsmtBHistQTs, m90SsmtBActiveQTs, ssmtKeepEff)
                 else
                     if not na(m90SsmtBLine)
                         line.delete(m90SsmtBLine)
@@ -2124,6 +2276,7 @@ f_run_ssmt_hssmt() =>
             m90SsmtBEventKey := na
             m90SsmtBExtendTier := 0
         f_ssmt_hist_trim(m90SsmtBHistLines, m90SsmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(m90SsmtBHistQTs, ssmtKeepEff)
     else
         if not na(m90SsmtBLine)
             line.delete(m90SsmtBLine)
@@ -2132,6 +2285,7 @@ f_run_ssmt_hssmt() =>
             label.delete(m90SsmtBLbl)
             m90SsmtBLbl := na
         f_ssmt_hist_clear(m90SsmtBHistLines, m90SsmtBHistLbls)
+        f_ssmt_hist_clear_q(m90SsmtBHistQTs)
         if not na(m90SsmtBDbgTbl)
             table.delete(m90SsmtBDbgTbl)
             m90SsmtBDbgTbl := na
@@ -2144,14 +2298,16 @@ f_run_ssmt_hssmt() =>
     // -----------------------------------------------------------------------------
     var line[] m90HssmtHistLines = array.new_line()
     var label[] m90HssmtHistLbls = array.new_label()
+    var int[] m90HssmtHistQTs = array.new_int()
     var line m90HssmtLine = na
     var int  m90HssmtEventKey = na
     var label m90HssmtLbl = na
     var int  m90HssmtExtendTier = 0
     var int  m90HssmtActiveQTs = na
+    var bool m90HssmtSuppressed = false
 
     bool hssmt90mTfOk = vis90mTf
-    if show90mBearHSSMT and hssmt90mTfOk and not m90BearSplit
+    if show90mBearHSSMT and hssmt90mTfOk
         string chartTagMH = f_ssmt_tag(syminfo.tickerid)
         bool isChartESMH = chartTagMH == "ES"
         bool isChartNQMH = chartTagMH == "NQ"
@@ -2198,9 +2354,18 @@ f_run_ssmt_hssmt() =>
             if splitMH
                 int eventKey = prevHTs
                 if na(m90HssmtEventKey) or m90HssmtEventKey != eventKey
-                    f_ssmt_hist_push(m90HssmtLine, m90HssmtLbl, m90HssmtHistLines, m90HssmtHistLbls, ssmtKeepEff)
-                    m90HssmtLine := na
-                    m90HssmtLbl := na
+                    if m90HssmtSuppressed
+                        if not na(m90HssmtLine)
+                            line.delete(m90HssmtLine)
+                        if not na(m90HssmtLbl)
+                            label.delete(m90HssmtLbl)
+                        m90HssmtLine := na
+                        m90HssmtLbl := na
+                        m90HssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(m90HssmtLine, m90HssmtLbl, m90HssmtHistLines, m90HssmtHistLbls, m90HssmtHistQTs, m90HssmtActiveQTs, ssmtKeepEff)
+                        m90HssmtLine := na
+                        m90HssmtLbl := na
                     m90HssmtEventKey := eventKey
                     m90HssmtActiveQTs := curQTs
                     m90HssmtExtendTier := 0
@@ -2260,10 +2425,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabel and not na(m90HssmtLbl)
                     label.delete(m90HssmtLbl)
                     m90HssmtLbl := na
+                bool suppressMH = ssmtOverride and not na(m90SsmtBearQTs) and m90SsmtBearQTs == curQTs
+                m90HssmtSuppressed := suppressMH
+                if m90HssmtSuppressed
+                    if not na(m90HssmtLine)
+                        line.set_color(m90HssmtLine, color.new(ssmtBearLineCol, 100))
+                    if not na(m90HssmtLbl)
+                        label.set_textcolor(m90HssmtLbl, color.new(color.black, 100))
             if not splitMH and not na(m90HssmtEventKey)
                 bool rolled = not na(m90HssmtActiveQTs) and not na(curQTs) and curQTs != m90HssmtActiveQTs
                 if rolled
-                    f_ssmt_hist_push(m90HssmtLine, m90HssmtLbl, m90HssmtHistLines, m90HssmtHistLbls, ssmtKeepEff)
+                    if m90HssmtSuppressed
+                        if not na(m90HssmtLine)
+                            line.delete(m90HssmtLine)
+                        if not na(m90HssmtLbl)
+                            label.delete(m90HssmtLbl)
+                        m90HssmtSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(m90HssmtLine, m90HssmtLbl, m90HssmtHistLines, m90HssmtHistLbls, m90HssmtHistQTs, m90HssmtActiveQTs, ssmtKeepEff)
                 else
                     if not na(m90HssmtLine)
                         line.delete(m90HssmtLine)
@@ -2284,7 +2463,11 @@ f_run_ssmt_hssmt() =>
                 m90HssmtLbl := na
             m90HssmtEventKey := na
             m90HssmtExtendTier := 0
+            m90HssmtSuppressed := false
         f_ssmt_hist_trim(m90HssmtHistLines, m90HssmtHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(m90HssmtHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(m90HssmtHistLines, m90HssmtHistLbls, m90HssmtHistQTs, m90SsmtHistQTs)
     else
         if not na(m90HssmtLine)
             line.delete(m90HssmtLine)
@@ -2293,8 +2476,10 @@ f_run_ssmt_hssmt() =>
             label.delete(m90HssmtLbl)
             m90HssmtLbl := na
         f_ssmt_hist_clear(m90HssmtHistLines, m90HssmtHistLbls)
+        f_ssmt_hist_clear_q(m90HssmtHistQTs)
         m90HssmtEventKey := na
         m90HssmtExtendTier := 0
+        m90HssmtSuppressed := false
 
     // -----------------------------------------------------------------------------
     // Bullish m90 HSSMT (ES/NQ) — test-only
@@ -2302,14 +2487,16 @@ f_run_ssmt_hssmt() =>
     // -----------------------------------------------------------------------------
     var line[] m90HssmtBHistLines = array.new_line()
     var label[] m90HssmtBHistLbls = array.new_label()
+    var int[] m90HssmtBHistQTs = array.new_int()
     var line m90HssmtBLine = na
     var int  m90HssmtBEventKey = na
     var label m90HssmtBLbl = na
     var int  m90HssmtBExtendTier = 0
     var int  m90HssmtBActiveQTs = na
+    var bool m90HssmtBSuppressed = false
 
     bool hssmt90mBullTfOk = vis90mTf
-    if show90mBullHSSMT and hssmt90mBullTfOk and not m90BullSplit
+    if show90mBullHSSMT and hssmt90mBullTfOk
         string chartTagMHB = f_ssmt_tag(syminfo.tickerid)
         bool isChartESMHB = chartTagMHB == "ES"
         bool isChartNQMHB = chartTagMHB == "NQ"
@@ -2356,9 +2543,18 @@ f_run_ssmt_hssmt() =>
             if splitMHB
                 int eventKeyB = prevLTs
                 if na(m90HssmtBEventKey) or m90HssmtBEventKey != eventKeyB
-                    f_ssmt_hist_push(m90HssmtBLine, m90HssmtBLbl, m90HssmtBHistLines, m90HssmtBHistLbls, ssmtKeepEff)
-                    m90HssmtBLine := na
-                    m90HssmtBLbl := na
+                    if m90HssmtBSuppressed
+                        if not na(m90HssmtBLine)
+                            line.delete(m90HssmtBLine)
+                        if not na(m90HssmtBLbl)
+                            label.delete(m90HssmtBLbl)
+                        m90HssmtBLine := na
+                        m90HssmtBLbl := na
+                        m90HssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(m90HssmtBLine, m90HssmtBLbl, m90HssmtBHistLines, m90HssmtBHistLbls, m90HssmtBHistQTs, m90HssmtBActiveQTs, ssmtKeepEff)
+                        m90HssmtBLine := na
+                        m90HssmtBLbl := na
                     m90HssmtBEventKey := eventKeyB
                     m90HssmtBActiveQTs := curQTs
                     m90HssmtBExtendTier := 0
@@ -2407,7 +2603,7 @@ f_run_ssmt_hssmt() =>
                         int x2B = line.get_x2(m90HssmtBLine)
                         xMidB := x1B + int((x2B - x1B) / 2)
                         yMidB := (line.get_y1(m90HssmtBLine) + line.get_y2(m90HssmtBLine)) / 2
-                    float yLblB = yMidB - syminfo.mintick
+                    float yLblB = yMidB - (syminfo.mintick * 6)
 
                     if na(m90HssmtBLbl)
                         m90HssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
@@ -2418,10 +2614,24 @@ f_run_ssmt_hssmt() =>
                 else if not showLabelB and not na(m90HssmtBLbl)
                     label.delete(m90HssmtBLbl)
                     m90HssmtBLbl := na
+                bool suppressMHB = ssmtOverride and not na(m90SsmtBullQTs) and m90SsmtBullQTs == curQTs
+                m90HssmtBSuppressed := suppressMHB
+                if m90HssmtBSuppressed
+                    if not na(m90HssmtBLine)
+                        line.set_color(m90HssmtBLine, color.new(ssmtBullLineCol, 100))
+                    if not na(m90HssmtBLbl)
+                        label.set_textcolor(m90HssmtBLbl, color.new(color.black, 100))
             if not splitMHB and not na(m90HssmtBEventKey)
                 bool rolledB = not na(m90HssmtBActiveQTs) and not na(curQTs) and curQTs != m90HssmtBActiveQTs
                 if rolledB
-                    f_ssmt_hist_push(m90HssmtBLine, m90HssmtBLbl, m90HssmtBHistLines, m90HssmtBHistLbls, ssmtKeepEff)
+                    if m90HssmtBSuppressed
+                        if not na(m90HssmtBLine)
+                            line.delete(m90HssmtBLine)
+                        if not na(m90HssmtBLbl)
+                            label.delete(m90HssmtBLbl)
+                        m90HssmtBSuppressed := false
+                    else
+                        f_ssmt_hist_push_q(m90HssmtBLine, m90HssmtBLbl, m90HssmtBHistLines, m90HssmtBHistLbls, m90HssmtBHistQTs, m90HssmtBActiveQTs, ssmtKeepEff)
                 else
                     if not na(m90HssmtBLine)
                         line.delete(m90HssmtBLine)
@@ -2442,7 +2652,11 @@ f_run_ssmt_hssmt() =>
                 m90HssmtBLbl := na
             m90HssmtBEventKey := na
             m90HssmtBExtendTier := 0
+            m90HssmtBSuppressed := false
         f_ssmt_hist_trim(m90HssmtBHistLines, m90HssmtBHistLbls, ssmtKeepEff)
+        f_ssmt_hist_trim_q(m90HssmtBHistQTs, ssmtKeepEff)
+        if ssmtOverride
+            f_ssmt_hist_purge_q(m90HssmtBHistLines, m90HssmtBHistLbls, m90HssmtBHistQTs, m90SsmtBHistQTs)
     else
         if not na(m90HssmtBLine)
             line.delete(m90HssmtBLine)
@@ -2451,8 +2665,10 @@ f_run_ssmt_hssmt() =>
             label.delete(m90HssmtBLbl)
             m90HssmtBLbl := na
         f_ssmt_hist_clear(m90HssmtBHistLines, m90HssmtBHistLbls)
+        f_ssmt_hist_clear_q(m90HssmtBHistQTs)
         m90HssmtBEventKey := na
         m90HssmtBExtendTier := 0
+        m90HssmtBSuppressed := false
 
 
     // -----------------------------------------------------------------------------
@@ -2840,7 +3056,7 @@ f_run_ssmt_hssmt() =>
                         int x2B = line.get_x2(microSsmtBLine)
                         xMidB := x1B + int((x2B - x1B) / 2)
                         yMidB := (line.get_y1(microSsmtBLine) + line.get_y2(microSsmtBLine)) / 2
-                    float yLblB = yMidB - syminfo.mintick
+                    float yLblB = yMidB - (syminfo.mintick * 6)
 
                     if na(microSsmtBLbl)
                         microSsmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
@@ -2890,7 +3106,7 @@ f_run_ssmt_hssmt() =>
         microSsmtBEventKey := na
         microSsmtBExtendTier := 0
 
-    if showMicroBearHSSMT and hssmtMicroTfOk and not microBearSplit
+    if showMicroBearHSSMT and hssmtMicroTfOk
         string chartTagU = f_ssmt_tag(syminfo.tickerid)
         bool isChartESU = chartTagU == "ES"
         bool isChartNQU = chartTagU == "NQ"
@@ -3049,7 +3265,7 @@ f_run_ssmt_hssmt() =>
     var int  microHssmtBActiveQTs = na
 
     bool hssmtMicroBullTfOk = visMicroTf
-    if showMicroBullHSSMT and hssmtMicroBullTfOk and not microBullSplit
+    if showMicroBullHSSMT and hssmtMicroBullTfOk
         string chartTagUB = f_ssmt_tag(syminfo.tickerid)
         bool isChartESUB = chartTagUB == "ES"
         bool isChartNQUB = chartTagUB == "NQ"
@@ -3147,7 +3363,7 @@ f_run_ssmt_hssmt() =>
                         int x2B = line.get_x2(microHssmtBLine)
                         xMidB := x1B + int((x2B - x1B) / 2)
                         yMidB := (line.get_y1(microHssmtBLine) + line.get_y2(microHssmtBLine)) / 2
-                    float yLblB = yMidB - syminfo.mintick
+                    float yLblB = yMidB - (syminfo.mintick * 6)
 
                     if na(microHssmtBLbl)
                         microHssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
@@ -3570,7 +3786,7 @@ f_run_ssmt_hssmt() =>
                         int x2B = line.get_x2(nanoSsmtBLine)
                         xMidB := x1B + int((x2B - x1B) / 2)
                         yMidB := (line.get_y1(nanoSsmtBLine) + line.get_y2(nanoSsmtBLine)) / 2
-                    float yLblB = yMidB - syminfo.mintick
+                    float yLblB = yMidB - (syminfo.mintick * 6)
 
                     if na(nanoSsmtBLbl)
                         nanoSsmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
@@ -3633,7 +3849,7 @@ f_run_ssmt_hssmt() =>
     var int  nanoHssmtActiveQTs = na
 
     bool hssmtNanoTfOk = visNanoTf
-    if showNanoBearHSSMT and hssmtNanoTfOk and not nanoBearSplit
+    if showNanoBearHSSMT and hssmtNanoTfOk
         string chartTagNH = f_ssmt_tag(syminfo.tickerid)
         bool isChartESNH = chartTagNH == "ES"
         bool isChartNQNH = chartTagNH == "NQ"
@@ -3791,7 +4007,7 @@ f_run_ssmt_hssmt() =>
     var int  nanoHssmtBActiveQTs = na
 
     bool hssmtNanoBullTfOk = visNanoTf
-    if showNanoBullHSSMT and hssmtNanoBullTfOk and not nanoBullSplit
+    if showNanoBullHSSMT and hssmtNanoBullTfOk
         string chartTagNHB = f_ssmt_tag(syminfo.tickerid)
         bool isChartESNHB = chartTagNHB == "ES"
         bool isChartNQNHB = chartTagNHB == "NQ"
@@ -3889,7 +4105,7 @@ f_run_ssmt_hssmt() =>
                         int x2B = line.get_x2(nanoHssmtBLine)
                         xMidB := x1B + int((x2B - x1B) / 2)
                         yMidB := (line.get_y1(nanoHssmtBLine) + line.get_y2(nanoHssmtBLine)) / 2
-                    float yLblB = yMidB - syminfo.mintick
+                    float yLblB = yMidB - (syminfo.mintick * 6)
 
                     if na(nanoHssmtBLbl)
                         nanoHssmtBLbl := label.new(xMidB, yLblB, lblTextB, xloc=xloc.bar_time, style=label.style_none, textcolor=color.black, size=size.tiny)
