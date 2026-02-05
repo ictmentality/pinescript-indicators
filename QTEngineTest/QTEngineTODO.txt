@@ -9,19 +9,6 @@ DONE
 
 DEFERRED
 - Elastic/calendar cycles (Weekly/Monthly/etc)
-- Divider collision module
-- Debug/telemetry module
-
-1) Public Surface
-2) Core Module
-3) Fixed-Cycle Module
-4) Calendar/Session Modules
-5) Ingestion/caching module
-6) Divider collision module
-7) Debug/telemetry module
-8) Minimal rework plan inside QTEngine
-
-
 
 
 1) Public surface (keep stable)
@@ -257,7 +244,4 @@ QTEngine Modules (Should these be modules or should my indicator's implement the
 
 
 Testing TODO
-- DFR toggle (Projections and highlight)
 - Better Asset Selector (already have helper file)
-- Add toggle for "Display Parent Cycle Opens" (Maybe a list: All Opens, Q1 + Q2, None)
-- Help with SSMT drawings
