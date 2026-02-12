@@ -1058,6 +1058,7 @@ f_hist_ensure_current() =>
     0
 
 // Main draw logic
+bool drawNow = barstate.islast and barstate.isconfirmed
 int enabledCycles = (showDailyTf ? 1 : 0) + (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
 if enabledCycles < 1
     enabledCycles := 1
@@ -1162,108 +1163,109 @@ else
         if not na(d.endTs) and tc > d.endTs
             vset_add(dailyV, d.endTs, COL_Q1)
 
-    if not showOpens
-        int dj = array.size(dailyHistStart) - 1
-        while dj >= 0
-            f_dhist_kill_at(dj)
-            dj -= 1
-    else
-        int dsz = array.size(dailyHistStart)
-        int dk = 0
-        while dk < dsz
-            int dEndTs = array.get(dailyHistEnd, dk)
-
-            float dy1 = array.get(daily_h_q1o, dk)
-            int   dx1 = array.get(daily_h_q1oTs, dk)
-            line  dl1 = array.get(daily_l_q1o, dk)
-            if not na(dy1) and not na(dx1) and not na(dEndTs)
-                dl1 := f_set_or_make_hline(dl1, dx1, dEndTs, dy1, q1OpenCol, q1OpenStyle)
-            else
-                dl1 := f_kill(dl1)
-            array.set(daily_l_q1o, dk, dl1)
-
-            float dy2 = array.get(daily_h_q2o, dk)
-            int   dx2 = array.get(daily_h_q2oTs, dk)
-            line  dl2 = array.get(daily_l_q2o, dk)
-            if not na(dy2) and not na(dx2) and not na(dEndTs)
-                dl2 := f_set_or_make_hline(dl2, dx2, dEndTs, dy2, q2OpenCol, q2OpenStyle)
-            else
-                dl2 := f_kill(dl2)
-            array.set(daily_l_q2o, dk, dl2)
-
-            float dy3 = array.get(daily_h_q3o, dk)
-            int   dx3 = array.get(daily_h_q3oTs, dk)
-            line  dl3 = array.get(daily_l_q3o, dk)
-            if not na(dy3) and not na(dx3) and not na(dEndTs)
-                dl3 := f_set_or_make_hline(dl3, dx3, dEndTs, dy3, q3OpenCol, q3OpenStyle)
-            else
-                dl3 := f_kill(dl3)
-            array.set(daily_l_q3o, dk, dl3)
-
-            float dy4 = array.get(daily_h_q4o, dk)
-            int   dx4 = array.get(daily_h_q4oTs, dk)
-            line  dl4 = array.get(daily_l_q4o, dk)
-            if not na(dy4) and not na(dx4) and not na(dEndTs)
-                dl4 := f_set_or_make_hline(dl4, dx4, dEndTs, dy4, q4OpenCol, q4OpenStyle)
-            else
-                dl4 := f_kill(dl4)
-            array.set(daily_l_q4o, dk, dl4)
-
-            dk += 1
-
-    int dfrSz = array.size(dailyHistStart)
-    int dfrIdx = 0
-    while dfrIdx < dfrSz
-        int dQ1 = array.get(dailyHistStart, dfrIdx)
-        int dQ2 = array.get(daily_h_q2oTs, dfrIdx)
-        if na(dQ2) and dQ1 == d.q1Ts
-            dQ2 := d.q2Ts
-        float dHi = array.get(daily_dfr_hi, dfrIdx)
-        float dLo = array.get(daily_dfr_lo, dfrIdx)
-        box dBox = array.get(daily_dfr_box, dfrIdx)
-        if not na(dQ1) and not na(dQ2) and not na(dHi) and not na(dLo)
-            int dStart = dQ1 + int((dQ2 - dQ1) / 3)
-            dBox := f_set_or_make_box(dBox, dStart, dHi, dQ2, dLo, COL_Q1)
+    if drawNow
+        if not showOpens
+            int dj = array.size(dailyHistStart) - 1
+            while dj >= 0
+                f_dhist_kill_at(dj)
+                dj -= 1
         else
-            dBox := f_kill_box(dBox)
-        array.set(daily_dfr_box, dfrIdx, dBox)
-        dfrIdx += 1
+            int dsz = array.size(dailyHistStart)
+            int dk = 0
+            while dk < dsz
+                int dEndTs = array.get(dailyHistEnd, dk)
 
-    int dStdvSz = array.size(dailyHistStart)
-    int dStdvIdx = 0
-    while dStdvIdx < dStdvSz
-        int dQ1 = array.get(dailyHistStart, dStdvIdx)
-        int dQ2 = array.get(daily_h_q2oTs, dStdvIdx)
-        if na(dQ2) and dQ1 == d.q1Ts
-            dQ2 := d.q2Ts
-        int dEndTs = array.get(dailyHistEnd, dStdvIdx)
-        int dStart = na
-        if not na(dQ1) and not na(dQ2)
-            dStart := dQ1 + int((dQ2 - dQ1) / 3)
-        float dHi = array.get(daily_dfr_hi, dStdvIdx)
-        float dLo = array.get(daily_dfr_lo, dStdvIdx)
-        int dBase = dStdvIdx * STDV_LEVELS_N
-        int dLvlIdx = 0
-        while dLvlIdx < STDV_LEVELS_N
-            int dLineIdx = dBase + dLvlIdx
-            line dLn = array.get(daily_l_stdv, dLineIdx)
-            label dLbl = array.get(daily_l_stdv_lbl, dLineIdx)
-            float dLvl = array.get(STDV_LEVELS, dLvlIdx)
-            float dY = dLo + (dHi - dLo) * dLvl
-            bool dCanDraw = showDfrStdv and not na(dStart) and not na(dEndTs) and not na(dHi) and not na(dLo)
-            if dCanDraw
-                dLn := f_set_or_make_hline(dLn, dStart, dEndTs, dY, COL_Q1, line.style_solid)
-                if f_show_stdv_label(dLvl)
-                    dLbl := f_set_or_make_label(dLbl, dStart, dY, str.tostring(dLvl), COL_Q1)
+                float dy1 = array.get(daily_h_q1o, dk)
+                int   dx1 = array.get(daily_h_q1oTs, dk)
+                line  dl1 = array.get(daily_l_q1o, dk)
+                if not na(dy1) and not na(dx1) and not na(dEndTs)
+                    dl1 := f_set_or_make_hline(dl1, dx1, dEndTs, dy1, q1OpenCol, q1OpenStyle)
                 else
-                    dLbl := f_kill_label(dLbl)
+                    dl1 := f_kill(dl1)
+                array.set(daily_l_q1o, dk, dl1)
+
+                float dy2 = array.get(daily_h_q2o, dk)
+                int   dx2 = array.get(daily_h_q2oTs, dk)
+                line  dl2 = array.get(daily_l_q2o, dk)
+                if not na(dy2) and not na(dx2) and not na(dEndTs)
+                    dl2 := f_set_or_make_hline(dl2, dx2, dEndTs, dy2, q2OpenCol, q2OpenStyle)
+                else
+                    dl2 := f_kill(dl2)
+                array.set(daily_l_q2o, dk, dl2)
+
+                float dy3 = array.get(daily_h_q3o, dk)
+                int   dx3 = array.get(daily_h_q3oTs, dk)
+                line  dl3 = array.get(daily_l_q3o, dk)
+                if not na(dy3) and not na(dx3) and not na(dEndTs)
+                    dl3 := f_set_or_make_hline(dl3, dx3, dEndTs, dy3, q3OpenCol, q3OpenStyle)
+                else
+                    dl3 := f_kill(dl3)
+                array.set(daily_l_q3o, dk, dl3)
+
+                float dy4 = array.get(daily_h_q4o, dk)
+                int   dx4 = array.get(daily_h_q4oTs, dk)
+                line  dl4 = array.get(daily_l_q4o, dk)
+                if not na(dy4) and not na(dx4) and not na(dEndTs)
+                    dl4 := f_set_or_make_hline(dl4, dx4, dEndTs, dy4, q4OpenCol, q4OpenStyle)
+                else
+                    dl4 := f_kill(dl4)
+                array.set(daily_l_q4o, dk, dl4)
+
+                dk += 1
+
+        int dfrSz = array.size(dailyHistStart)
+        int dfrIdx = 0
+        while dfrIdx < dfrSz
+            int dQ1 = array.get(dailyHistStart, dfrIdx)
+            int dQ2 = array.get(daily_h_q2oTs, dfrIdx)
+            if na(dQ2) and dQ1 == d.q1Ts
+                dQ2 := d.q2Ts
+            float dHi = array.get(daily_dfr_hi, dfrIdx)
+            float dLo = array.get(daily_dfr_lo, dfrIdx)
+            box dBox = array.get(daily_dfr_box, dfrIdx)
+            if not na(dQ1) and not na(dQ2) and not na(dHi) and not na(dLo)
+                int dStart = dQ1 + int((dQ2 - dQ1) / 3)
+                dBox := f_set_or_make_box(dBox, dStart, dHi, dQ2, dLo, COL_Q1)
             else
-                dLn := f_kill(dLn)
-                dLbl := f_kill_label(dLbl)
-            array.set(daily_l_stdv, dLineIdx, dLn)
-            array.set(daily_l_stdv_lbl, dLineIdx, dLbl)
-            dLvlIdx += 1
-        dStdvIdx += 1
+                dBox := f_kill_box(dBox)
+            array.set(daily_dfr_box, dfrIdx, dBox)
+            dfrIdx += 1
+
+        int dStdvSz = array.size(dailyHistStart)
+        int dStdvIdx = 0
+        while dStdvIdx < dStdvSz
+            int dQ1 = array.get(dailyHistStart, dStdvIdx)
+            int dQ2 = array.get(daily_h_q2oTs, dStdvIdx)
+            if na(dQ2) and dQ1 == d.q1Ts
+                dQ2 := d.q2Ts
+            int dEndTs = array.get(dailyHistEnd, dStdvIdx)
+            int dStart = na
+            if not na(dQ1) and not na(dQ2)
+                dStart := dQ1 + int((dQ2 - dQ1) / 3)
+            float dHi = array.get(daily_dfr_hi, dStdvIdx)
+            float dLo = array.get(daily_dfr_lo, dStdvIdx)
+            int dBase = dStdvIdx * STDV_LEVELS_N
+            int dLvlIdx = 0
+            while dLvlIdx < STDV_LEVELS_N
+                int dLineIdx = dBase + dLvlIdx
+                line dLn = array.get(daily_l_stdv, dLineIdx)
+                label dLbl = array.get(daily_l_stdv_lbl, dLineIdx)
+                float dLvl = array.get(STDV_LEVELS, dLvlIdx)
+                float dY = dLo + (dHi - dLo) * dLvl
+                bool dCanDraw = showDfrStdv and not na(dStart) and not na(dEndTs) and not na(dHi) and not na(dLo)
+                if dCanDraw
+                    dLn := f_set_or_make_hline(dLn, dStart, dEndTs, dY, COL_Q1, line.style_solid)
+                    if f_show_stdv_label(dLvl)
+                        dLbl := f_set_or_make_label(dLbl, dStart, dY, str.tostring(dLvl), COL_Q1)
+                    else
+                        dLbl := f_kill_label(dLbl)
+                else
+                    dLn := f_kill(dLn)
+                    dLbl := f_kill_label(dLbl)
+                array.set(daily_l_stdv, dLineIdx, dLn)
+                array.set(daily_l_stdv_lbl, dLineIdx, dLbl)
+                dLvlIdx += 1
+            dStdvIdx += 1
 
 if not showMicroTf
     vset_clear(microV)
@@ -1348,112 +1350,113 @@ else
         if not na(m.endTs) and tc > m.endTs
             vset_add(microV, m.endTs, COL_Q1)
 
-    if not showOpens
-        int mj = array.size(microHistStart) - 1
-        while mj >= 0
-            f_mhist_kill_at(mj)
-            mj -= 1
-    else
-        int msz = array.size(microHistStart)
-        int mk = 0
-        while mk < msz
-            int mEndTs = array.get(microHistEnd, mk)
-
-            float my1 = array.get(micro_h_q1o, mk)
-            int   mx1 = array.get(micro_h_q1oTs, mk)
-            line  ml1 = array.get(micro_l_q1o, mk)
-            bool mSuppressQ1 = parentActiveM90 and f_find_int(parentM90OpenTs, mx1) != -1
-            if not na(my1) and not na(mx1) and not na(mEndTs) and not mSuppressQ1
-                ml1 := f_set_or_make_hline(ml1, mx1, mEndTs, my1, q1OpenCol, q1OpenStyle)
-            else
-                ml1 := f_kill(ml1)
-            array.set(micro_l_q1o, mk, ml1)
-
-            float my2 = array.get(micro_h_q2o, mk)
-            int   mx2 = array.get(micro_h_q2oTs, mk)
-            line  ml2 = array.get(micro_l_q2o, mk)
-            bool mSuppressQ2 = parentActiveM90 and f_find_int(parentM90OpenTs, mx2) != -1
-            if not na(my2) and not na(mx2) and not na(mEndTs) and not mSuppressQ2
-                ml2 := f_set_or_make_hline(ml2, mx2, mEndTs, my2, q2OpenCol, q2OpenStyle)
-            else
-                ml2 := f_kill(ml2)
-            array.set(micro_l_q2o, mk, ml2)
-
-            float my3 = array.get(micro_h_q3o, mk)
-            int   mx3 = array.get(micro_h_q3oTs, mk)
-            line  ml3 = array.get(micro_l_q3o, mk)
-            bool mSuppressQ3 = parentActiveM90 and f_find_int(parentM90OpenTs, mx3) != -1
-            if not na(my3) and not na(mx3) and not na(mEndTs) and not mSuppressQ3
-                ml3 := f_set_or_make_hline(ml3, mx3, mEndTs, my3, q3OpenCol, q3OpenStyle)
-            else
-                ml3 := f_kill(ml3)
-            array.set(micro_l_q3o, mk, ml3)
-
-            float my4 = array.get(micro_h_q4o, mk)
-            int   mx4 = array.get(micro_h_q4oTs, mk)
-            line  ml4 = array.get(micro_l_q4o, mk)
-            bool mSuppressQ4 = parentActiveM90 and f_find_int(parentM90OpenTs, mx4) != -1
-            if not na(my4) and not na(mx4) and not na(mEndTs) and not mSuppressQ4
-                ml4 := f_set_or_make_hline(ml4, mx4, mEndTs, my4, q4OpenCol, q4OpenStyle)
-            else
-                ml4 := f_kill(ml4)
-            array.set(micro_l_q4o, mk, ml4)
-
-            mk += 1
-
-    int mDfrSz = array.size(microHistStart)
-    int mDfrIdx = 0
-    while mDfrIdx < mDfrSz
-        int mQ1 = array.get(microHistStart, mDfrIdx)
-        int mQ2 = array.get(micro_h_q2oTs, mDfrIdx)
-        if na(mQ2) and mQ1 == m.q1Ts
-            mQ2 := m.q2Ts
-        float mHi = array.get(micro_dfr_hi, mDfrIdx)
-        float mLo = array.get(micro_dfr_lo, mDfrIdx)
-        box mBox = array.get(micro_dfr_box, mDfrIdx)
-        if not na(mQ1) and not na(mQ2) and not na(mHi) and not na(mLo)
-            int mStart = mQ1 + int((mQ2 - mQ1) / 3)
-            mBox := f_set_or_make_box(mBox, mStart, mHi, mQ2, mLo, COL_Q1)
+    if drawNow
+        if not showOpens
+            int mj = array.size(microHistStart) - 1
+            while mj >= 0
+                f_mhist_kill_at(mj)
+                mj -= 1
         else
-            mBox := f_kill_box(mBox)
-        array.set(micro_dfr_box, mDfrIdx, mBox)
-        mDfrIdx += 1
+            int msz = array.size(microHistStart)
+            int mk = 0
+            while mk < msz
+                int mEndTs = array.get(microHistEnd, mk)
 
-    int mStdvSz = array.size(microHistStart)
-    int mStdvIdx = 0
-    while mStdvIdx < mStdvSz
-        int mQ1 = array.get(microHistStart, mStdvIdx)
-        int mQ2 = array.get(micro_h_q2oTs, mStdvIdx)
-        if na(mQ2) and mQ1 == m.q1Ts
-            mQ2 := m.q2Ts
-        int mEndTs = array.get(microHistEnd, mStdvIdx)
-        int mStart = na
-        if not na(mQ1) and not na(mQ2)
-            mStart := mQ1 + int((mQ2 - mQ1) / 3)
-        float mHi = array.get(micro_dfr_hi, mStdvIdx)
-        float mLo = array.get(micro_dfr_lo, mStdvIdx)
-        int mBase = mStdvIdx * STDV_LEVELS_N
-        int mLvlIdx = 0
-        while mLvlIdx < STDV_LEVELS_N
-            int mLineIdx = mBase + mLvlIdx
-            line mLn = array.get(micro_l_stdv, mLineIdx)
-            label mLbl = array.get(micro_l_stdv_lbl, mLineIdx)
-            float mLvl = array.get(STDV_LEVELS, mLvlIdx)
-            float mY = mLo + (mHi - mLo) * mLvl
-            bool mCanDraw = showDfrStdv and not na(mStart) and not na(mEndTs) and not na(mHi) and not na(mLo)
-            if mCanDraw
-                mLn := f_set_or_make_hline(mLn, mStart, mEndTs, mY, COL_Q1, line.style_solid)
-                if f_show_stdv_label(mLvl)
-                    mLbl := f_set_or_make_label(mLbl, mStart, mY, str.tostring(mLvl), COL_Q1)
+                float my1 = array.get(micro_h_q1o, mk)
+                int   mx1 = array.get(micro_h_q1oTs, mk)
+                line  ml1 = array.get(micro_l_q1o, mk)
+                bool mSuppressQ1 = parentActiveM90 and f_find_int(parentM90OpenTs, mx1) != -1
+                if not na(my1) and not na(mx1) and not na(mEndTs) and not mSuppressQ1
+                    ml1 := f_set_or_make_hline(ml1, mx1, mEndTs, my1, q1OpenCol, q1OpenStyle)
                 else
-                    mLbl := f_kill_label(mLbl)
+                    ml1 := f_kill(ml1)
+                array.set(micro_l_q1o, mk, ml1)
+
+                float my2 = array.get(micro_h_q2o, mk)
+                int   mx2 = array.get(micro_h_q2oTs, mk)
+                line  ml2 = array.get(micro_l_q2o, mk)
+                bool mSuppressQ2 = parentActiveM90 and f_find_int(parentM90OpenTs, mx2) != -1
+                if not na(my2) and not na(mx2) and not na(mEndTs) and not mSuppressQ2
+                    ml2 := f_set_or_make_hline(ml2, mx2, mEndTs, my2, q2OpenCol, q2OpenStyle)
+                else
+                    ml2 := f_kill(ml2)
+                array.set(micro_l_q2o, mk, ml2)
+
+                float my3 = array.get(micro_h_q3o, mk)
+                int   mx3 = array.get(micro_h_q3oTs, mk)
+                line  ml3 = array.get(micro_l_q3o, mk)
+                bool mSuppressQ3 = parentActiveM90 and f_find_int(parentM90OpenTs, mx3) != -1
+                if not na(my3) and not na(mx3) and not na(mEndTs) and not mSuppressQ3
+                    ml3 := f_set_or_make_hline(ml3, mx3, mEndTs, my3, q3OpenCol, q3OpenStyle)
+                else
+                    ml3 := f_kill(ml3)
+                array.set(micro_l_q3o, mk, ml3)
+
+                float my4 = array.get(micro_h_q4o, mk)
+                int   mx4 = array.get(micro_h_q4oTs, mk)
+                line  ml4 = array.get(micro_l_q4o, mk)
+                bool mSuppressQ4 = parentActiveM90 and f_find_int(parentM90OpenTs, mx4) != -1
+                if not na(my4) and not na(mx4) and not na(mEndTs) and not mSuppressQ4
+                    ml4 := f_set_or_make_hline(ml4, mx4, mEndTs, my4, q4OpenCol, q4OpenStyle)
+                else
+                    ml4 := f_kill(ml4)
+                array.set(micro_l_q4o, mk, ml4)
+
+                mk += 1
+
+        int mDfrSz = array.size(microHistStart)
+        int mDfrIdx = 0
+        while mDfrIdx < mDfrSz
+            int mQ1 = array.get(microHistStart, mDfrIdx)
+            int mQ2 = array.get(micro_h_q2oTs, mDfrIdx)
+            if na(mQ2) and mQ1 == m.q1Ts
+                mQ2 := m.q2Ts
+            float mHi = array.get(micro_dfr_hi, mDfrIdx)
+            float mLo = array.get(micro_dfr_lo, mDfrIdx)
+            box mBox = array.get(micro_dfr_box, mDfrIdx)
+            if not na(mQ1) and not na(mQ2) and not na(mHi) and not na(mLo)
+                int mStart = mQ1 + int((mQ2 - mQ1) / 3)
+                mBox := f_set_or_make_box(mBox, mStart, mHi, mQ2, mLo, COL_Q1)
             else
-                mLn := f_kill(mLn)
-                mLbl := f_kill_label(mLbl)
-            array.set(micro_l_stdv, mLineIdx, mLn)
-            array.set(micro_l_stdv_lbl, mLineIdx, mLbl)
-            mLvlIdx += 1
-        mStdvIdx += 1
+                mBox := f_kill_box(mBox)
+            array.set(micro_dfr_box, mDfrIdx, mBox)
+            mDfrIdx += 1
+
+        int mStdvSz = array.size(microHistStart)
+        int mStdvIdx = 0
+        while mStdvIdx < mStdvSz
+            int mQ1 = array.get(microHistStart, mStdvIdx)
+            int mQ2 = array.get(micro_h_q2oTs, mStdvIdx)
+            if na(mQ2) and mQ1 == m.q1Ts
+                mQ2 := m.q2Ts
+            int mEndTs = array.get(microHistEnd, mStdvIdx)
+            int mStart = na
+            if not na(mQ1) and not na(mQ2)
+                mStart := mQ1 + int((mQ2 - mQ1) / 3)
+            float mHi = array.get(micro_dfr_hi, mStdvIdx)
+            float mLo = array.get(micro_dfr_lo, mStdvIdx)
+            int mBase = mStdvIdx * STDV_LEVELS_N
+            int mLvlIdx = 0
+            while mLvlIdx < STDV_LEVELS_N
+                int mLineIdx = mBase + mLvlIdx
+                line mLn = array.get(micro_l_stdv, mLineIdx)
+                label mLbl = array.get(micro_l_stdv_lbl, mLineIdx)
+                float mLvl = array.get(STDV_LEVELS, mLvlIdx)
+                float mY = mLo + (mHi - mLo) * mLvl
+                bool mCanDraw = showDfrStdv and not na(mStart) and not na(mEndTs) and not na(mHi) and not na(mLo)
+                if mCanDraw
+                    mLn := f_set_or_make_hline(mLn, mStart, mEndTs, mY, COL_Q1, line.style_solid)
+                    if f_show_stdv_label(mLvl)
+                        mLbl := f_set_or_make_label(mLbl, mStart, mY, str.tostring(mLvl), COL_Q1)
+                    else
+                        mLbl := f_kill_label(mLbl)
+                else
+                    mLn := f_kill(mLn)
+                    mLbl := f_kill_label(mLbl)
+                array.set(micro_l_stdv, mLineIdx, mLn)
+                array.set(micro_l_stdv_lbl, mLineIdx, mLbl)
+                mLvlIdx += 1
+            mStdvIdx += 1
 
 if not show90mTf
     vset_clear(m90V)
@@ -1536,112 +1539,113 @@ else
         if not na(m90.endTs) and tc > m90.endTs
             vset_add(m90V, m90.endTs, COL_Q1)
 
-    if not showOpens
-        int m90j = array.size(m90HistStart) - 1
-        while m90j >= 0
-            f_m90hist_kill_at(m90j)
-            m90j -= 1
-    else
-        int m90sz = array.size(m90HistStart)
-        int m90k = 0
-        while m90k < m90sz
-            int m90EndTs = array.get(m90HistEnd, m90k)
-
-            float m90y1 = array.get(m90_h_q1o, m90k)
-            int   m90x1 = array.get(m90_h_q1oTs, m90k)
-            line  m90l1 = array.get(m90_l_q1o, m90k)
-            bool m90SuppressQ1 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x1) != -1
-            if not na(m90y1) and not na(m90x1) and not na(m90EndTs) and not m90SuppressQ1
-                m90l1 := f_set_or_make_hline(m90l1, m90x1, m90EndTs, m90y1, q1OpenCol, q1OpenStyle)
-            else
-                m90l1 := f_kill(m90l1)
-            array.set(m90_l_q1o, m90k, m90l1)
-
-            float m90y2 = array.get(m90_h_q2o, m90k)
-            int   m90x2 = array.get(m90_h_q2oTs, m90k)
-            line  m90l2 = array.get(m90_l_q2o, m90k)
-            bool m90SuppressQ2 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x2) != -1
-            if not na(m90y2) and not na(m90x2) and not na(m90EndTs) and not m90SuppressQ2
-                m90l2 := f_set_or_make_hline(m90l2, m90x2, m90EndTs, m90y2, q2OpenCol, q2OpenStyle)
-            else
-                m90l2 := f_kill(m90l2)
-            array.set(m90_l_q2o, m90k, m90l2)
-
-            float m90y3 = array.get(m90_h_q3o, m90k)
-            int   m90x3 = array.get(m90_h_q3oTs, m90k)
-            line  m90l3 = array.get(m90_l_q3o, m90k)
-            bool m90SuppressQ3 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x3) != -1
-            if not na(m90y3) and not na(m90x3) and not na(m90EndTs) and not m90SuppressQ3
-                m90l3 := f_set_or_make_hline(m90l3, m90x3, m90EndTs, m90y3, q3OpenCol, q3OpenStyle)
-            else
-                m90l3 := f_kill(m90l3)
-            array.set(m90_l_q3o, m90k, m90l3)
-
-            float m90y4 = array.get(m90_h_q4o, m90k)
-            int   m90x4 = array.get(m90_h_q4oTs, m90k)
-            line  m90l4 = array.get(m90_l_q4o, m90k)
-            bool m90SuppressQ4 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x4) != -1
-            if not na(m90y4) and not na(m90x4) and not na(m90EndTs) and not m90SuppressQ4
-                m90l4 := f_set_or_make_hline(m90l4, m90x4, m90EndTs, m90y4, q4OpenCol, q4OpenStyle)
-            else
-                m90l4 := f_kill(m90l4)
-            array.set(m90_l_q4o, m90k, m90l4)
-
-            m90k += 1
-
-    int m90DfrSz = array.size(m90HistStart)
-    int m90DfrIdx = 0
-    while m90DfrIdx < m90DfrSz
-        int m90Q1 = array.get(m90HistStart, m90DfrIdx)
-        int m90Q2 = array.get(m90_h_q2oTs, m90DfrIdx)
-        if na(m90Q2) and m90Q1 == m90.q1Ts
-            m90Q2 := m90.q2Ts
-        float m90Hi = array.get(m90_dfr_hi, m90DfrIdx)
-        float m90Lo = array.get(m90_dfr_lo, m90DfrIdx)
-        box m90Box = array.get(m90_dfr_box, m90DfrIdx)
-        if not na(m90Q1) and not na(m90Q2) and not na(m90Hi) and not na(m90Lo)
-            int m90Start = m90Q1 + int((m90Q2 - m90Q1) / 3)
-            m90Box := f_set_or_make_box(m90Box, m90Start, m90Hi, m90Q2, m90Lo, COL_Q1)
+    if drawNow
+        if not showOpens
+            int m90j = array.size(m90HistStart) - 1
+            while m90j >= 0
+                f_m90hist_kill_at(m90j)
+                m90j -= 1
         else
-            m90Box := f_kill_box(m90Box)
-        array.set(m90_dfr_box, m90DfrIdx, m90Box)
-        m90DfrIdx += 1
+            int m90sz = array.size(m90HistStart)
+            int m90k = 0
+            while m90k < m90sz
+                int m90EndTs = array.get(m90HistEnd, m90k)
 
-    int m90StdvSz = array.size(m90HistStart)
-    int m90StdvIdx = 0
-    while m90StdvIdx < m90StdvSz
-        int m90Q1 = array.get(m90HistStart, m90StdvIdx)
-        int m90Q2 = array.get(m90_h_q2oTs, m90StdvIdx)
-        if na(m90Q2) and m90Q1 == m90.q1Ts
-            m90Q2 := m90.q2Ts
-        int m90EndTs = array.get(m90HistEnd, m90StdvIdx)
-        int m90Start = na
-        if not na(m90Q1) and not na(m90Q2)
-            m90Start := m90Q1 + int((m90Q2 - m90Q1) / 3)
-        float m90Hi = array.get(m90_dfr_hi, m90StdvIdx)
-        float m90Lo = array.get(m90_dfr_lo, m90StdvIdx)
-        int m90Base = m90StdvIdx * STDV_LEVELS_N
-        int m90LvlIdx = 0
-        while m90LvlIdx < STDV_LEVELS_N
-            int m90LineIdx = m90Base + m90LvlIdx
-            line m90Ln = array.get(m90_l_stdv, m90LineIdx)
-            label m90Lbl = array.get(m90_l_stdv_lbl, m90LineIdx)
-            float m90Lvl = array.get(STDV_LEVELS, m90LvlIdx)
-            float m90Y = m90Lo + (m90Hi - m90Lo) * m90Lvl
-            bool m90CanDraw = showDfrStdv and not na(m90Start) and not na(m90EndTs) and not na(m90Hi) and not na(m90Lo)
-            if m90CanDraw
-                m90Ln := f_set_or_make_hline(m90Ln, m90Start, m90EndTs, m90Y, COL_Q1, line.style_solid)
-                if f_show_stdv_label(m90Lvl)
-                    m90Lbl := f_set_or_make_label(m90Lbl, m90Start, m90Y, str.tostring(m90Lvl), COL_Q1)
+                float m90y1 = array.get(m90_h_q1o, m90k)
+                int   m90x1 = array.get(m90_h_q1oTs, m90k)
+                line  m90l1 = array.get(m90_l_q1o, m90k)
+                bool m90SuppressQ1 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x1) != -1
+                if not na(m90y1) and not na(m90x1) and not na(m90EndTs) and not m90SuppressQ1
+                    m90l1 := f_set_or_make_hline(m90l1, m90x1, m90EndTs, m90y1, q1OpenCol, q1OpenStyle)
                 else
-                    m90Lbl := f_kill_label(m90Lbl)
+                    m90l1 := f_kill(m90l1)
+                array.set(m90_l_q1o, m90k, m90l1)
+
+                float m90y2 = array.get(m90_h_q2o, m90k)
+                int   m90x2 = array.get(m90_h_q2oTs, m90k)
+                line  m90l2 = array.get(m90_l_q2o, m90k)
+                bool m90SuppressQ2 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x2) != -1
+                if not na(m90y2) and not na(m90x2) and not na(m90EndTs) and not m90SuppressQ2
+                    m90l2 := f_set_or_make_hline(m90l2, m90x2, m90EndTs, m90y2, q2OpenCol, q2OpenStyle)
+                else
+                    m90l2 := f_kill(m90l2)
+                array.set(m90_l_q2o, m90k, m90l2)
+
+                float m90y3 = array.get(m90_h_q3o, m90k)
+                int   m90x3 = array.get(m90_h_q3oTs, m90k)
+                line  m90l3 = array.get(m90_l_q3o, m90k)
+                bool m90SuppressQ3 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x3) != -1
+                if not na(m90y3) and not na(m90x3) and not na(m90EndTs) and not m90SuppressQ3
+                    m90l3 := f_set_or_make_hline(m90l3, m90x3, m90EndTs, m90y3, q3OpenCol, q3OpenStyle)
+                else
+                    m90l3 := f_kill(m90l3)
+                array.set(m90_l_q3o, m90k, m90l3)
+
+                float m90y4 = array.get(m90_h_q4o, m90k)
+                int   m90x4 = array.get(m90_h_q4oTs, m90k)
+                line  m90l4 = array.get(m90_l_q4o, m90k)
+                bool m90SuppressQ4 = parentActiveDaily and f_find_int(parentDailyOpenTs, m90x4) != -1
+                if not na(m90y4) and not na(m90x4) and not na(m90EndTs) and not m90SuppressQ4
+                    m90l4 := f_set_or_make_hline(m90l4, m90x4, m90EndTs, m90y4, q4OpenCol, q4OpenStyle)
+                else
+                    m90l4 := f_kill(m90l4)
+                array.set(m90_l_q4o, m90k, m90l4)
+
+                m90k += 1
+
+        int m90DfrSz = array.size(m90HistStart)
+        int m90DfrIdx = 0
+        while m90DfrIdx < m90DfrSz
+            int m90Q1 = array.get(m90HistStart, m90DfrIdx)
+            int m90Q2 = array.get(m90_h_q2oTs, m90DfrIdx)
+            if na(m90Q2) and m90Q1 == m90.q1Ts
+                m90Q2 := m90.q2Ts
+            float m90Hi = array.get(m90_dfr_hi, m90DfrIdx)
+            float m90Lo = array.get(m90_dfr_lo, m90DfrIdx)
+            box m90Box = array.get(m90_dfr_box, m90DfrIdx)
+            if not na(m90Q1) and not na(m90Q2) and not na(m90Hi) and not na(m90Lo)
+                int m90Start = m90Q1 + int((m90Q2 - m90Q1) / 3)
+                m90Box := f_set_or_make_box(m90Box, m90Start, m90Hi, m90Q2, m90Lo, COL_Q1)
             else
-                m90Ln := f_kill(m90Ln)
-                m90Lbl := f_kill_label(m90Lbl)
-            array.set(m90_l_stdv, m90LineIdx, m90Ln)
-            array.set(m90_l_stdv_lbl, m90LineIdx, m90Lbl)
-            m90LvlIdx += 1
-        m90StdvIdx += 1
+                m90Box := f_kill_box(m90Box)
+            array.set(m90_dfr_box, m90DfrIdx, m90Box)
+            m90DfrIdx += 1
+
+        int m90StdvSz = array.size(m90HistStart)
+        int m90StdvIdx = 0
+        while m90StdvIdx < m90StdvSz
+            int m90Q1 = array.get(m90HistStart, m90StdvIdx)
+            int m90Q2 = array.get(m90_h_q2oTs, m90StdvIdx)
+            if na(m90Q2) and m90Q1 == m90.q1Ts
+                m90Q2 := m90.q2Ts
+            int m90EndTs = array.get(m90HistEnd, m90StdvIdx)
+            int m90Start = na
+            if not na(m90Q1) and not na(m90Q2)
+                m90Start := m90Q1 + int((m90Q2 - m90Q1) / 3)
+            float m90Hi = array.get(m90_dfr_hi, m90StdvIdx)
+            float m90Lo = array.get(m90_dfr_lo, m90StdvIdx)
+            int m90Base = m90StdvIdx * STDV_LEVELS_N
+            int m90LvlIdx = 0
+            while m90LvlIdx < STDV_LEVELS_N
+                int m90LineIdx = m90Base + m90LvlIdx
+                line m90Ln = array.get(m90_l_stdv, m90LineIdx)
+                label m90Lbl = array.get(m90_l_stdv_lbl, m90LineIdx)
+                float m90Lvl = array.get(STDV_LEVELS, m90LvlIdx)
+                float m90Y = m90Lo + (m90Hi - m90Lo) * m90Lvl
+                bool m90CanDraw = showDfrStdv and not na(m90Start) and not na(m90EndTs) and not na(m90Hi) and not na(m90Lo)
+                if m90CanDraw
+                    m90Ln := f_set_or_make_hline(m90Ln, m90Start, m90EndTs, m90Y, COL_Q1, line.style_solid)
+                    if f_show_stdv_label(m90Lvl)
+                        m90Lbl := f_set_or_make_label(m90Lbl, m90Start, m90Y, str.tostring(m90Lvl), COL_Q1)
+                    else
+                        m90Lbl := f_kill_label(m90Lbl)
+                else
+                    m90Ln := f_kill(m90Ln)
+                    m90Lbl := f_kill_label(m90Lbl)
+                array.set(m90_l_stdv, m90LineIdx, m90Ln)
+                array.set(m90_l_stdv_lbl, m90LineIdx, m90Lbl)
+                m90LvlIdx += 1
+            m90StdvIdx += 1
 
 if not showNanoTf
     vset_clear(nanoV)
@@ -1714,260 +1718,262 @@ else
         if not na(n.endTs) and tc > n.endTs
             vset_add(nanoV, n.endTs, COL_Q1)
 
-    if not showOpens
-        int j = array.size(histStart) - 1
-        while j >= 0
-            f_hist_kill_at(j)
-            j -= 1
-    else
-        int sz = array.size(histStart)
-        int k = 0
-        while k < sz
-            int endTs = array.get(histEnd, k)
-
-            float y1 = array.get(h_q1o, k)
-            int   x1 = array.get(h_q1oTs, k)
-            line  l1 = array.get(l_q1o, k)
-            bool nSuppressQ1 = parentActiveMicro and f_find_int(parentMicroOpenTs, x1) != -1
-            if not na(y1) and not na(x1) and not na(endTs) and not nSuppressQ1
-                l1 := f_set_or_make_hline(l1, x1, endTs, y1, q1OpenCol, q1OpenStyle)
-            else
-                l1 := f_kill(l1)
-            array.set(l_q1o, k, l1)
-
-            float y2 = array.get(h_q2o, k)
-            int   x2 = array.get(h_q2oTs, k)
-            line  l2 = array.get(l_q2o, k)
-            bool nSuppressQ2 = parentActiveMicro and f_find_int(parentMicroOpenTs, x2) != -1
-            if not na(y2) and not na(x2) and not na(endTs) and not nSuppressQ2
-                l2 := f_set_or_make_hline(l2, x2, endTs, y2, q2OpenCol, q2OpenStyle)
-            else
-                l2 := f_kill(l2)
-            array.set(l_q2o, k, l2)
-
-            float y3 = array.get(h_q3o, k)
-            int   x3 = array.get(h_q3oTs, k)
-            line  l3 = array.get(l_q3o, k)
-            bool nSuppressQ3 = parentActiveMicro and f_find_int(parentMicroOpenTs, x3) != -1
-            if not na(y3) and not na(x3) and not na(endTs) and not nSuppressQ3
-                l3 := f_set_or_make_hline(l3, x3, endTs, y3, q3OpenCol, q3OpenStyle)
-            else
-                l3 := f_kill(l3)
-            array.set(l_q3o, k, l3)
-
-            float y4 = array.get(h_q4o, k)
-            int   x4 = array.get(h_q4oTs, k)
-            line  l4 = array.get(l_q4o, k)
-            bool nSuppressQ4 = parentActiveMicro and f_find_int(parentMicroOpenTs, x4) != -1
-            if not na(y4) and not na(x4) and not na(endTs) and not nSuppressQ4
-                l4 := f_set_or_make_hline(l4, x4, endTs, y4, q4OpenCol, q4OpenStyle)
-            else
-                l4 := f_kill(l4)
-            array.set(l_q4o, k, l4)
-
-            k += 1
-
-    int nDfrSz = array.size(histStart)
-    int nDfrIdx = 0
-    while nDfrIdx < nDfrSz
-        int nQ1 = array.get(histStart, nDfrIdx)
-        int nQ2 = array.get(h_q2oTs, nDfrIdx)
-        if na(nQ2) and nQ1 == n.q1Ts
-            nQ2 := n.q2Ts
-        float nHi = array.get(dfr_hi, nDfrIdx)
-        float nLo = array.get(dfr_lo, nDfrIdx)
-        box nBox = array.get(dfr_box, nDfrIdx)
-        if not na(nQ1) and not na(nQ2) and not na(nHi) and not na(nLo)
-            int nStart = nQ1 + int((nQ2 - nQ1) / 3)
-            nBox := f_set_or_make_box(nBox, nStart, nHi, nQ2, nLo, COL_Q1)
+    if drawNow
+        if not showOpens
+            int j = array.size(histStart) - 1
+            while j >= 0
+                f_hist_kill_at(j)
+                j -= 1
         else
-            nBox := f_kill_box(nBox)
-        array.set(dfr_box, nDfrIdx, nBox)
-        nDfrIdx += 1
+            int sz = array.size(histStart)
+            int k = 0
+            while k < sz
+                int endTs = array.get(histEnd, k)
 
-    int nStdvSz = array.size(histStart)
-    int nStdvIdx = 0
-    while nStdvIdx < nStdvSz
-        int nQ1 = array.get(histStart, nStdvIdx)
-        int nQ2 = array.get(h_q2oTs, nStdvIdx)
-        if na(nQ2) and nQ1 == n.q1Ts
-            nQ2 := n.q2Ts
-        int nEndTs = array.get(histEnd, nStdvIdx)
-        int nStart = na
-        if not na(nQ1) and not na(nQ2)
-            nStart := nQ1 + int((nQ2 - nQ1) / 3)
-        float nHi = array.get(dfr_hi, nStdvIdx)
-        float nLo = array.get(dfr_lo, nStdvIdx)
-        int nBase = nStdvIdx * STDV_LEVELS_N
-        int nLvlIdx = 0
-        while nLvlIdx < STDV_LEVELS_N
-            int nLineIdx = nBase + nLvlIdx
-            line nLn = array.get(nano_l_stdv, nLineIdx)
-            label nLbl = array.get(nano_l_stdv_lbl, nLineIdx)
-            float nLvl = array.get(STDV_LEVELS, nLvlIdx)
-            float nY = nLo + (nHi - nLo) * nLvl
-            bool nCanDraw = showDfrStdv and not na(nStart) and not na(nEndTs) and not na(nHi) and not na(nLo)
-            if nCanDraw
-                nLn := f_set_or_make_hline(nLn, nStart, nEndTs, nY, COL_Q1, line.style_solid)
-                if f_show_stdv_label(nLvl)
-                    nLbl := f_set_or_make_label(nLbl, nStart, nY, str.tostring(nLvl), COL_Q1)
+                float y1 = array.get(h_q1o, k)
+                int   x1 = array.get(h_q1oTs, k)
+                line  l1 = array.get(l_q1o, k)
+                bool nSuppressQ1 = parentActiveMicro and f_find_int(parentMicroOpenTs, x1) != -1
+                if not na(y1) and not na(x1) and not na(endTs) and not nSuppressQ1
+                    l1 := f_set_or_make_hline(l1, x1, endTs, y1, q1OpenCol, q1OpenStyle)
                 else
-                    nLbl := f_kill_label(nLbl)
+                    l1 := f_kill(l1)
+                array.set(l_q1o, k, l1)
+
+                float y2 = array.get(h_q2o, k)
+                int   x2 = array.get(h_q2oTs, k)
+                line  l2 = array.get(l_q2o, k)
+                bool nSuppressQ2 = parentActiveMicro and f_find_int(parentMicroOpenTs, x2) != -1
+                if not na(y2) and not na(x2) and not na(endTs) and not nSuppressQ2
+                    l2 := f_set_or_make_hline(l2, x2, endTs, y2, q2OpenCol, q2OpenStyle)
+                else
+                    l2 := f_kill(l2)
+                array.set(l_q2o, k, l2)
+
+                float y3 = array.get(h_q3o, k)
+                int   x3 = array.get(h_q3oTs, k)
+                line  l3 = array.get(l_q3o, k)
+                bool nSuppressQ3 = parentActiveMicro and f_find_int(parentMicroOpenTs, x3) != -1
+                if not na(y3) and not na(x3) and not na(endTs) and not nSuppressQ3
+                    l3 := f_set_or_make_hline(l3, x3, endTs, y3, q3OpenCol, q3OpenStyle)
+                else
+                    l3 := f_kill(l3)
+                array.set(l_q3o, k, l3)
+
+                float y4 = array.get(h_q4o, k)
+                int   x4 = array.get(h_q4oTs, k)
+                line  l4 = array.get(l_q4o, k)
+                bool nSuppressQ4 = parentActiveMicro and f_find_int(parentMicroOpenTs, x4) != -1
+                if not na(y4) and not na(x4) and not na(endTs) and not nSuppressQ4
+                    l4 := f_set_or_make_hline(l4, x4, endTs, y4, q4OpenCol, q4OpenStyle)
+                else
+                    l4 := f_kill(l4)
+                array.set(l_q4o, k, l4)
+
+                k += 1
+
+        int nDfrSz = array.size(histStart)
+        int nDfrIdx = 0
+        while nDfrIdx < nDfrSz
+            int nQ1 = array.get(histStart, nDfrIdx)
+            int nQ2 = array.get(h_q2oTs, nDfrIdx)
+            if na(nQ2) and nQ1 == n.q1Ts
+                nQ2 := n.q2Ts
+            float nHi = array.get(dfr_hi, nDfrIdx)
+            float nLo = array.get(dfr_lo, nDfrIdx)
+            box nBox = array.get(dfr_box, nDfrIdx)
+            if not na(nQ1) and not na(nQ2) and not na(nHi) and not na(nLo)
+                int nStart = nQ1 + int((nQ2 - nQ1) / 3)
+                nBox := f_set_or_make_box(nBox, nStart, nHi, nQ2, nLo, COL_Q1)
             else
-                nLn := f_kill(nLn)
-                nLbl := f_kill_label(nLbl)
-            array.set(nano_l_stdv, nLineIdx, nLn)
-            array.set(nano_l_stdv_lbl, nLineIdx, nLbl)
-            nLvlIdx += 1
-        nStdvIdx += 1
+                nBox := f_kill_box(nBox)
+            array.set(dfr_box, nDfrIdx, nBox)
+            nDfrIdx += 1
 
-// Parent cycle opens (thicker lines)
-bool parentDailyDraw = parentActiveDaily and m90Cutoff > 0
-if parentDailyDraw
-    int pdSz = array.size(dailyHistStart)
-    int pdi = 0
-    while pdi < pdSz
-        int pEnd = array.get(dailyHistEnd, pdi)
-        bool inWin = not na(pEnd) and pEnd >= m90Cutoff
+        int nStdvSz = array.size(histStart)
+        int nStdvIdx = 0
+        while nStdvIdx < nStdvSz
+            int nQ1 = array.get(histStart, nStdvIdx)
+            int nQ2 = array.get(h_q2oTs, nStdvIdx)
+            if na(nQ2) and nQ1 == n.q1Ts
+                nQ2 := n.q2Ts
+            int nEndTs = array.get(histEnd, nStdvIdx)
+            int nStart = na
+            if not na(nQ1) and not na(nQ2)
+                nStart := nQ1 + int((nQ2 - nQ1) / 3)
+            float nHi = array.get(dfr_hi, nStdvIdx)
+            float nLo = array.get(dfr_lo, nStdvIdx)
+            int nBase = nStdvIdx * STDV_LEVELS_N
+            int nLvlIdx = 0
+            while nLvlIdx < STDV_LEVELS_N
+                int nLineIdx = nBase + nLvlIdx
+                line nLn = array.get(nano_l_stdv, nLineIdx)
+                label nLbl = array.get(nano_l_stdv_lbl, nLineIdx)
+                float nLvl = array.get(STDV_LEVELS, nLvlIdx)
+                float nY = nLo + (nHi - nLo) * nLvl
+                bool nCanDraw = showDfrStdv and not na(nStart) and not na(nEndTs) and not na(nHi) and not na(nLo)
+                if nCanDraw
+                    nLn := f_set_or_make_hline(nLn, nStart, nEndTs, nY, COL_Q1, line.style_solid)
+                    if f_show_stdv_label(nLvl)
+                        nLbl := f_set_or_make_label(nLbl, nStart, nY, str.tostring(nLvl), COL_Q1)
+                    else
+                        nLbl := f_kill_label(nLbl)
+                else
+                    nLn := f_kill(nLn)
+                    nLbl := f_kill_label(nLbl)
+                array.set(nano_l_stdv, nLineIdx, nLn)
+                array.set(nano_l_stdv_lbl, nLineIdx, nLbl)
+                nLvlIdx += 1
+            nStdvIdx += 1
 
-        line pl1 = array.get(daily_p_l_q1o, pdi)
-        float py1 = array.get(daily_h_q1o, pdi)
-        int   px1 = array.get(daily_h_q1oTs, pdi)
-        if parentShowQ1 and inWin and not na(py1) and not na(px1)
-            pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, q1OpenStyle, PARENT_LINE_W)
-        else
-            pl1 := f_kill(pl1)
-        array.set(daily_p_l_q1o, pdi, pl1)
+if drawNow
+    // Parent cycle opens (thicker lines)
+    bool parentDailyDraw = parentActiveDaily and m90Cutoff > 0
+    if parentDailyDraw
+        int pdSz = array.size(dailyHistStart)
+        int pdi = 0
+        while pdi < pdSz
+            int pEnd = array.get(dailyHistEnd, pdi)
+            bool inWin = not na(pEnd) and pEnd >= m90Cutoff
 
-        line pl2 = array.get(daily_p_l_q2o, pdi)
-        float py2 = array.get(daily_h_q2o, pdi)
-        int   px2 = array.get(daily_h_q2oTs, pdi)
-        if parentShowQ2 and inWin and not na(py2) and not na(px2)
-            pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, q2OpenStyle, PARENT_LINE_W)
-        else
-            pl2 := f_kill(pl2)
-        array.set(daily_p_l_q2o, pdi, pl2)
+            line pl1 = array.get(daily_p_l_q1o, pdi)
+            float py1 = array.get(daily_h_q1o, pdi)
+            int   px1 = array.get(daily_h_q1oTs, pdi)
+            if parentShowQ1 and inWin and not na(py1) and not na(px1)
+                pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, q1OpenStyle, PARENT_LINE_W)
+            else
+                pl1 := f_kill(pl1)
+            array.set(daily_p_l_q1o, pdi, pl1)
 
-        line pl3 = array.get(daily_p_l_q3o, pdi)
-        float py3 = array.get(daily_h_q3o, pdi)
-        int   px3 = array.get(daily_h_q3oTs, pdi)
-        if parentShowQ3 and inWin and not na(py3) and not na(px3)
-            pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, q3OpenStyle, PARENT_LINE_W)
-        else
-            pl3 := f_kill(pl3)
-        array.set(daily_p_l_q3o, pdi, pl3)
+            line pl2 = array.get(daily_p_l_q2o, pdi)
+            float py2 = array.get(daily_h_q2o, pdi)
+            int   px2 = array.get(daily_h_q2oTs, pdi)
+            if parentShowQ2 and inWin and not na(py2) and not na(px2)
+                pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, q2OpenStyle, PARENT_LINE_W)
+            else
+                pl2 := f_kill(pl2)
+            array.set(daily_p_l_q2o, pdi, pl2)
 
-        line pl4 = array.get(daily_p_l_q4o, pdi)
-        float py4 = array.get(daily_h_q4o, pdi)
-        int   px4 = array.get(daily_h_q4oTs, pdi)
-        if parentShowQ4 and inWin and not na(py4) and not na(px4)
-            pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, q4OpenStyle, PARENT_LINE_W)
-        else
-            pl4 := f_kill(pl4)
-        array.set(daily_p_l_q4o, pdi, pl4)
+            line pl3 = array.get(daily_p_l_q3o, pdi)
+            float py3 = array.get(daily_h_q3o, pdi)
+            int   px3 = array.get(daily_h_q3oTs, pdi)
+            if parentShowQ3 and inWin and not na(py3) and not na(px3)
+                pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, q3OpenStyle, PARENT_LINE_W)
+            else
+                pl3 := f_kill(pl3)
+            array.set(daily_p_l_q3o, pdi, pl3)
 
-        pdi += 1
-else
-    if prevParentDailyActive
-        f_clear_parent_lines(daily_p_l_q1o, daily_p_l_q2o, daily_p_l_q3o, daily_p_l_q4o)
-prevParentDailyActive := parentDailyDraw
+            line pl4 = array.get(daily_p_l_q4o, pdi)
+            float py4 = array.get(daily_h_q4o, pdi)
+            int   px4 = array.get(daily_h_q4oTs, pdi)
+            if parentShowQ4 and inWin and not na(py4) and not na(px4)
+                pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, q4OpenStyle, PARENT_LINE_W)
+            else
+                pl4 := f_kill(pl4)
+            array.set(daily_p_l_q4o, pdi, pl4)
 
-bool parentM90Draw = parentActiveM90 and mCutoff > 0
-if parentM90Draw
-    int pm90Sz = array.size(m90HistStart)
-    int pm90i = 0
-    while pm90i < pm90Sz
-        int pEnd = array.get(m90HistEnd, pm90i)
-        bool inWin = not na(pEnd) and pEnd >= mCutoff
+            pdi += 1
+    else
+        if prevParentDailyActive
+            f_clear_parent_lines(daily_p_l_q1o, daily_p_l_q2o, daily_p_l_q3o, daily_p_l_q4o)
+    prevParentDailyActive := parentDailyDraw
 
-        line pl1 = array.get(m90_p_l_q1o, pm90i)
-        float py1 = array.get(m90_h_q1o, pm90i)
-        int   px1 = array.get(m90_h_q1oTs, pm90i)
-        if parentShowQ1 and inWin and not na(py1) and not na(px1)
-            pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, q1OpenStyle, PARENT_LINE_W)
-        else
-            pl1 := f_kill(pl1)
-        array.set(m90_p_l_q1o, pm90i, pl1)
+    bool parentM90Draw = parentActiveM90 and mCutoff > 0
+    if parentM90Draw
+        int pm90Sz = array.size(m90HistStart)
+        int pm90i = 0
+        while pm90i < pm90Sz
+            int pEnd = array.get(m90HistEnd, pm90i)
+            bool inWin = not na(pEnd) and pEnd >= mCutoff
 
-        line pl2 = array.get(m90_p_l_q2o, pm90i)
-        float py2 = array.get(m90_h_q2o, pm90i)
-        int   px2 = array.get(m90_h_q2oTs, pm90i)
-        if parentShowQ2 and inWin and not na(py2) and not na(px2)
-            pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, q2OpenStyle, PARENT_LINE_W)
-        else
-            pl2 := f_kill(pl2)
-        array.set(m90_p_l_q2o, pm90i, pl2)
+            line pl1 = array.get(m90_p_l_q1o, pm90i)
+            float py1 = array.get(m90_h_q1o, pm90i)
+            int   px1 = array.get(m90_h_q1oTs, pm90i)
+            if parentShowQ1 and inWin and not na(py1) and not na(px1)
+                pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, q1OpenStyle, PARENT_LINE_W)
+            else
+                pl1 := f_kill(pl1)
+            array.set(m90_p_l_q1o, pm90i, pl1)
 
-        line pl3 = array.get(m90_p_l_q3o, pm90i)
-        float py3 = array.get(m90_h_q3o, pm90i)
-        int   px3 = array.get(m90_h_q3oTs, pm90i)
-        if parentShowQ3 and inWin and not na(py3) and not na(px3)
-            pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, q3OpenStyle, PARENT_LINE_W)
-        else
-            pl3 := f_kill(pl3)
-        array.set(m90_p_l_q3o, pm90i, pl3)
+            line pl2 = array.get(m90_p_l_q2o, pm90i)
+            float py2 = array.get(m90_h_q2o, pm90i)
+            int   px2 = array.get(m90_h_q2oTs, pm90i)
+            if parentShowQ2 and inWin and not na(py2) and not na(px2)
+                pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, q2OpenStyle, PARENT_LINE_W)
+            else
+                pl2 := f_kill(pl2)
+            array.set(m90_p_l_q2o, pm90i, pl2)
 
-        line pl4 = array.get(m90_p_l_q4o, pm90i)
-        float py4 = array.get(m90_h_q4o, pm90i)
-        int   px4 = array.get(m90_h_q4oTs, pm90i)
-        if parentShowQ4 and inWin and not na(py4) and not na(px4)
-            pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, q4OpenStyle, PARENT_LINE_W)
-        else
-            pl4 := f_kill(pl4)
-        array.set(m90_p_l_q4o, pm90i, pl4)
+            line pl3 = array.get(m90_p_l_q3o, pm90i)
+            float py3 = array.get(m90_h_q3o, pm90i)
+            int   px3 = array.get(m90_h_q3oTs, pm90i)
+            if parentShowQ3 and inWin and not na(py3) and not na(px3)
+                pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, q3OpenStyle, PARENT_LINE_W)
+            else
+                pl3 := f_kill(pl3)
+            array.set(m90_p_l_q3o, pm90i, pl3)
 
-        pm90i += 1
-else
-    if prevParentM90Active
-        f_clear_parent_lines(m90_p_l_q1o, m90_p_l_q2o, m90_p_l_q3o, m90_p_l_q4o)
-prevParentM90Active := parentM90Draw
+            line pl4 = array.get(m90_p_l_q4o, pm90i)
+            float py4 = array.get(m90_h_q4o, pm90i)
+            int   px4 = array.get(m90_h_q4oTs, pm90i)
+            if parentShowQ4 and inWin and not na(py4) and not na(px4)
+                pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, q4OpenStyle, PARENT_LINE_W)
+            else
+                pl4 := f_kill(pl4)
+            array.set(m90_p_l_q4o, pm90i, pl4)
 
-bool parentMicroDraw = parentActiveMicro and nCutoff > 0
-if parentMicroDraw
-    int pmSz = array.size(microHistStart)
-    int pmi = 0
-    while pmi < pmSz
-        int pEnd = array.get(microHistEnd, pmi)
-        bool inWin = not na(pEnd) and pEnd >= nCutoff
+            pm90i += 1
+    else
+        if prevParentM90Active
+            f_clear_parent_lines(m90_p_l_q1o, m90_p_l_q2o, m90_p_l_q3o, m90_p_l_q4o)
+    prevParentM90Active := parentM90Draw
 
-        line pl1 = array.get(micro_p_l_q1o, pmi)
-        float py1 = array.get(micro_h_q1o, pmi)
-        int   px1 = array.get(micro_h_q1oTs, pmi)
-        if parentShowQ1 and inWin and not na(py1) and not na(px1)
-            pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, q1OpenStyle, PARENT_LINE_W)
-        else
-            pl1 := f_kill(pl1)
-        array.set(micro_p_l_q1o, pmi, pl1)
+    bool parentMicroDraw = parentActiveMicro and nCutoff > 0
+    if parentMicroDraw
+        int pmSz = array.size(microHistStart)
+        int pmi = 0
+        while pmi < pmSz
+            int pEnd = array.get(microHistEnd, pmi)
+            bool inWin = not na(pEnd) and pEnd >= nCutoff
 
-        line pl2 = array.get(micro_p_l_q2o, pmi)
-        float py2 = array.get(micro_h_q2o, pmi)
-        int   px2 = array.get(micro_h_q2oTs, pmi)
-        if parentShowQ2 and inWin and not na(py2) and not na(px2)
-            pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, q2OpenStyle, PARENT_LINE_W)
-        else
-            pl2 := f_kill(pl2)
-        array.set(micro_p_l_q2o, pmi, pl2)
+            line pl1 = array.get(micro_p_l_q1o, pmi)
+            float py1 = array.get(micro_h_q1o, pmi)
+            int   px1 = array.get(micro_h_q1oTs, pmi)
+            if parentShowQ1 and inWin and not na(py1) and not na(px1)
+                pl1 := f_set_or_make_hline_w(pl1, px1, pEnd, py1, q1OpenCol, q1OpenStyle, PARENT_LINE_W)
+            else
+                pl1 := f_kill(pl1)
+            array.set(micro_p_l_q1o, pmi, pl1)
 
-        line pl3 = array.get(micro_p_l_q3o, pmi)
-        float py3 = array.get(micro_h_q3o, pmi)
-        int   px3 = array.get(micro_h_q3oTs, pmi)
-        if parentShowQ3 and inWin and not na(py3) and not na(px3)
-            pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, q3OpenStyle, PARENT_LINE_W)
-        else
-            pl3 := f_kill(pl3)
-        array.set(micro_p_l_q3o, pmi, pl3)
+            line pl2 = array.get(micro_p_l_q2o, pmi)
+            float py2 = array.get(micro_h_q2o, pmi)
+            int   px2 = array.get(micro_h_q2oTs, pmi)
+            if parentShowQ2 and inWin and not na(py2) and not na(px2)
+                pl2 := f_set_or_make_hline_w(pl2, px2, pEnd, py2, q2OpenCol, q2OpenStyle, PARENT_LINE_W)
+            else
+                pl2 := f_kill(pl2)
+            array.set(micro_p_l_q2o, pmi, pl2)
 
-        line pl4 = array.get(micro_p_l_q4o, pmi)
-        float py4 = array.get(micro_h_q4o, pmi)
-        int   px4 = array.get(micro_h_q4oTs, pmi)
-        if parentShowQ4 and inWin and not na(py4) and not na(px4)
-            pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, q4OpenStyle, PARENT_LINE_W)
-        else
-            pl4 := f_kill(pl4)
-        array.set(micro_p_l_q4o, pmi, pl4)
+            line pl3 = array.get(micro_p_l_q3o, pmi)
+            float py3 = array.get(micro_h_q3o, pmi)
+            int   px3 = array.get(micro_h_q3oTs, pmi)
+            if parentShowQ3 and inWin and not na(py3) and not na(px3)
+                pl3 := f_set_or_make_hline_w(pl3, px3, pEnd, py3, q3OpenCol, q3OpenStyle, PARENT_LINE_W)
+            else
+                pl3 := f_kill(pl3)
+            array.set(micro_p_l_q3o, pmi, pl3)
 
-        pmi += 1
-else
-    if prevParentMicroActive
-        f_clear_parent_lines(micro_p_l_q1o, micro_p_l_q2o, micro_p_l_q3o, micro_p_l_q4o)
-prevParentMicroActive := parentMicroDraw
+            line pl4 = array.get(micro_p_l_q4o, pmi)
+            float py4 = array.get(micro_h_q4o, pmi)
+            int   px4 = array.get(micro_h_q4oTs, pmi)
+            if parentShowQ4 and inWin and not na(py4) and not na(px4)
+                pl4 := f_set_or_make_hline_w(pl4, px4, pEnd, py4, q4OpenCol, q4OpenStyle, PARENT_LINE_W)
+            else
+                pl4 := f_kill(pl4)
+            array.set(micro_p_l_q4o, pmi, pl4)
+
+            pmi += 1
+    else
+        if prevParentMicroActive
+            f_clear_parent_lines(micro_p_l_q1o, micro_p_l_q2o, micro_p_l_q3o, micro_p_l_q4o)
+    prevParentMicroActive := parentMicroDraw
