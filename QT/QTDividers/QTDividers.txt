@@ -12,8 +12,8 @@ showNano  = input.bool(true, "Nano", group=groupCycles)
 
 groupAll = "CYCLE SETTINGS"
 showOpens = input.bool(true, "Show Opens", group=groupAll)
-parentOpenMode = input.string("None", "Show Parent Cycle Opens", options=["None", "Q1", "Q1 + Q2", "All"], group=groupAll)
 keepCycles = input.int(4, "# of Cycles", minval=1, maxval=200, group=groupAll)
+showDfrOutline = input.bool(true, "DFR Outline", group=groupAll)
 showDfrStdv = input.bool(true, "DFR STDV", group=groupAll)
 
 var int V_TRANSP = 70
@@ -283,11 +283,11 @@ bool showMicroTf = showMicro and visMicroTf
 bool show90mTf = show90m and vis90mTf
 bool showDailyTf = showDaily and visDailyTf
 
-bool parentShow = parentOpenMode != "None"
-bool parentShowQ1 = parentShow
-bool parentShowQ2 = parentOpenMode == "Q1 + Q2" or parentOpenMode == "All"
-bool parentShowQ3 = parentOpenMode == "All"
-bool parentShowQ4 = parentOpenMode == "All"
+bool parentShow = false
+bool parentShowQ1 = false
+bool parentShowQ2 = false
+bool parentShowQ3 = false
+bool parentShowQ4 = false
 
 bool parentFromDaily = parentShow and show90mTf
 bool parentFromM90 = parentShow and showMicroTf
@@ -304,6 +304,10 @@ var int[] parentMicroOpenTs = array.new_int()
 var bool prevParentDailyActive = false
 var bool prevParentM90Active = false
 var bool prevParentMicroActive = false
+var bool prevShowDailyTf = false
+var bool prevShow90mTf = false
+var bool prevShowMicroTf = false
+var bool prevShowNanoTf = false
 
 // QT Core update
 var qt.QTConfig   cfg = qt.qt_config_default()
@@ -1058,7 +1062,7 @@ f_hist_ensure_current() =>
     0
 
 // Main draw logic
-bool drawNow = barstate.islast and barstate.isconfirmed
+bool drawNow = barstate.islast
 int enabledCycles = (showDailyTf ? 1 : 0) + (show90mTf ? 1 : 0) + (showMicroTf ? 1 : 0) + (showNanoTf ? 1 : 0)
 if enabledCycles < 1
     enabledCycles := 1
@@ -1085,48 +1089,49 @@ int nCutoff = na
 int PARENT_LINE_W = 2
 
 if not showDailyTf
-    vset_clear(dailyV)
-    dailyProjQ2  := f_kill(dailyProjQ2)
-    dailyProjQ3  := f_kill(dailyProjQ3)
-    dailyProjQ4  := f_kill(dailyProjQ4)
-    dailyProjEnd := f_kill(dailyProjEnd)
-    int dStdvClear = array.size(daily_l_stdv) - 1
-    while dStdvClear >= 0
-        line dStdvLn = array.get(daily_l_stdv, dStdvClear)
-        if not na(dStdvLn)
-            line.delete(dStdvLn)
-        label dStdvLbl = array.get(daily_l_stdv_lbl, dStdvClear)
-        if not na(dStdvLbl)
-            label.delete(dStdvLbl)
-        array.set(daily_l_stdv, dStdvClear, na)
-        array.set(daily_l_stdv_lbl, dStdvClear, na)
-        dStdvClear -= 1
-    if not parentFromDaily
-        int di = array.size(dailyHistStart) - 1
-        while di >= 0
-            f_dhist_kill_at(di)
-            f_dhist_kill_parent_at(di)
-            di -= 1
-        f_clear_boxes(daily_dfr_box)
-        array.clear(dailyHistStart), array.clear(dailyHistEnd)
-        array.clear(daily_h_q1o), array.clear(daily_h_q1oTs)
-        array.clear(daily_h_q2o), array.clear(daily_h_q2oTs)
-        array.clear(daily_h_q3o), array.clear(daily_h_q3oTs)
-        array.clear(daily_h_q4o), array.clear(daily_h_q4oTs)
-        array.clear(daily_dfr_hi), array.clear(daily_dfr_lo)
-        array.clear(daily_dfr_box)
-        array.clear(daily_l_q1o), array.clear(daily_l_q2o), array.clear(daily_l_q3o), array.clear(daily_l_q4o)
-        array.clear(daily_p_l_q1o), array.clear(daily_p_l_q2o), array.clear(daily_p_l_q3o), array.clear(daily_p_l_q4o)
-        array.clear(daily_l_stdv)
-        array.clear(daily_l_stdv_lbl)
-        array.clear(dailyStarts)
-    else
-        int di = array.size(dailyHistStart) - 1
-        while di >= 0
-            f_dhist_kill_at(di)
-            di -= 1
-        f_clear_boxes(daily_dfr_box)
-        f_dhist_ensure_current()
+    if prevShowDailyTf
+        vset_clear(dailyV)
+        dailyProjQ2  := f_kill(dailyProjQ2)
+        dailyProjQ3  := f_kill(dailyProjQ3)
+        dailyProjQ4  := f_kill(dailyProjQ4)
+        dailyProjEnd := f_kill(dailyProjEnd)
+        int dStdvClear = array.size(daily_l_stdv) - 1
+        while dStdvClear >= 0
+            line dStdvLn = array.get(daily_l_stdv, dStdvClear)
+            if not na(dStdvLn)
+                line.delete(dStdvLn)
+            label dStdvLbl = array.get(daily_l_stdv_lbl, dStdvClear)
+            if not na(dStdvLbl)
+                label.delete(dStdvLbl)
+            array.set(daily_l_stdv, dStdvClear, na)
+            array.set(daily_l_stdv_lbl, dStdvClear, na)
+            dStdvClear -= 1
+        if not parentFromDaily
+            int di = array.size(dailyHistStart) - 1
+            while di >= 0
+                f_dhist_kill_at(di)
+                f_dhist_kill_parent_at(di)
+                di -= 1
+            f_clear_boxes(daily_dfr_box)
+            array.clear(dailyHistStart), array.clear(dailyHistEnd)
+            array.clear(daily_h_q1o), array.clear(daily_h_q1oTs)
+            array.clear(daily_h_q2o), array.clear(daily_h_q2oTs)
+            array.clear(daily_h_q3o), array.clear(daily_h_q3oTs)
+            array.clear(daily_h_q4o), array.clear(daily_h_q4oTs)
+            array.clear(daily_dfr_hi), array.clear(daily_dfr_lo)
+            array.clear(daily_dfr_box)
+            array.clear(daily_l_q1o), array.clear(daily_l_q2o), array.clear(daily_l_q3o), array.clear(daily_l_q4o)
+            array.clear(daily_p_l_q1o), array.clear(daily_p_l_q2o), array.clear(daily_p_l_q3o), array.clear(daily_p_l_q4o)
+            array.clear(daily_l_stdv)
+            array.clear(daily_l_stdv_lbl)
+            array.clear(dailyStarts)
+        else
+            int di = array.size(dailyHistStart) - 1
+            while di >= 0
+                f_dhist_kill_at(di)
+                di -= 1
+            f_clear_boxes(daily_dfr_box)
+            f_dhist_ensure_current()
 else
     if not na(d.q2Ts)
         dailyProjQ2 := tc > d.q2Ts ? f_kill(dailyProjQ2) : f_set_or_make_vline(dailyProjQ2, d.q2Ts, COL_Q2)
@@ -1223,7 +1228,7 @@ else
             float dHi = array.get(daily_dfr_hi, dfrIdx)
             float dLo = array.get(daily_dfr_lo, dfrIdx)
             box dBox = array.get(daily_dfr_box, dfrIdx)
-            if not na(dQ1) and not na(dQ2) and not na(dHi) and not na(dLo)
+            if showDfrOutline and not na(dQ1) and not na(dQ2) and not na(dHi) and not na(dLo)
                 int dStart = dQ1 + int((dQ2 - dQ1) / 3)
                 dBox := f_set_or_make_box(dBox, dStart, dHi, dQ2, dLo, COL_Q1)
             else
@@ -1267,49 +1272,52 @@ else
                 dLvlIdx += 1
             dStdvIdx += 1
 
+prevShowDailyTf := showDailyTf
+
 if not showMicroTf
-    vset_clear(microV)
-    microProjQ2  := f_kill(microProjQ2)
-    microProjQ3  := f_kill(microProjQ3)
-    microProjQ4  := f_kill(microProjQ4)
-    microProjEnd := f_kill(microProjEnd)
-    int mStdvClear = array.size(micro_l_stdv) - 1
-    while mStdvClear >= 0
-        line mStdvLn = array.get(micro_l_stdv, mStdvClear)
-        if not na(mStdvLn)
-            line.delete(mStdvLn)
-        label mStdvLbl = array.get(micro_l_stdv_lbl, mStdvClear)
-        if not na(mStdvLbl)
-            label.delete(mStdvLbl)
-        array.set(micro_l_stdv, mStdvClear, na)
-        array.set(micro_l_stdv_lbl, mStdvClear, na)
-        mStdvClear -= 1
-    if not parentFromMicro
-        int mi = array.size(microHistStart) - 1
-        while mi >= 0
-            f_mhist_kill_at(mi)
-            f_mhist_kill_parent_at(mi)
-            mi -= 1
-        f_clear_boxes(micro_dfr_box)
-        array.clear(microHistStart), array.clear(microHistEnd)
-        array.clear(micro_h_q1o), array.clear(micro_h_q1oTs)
-        array.clear(micro_h_q2o), array.clear(micro_h_q2oTs)
-        array.clear(micro_h_q3o), array.clear(micro_h_q3oTs)
-        array.clear(micro_h_q4o), array.clear(micro_h_q4oTs)
-        array.clear(micro_dfr_hi), array.clear(micro_dfr_lo)
-        array.clear(micro_dfr_box)
-        array.clear(micro_l_q1o), array.clear(micro_l_q2o), array.clear(micro_l_q3o), array.clear(micro_l_q4o)
-        array.clear(micro_p_l_q1o), array.clear(micro_p_l_q2o), array.clear(micro_p_l_q3o), array.clear(micro_p_l_q4o)
-        array.clear(micro_l_stdv)
-        array.clear(micro_l_stdv_lbl)
-        array.clear(microStarts)
-    else
-        int mi = array.size(microHistStart) - 1
-        while mi >= 0
-            f_mhist_kill_at(mi)
-            mi -= 1
-        f_clear_boxes(micro_dfr_box)
-        f_mhist_ensure_current()
+    if prevShowMicroTf
+        vset_clear(microV)
+        microProjQ2  := f_kill(microProjQ2)
+        microProjQ3  := f_kill(microProjQ3)
+        microProjQ4  := f_kill(microProjQ4)
+        microProjEnd := f_kill(microProjEnd)
+        int mStdvClear = array.size(micro_l_stdv) - 1
+        while mStdvClear >= 0
+            line mStdvLn = array.get(micro_l_stdv, mStdvClear)
+            if not na(mStdvLn)
+                line.delete(mStdvLn)
+            label mStdvLbl = array.get(micro_l_stdv_lbl, mStdvClear)
+            if not na(mStdvLbl)
+                label.delete(mStdvLbl)
+            array.set(micro_l_stdv, mStdvClear, na)
+            array.set(micro_l_stdv_lbl, mStdvClear, na)
+            mStdvClear -= 1
+        if not parentFromMicro
+            int mi = array.size(microHistStart) - 1
+            while mi >= 0
+                f_mhist_kill_at(mi)
+                f_mhist_kill_parent_at(mi)
+                mi -= 1
+            f_clear_boxes(micro_dfr_box)
+            array.clear(microHistStart), array.clear(microHistEnd)
+            array.clear(micro_h_q1o), array.clear(micro_h_q1oTs)
+            array.clear(micro_h_q2o), array.clear(micro_h_q2oTs)
+            array.clear(micro_h_q3o), array.clear(micro_h_q3oTs)
+            array.clear(micro_h_q4o), array.clear(micro_h_q4oTs)
+            array.clear(micro_dfr_hi), array.clear(micro_dfr_lo)
+            array.clear(micro_dfr_box)
+            array.clear(micro_l_q1o), array.clear(micro_l_q2o), array.clear(micro_l_q3o), array.clear(micro_l_q4o)
+            array.clear(micro_p_l_q1o), array.clear(micro_p_l_q2o), array.clear(micro_p_l_q3o), array.clear(micro_p_l_q4o)
+            array.clear(micro_l_stdv)
+            array.clear(micro_l_stdv_lbl)
+            array.clear(microStarts)
+        else
+            int mi = array.size(microHistStart) - 1
+            while mi >= 0
+                f_mhist_kill_at(mi)
+                mi -= 1
+            f_clear_boxes(micro_dfr_box)
+            f_mhist_ensure_current()
 else
     if not na(m.q2Ts)
         microProjQ2 := tc > m.q2Ts ? f_kill(microProjQ2) : f_set_or_make_vline(microProjQ2, m.q2Ts, COL_Q2)
@@ -1414,7 +1422,7 @@ else
             float mHi = array.get(micro_dfr_hi, mDfrIdx)
             float mLo = array.get(micro_dfr_lo, mDfrIdx)
             box mBox = array.get(micro_dfr_box, mDfrIdx)
-            if not na(mQ1) and not na(mQ2) and not na(mHi) and not na(mLo)
+            if showDfrOutline and not na(mQ1) and not na(mQ2) and not na(mHi) and not na(mLo)
                 int mStart = mQ1 + int((mQ2 - mQ1) / 3)
                 mBox := f_set_or_make_box(mBox, mStart, mHi, mQ2, mLo, COL_Q1)
             else
@@ -1458,49 +1466,52 @@ else
                 mLvlIdx += 1
             mStdvIdx += 1
 
+prevShowMicroTf := showMicroTf
+
 if not show90mTf
-    vset_clear(m90V)
-    m90ProjQ2  := f_kill(m90ProjQ2)
-    m90ProjQ3  := f_kill(m90ProjQ3)
-    m90ProjQ4  := f_kill(m90ProjQ4)
-    m90ProjEnd := f_kill(m90ProjEnd)
-    int m90StdvClear = array.size(m90_l_stdv) - 1
-    while m90StdvClear >= 0
-        line m90StdvLn = array.get(m90_l_stdv, m90StdvClear)
-        if not na(m90StdvLn)
-            line.delete(m90StdvLn)
-        label m90StdvLbl = array.get(m90_l_stdv_lbl, m90StdvClear)
-        if not na(m90StdvLbl)
-            label.delete(m90StdvLbl)
-        array.set(m90_l_stdv, m90StdvClear, na)
-        array.set(m90_l_stdv_lbl, m90StdvClear, na)
-        m90StdvClear -= 1
-    if not parentFromM90
-        int m90i = array.size(m90HistStart) - 1
-        while m90i >= 0
-            f_m90hist_kill_at(m90i)
-            f_m90hist_kill_parent_at(m90i)
-            m90i -= 1
-        f_clear_boxes(m90_dfr_box)
-        array.clear(m90HistStart), array.clear(m90HistEnd)
-        array.clear(m90_h_q1o), array.clear(m90_h_q1oTs)
-        array.clear(m90_h_q2o), array.clear(m90_h_q2oTs)
-        array.clear(m90_h_q3o), array.clear(m90_h_q3oTs)
-        array.clear(m90_h_q4o), array.clear(m90_h_q4oTs)
-        array.clear(m90_dfr_hi), array.clear(m90_dfr_lo)
-        array.clear(m90_dfr_box)
-        array.clear(m90_l_q1o), array.clear(m90_l_q2o), array.clear(m90_l_q3o), array.clear(m90_l_q4o)
-        array.clear(m90_p_l_q1o), array.clear(m90_p_l_q2o), array.clear(m90_p_l_q3o), array.clear(m90_p_l_q4o)
-        array.clear(m90_l_stdv)
-        array.clear(m90_l_stdv_lbl)
-        array.clear(m90Starts)
-    else
-        int m90i = array.size(m90HistStart) - 1
-        while m90i >= 0
-            f_m90hist_kill_at(m90i)
-            m90i -= 1
-        f_clear_boxes(m90_dfr_box)
-        f_m90hist_ensure_current()
+    if prevShow90mTf
+        vset_clear(m90V)
+        m90ProjQ2  := f_kill(m90ProjQ2)
+        m90ProjQ3  := f_kill(m90ProjQ3)
+        m90ProjQ4  := f_kill(m90ProjQ4)
+        m90ProjEnd := f_kill(m90ProjEnd)
+        int m90StdvClear = array.size(m90_l_stdv) - 1
+        while m90StdvClear >= 0
+            line m90StdvLn = array.get(m90_l_stdv, m90StdvClear)
+            if not na(m90StdvLn)
+                line.delete(m90StdvLn)
+            label m90StdvLbl = array.get(m90_l_stdv_lbl, m90StdvClear)
+            if not na(m90StdvLbl)
+                label.delete(m90StdvLbl)
+            array.set(m90_l_stdv, m90StdvClear, na)
+            array.set(m90_l_stdv_lbl, m90StdvClear, na)
+            m90StdvClear -= 1
+        if not parentFromM90
+            int m90i = array.size(m90HistStart) - 1
+            while m90i >= 0
+                f_m90hist_kill_at(m90i)
+                f_m90hist_kill_parent_at(m90i)
+                m90i -= 1
+            f_clear_boxes(m90_dfr_box)
+            array.clear(m90HistStart), array.clear(m90HistEnd)
+            array.clear(m90_h_q1o), array.clear(m90_h_q1oTs)
+            array.clear(m90_h_q2o), array.clear(m90_h_q2oTs)
+            array.clear(m90_h_q3o), array.clear(m90_h_q3oTs)
+            array.clear(m90_h_q4o), array.clear(m90_h_q4oTs)
+            array.clear(m90_dfr_hi), array.clear(m90_dfr_lo)
+            array.clear(m90_dfr_box)
+            array.clear(m90_l_q1o), array.clear(m90_l_q2o), array.clear(m90_l_q3o), array.clear(m90_l_q4o)
+            array.clear(m90_p_l_q1o), array.clear(m90_p_l_q2o), array.clear(m90_p_l_q3o), array.clear(m90_p_l_q4o)
+            array.clear(m90_l_stdv)
+            array.clear(m90_l_stdv_lbl)
+            array.clear(m90Starts)
+        else
+            int m90i = array.size(m90HistStart) - 1
+            while m90i >= 0
+                f_m90hist_kill_at(m90i)
+                m90i -= 1
+            f_clear_boxes(m90_dfr_box)
+            f_m90hist_ensure_current()
 else
     if not na(m90.q2Ts)
         m90ProjQ2 := tc > m90.q2Ts ? f_kill(m90ProjQ2) : f_set_or_make_vline(m90ProjQ2, m90.q2Ts, COL_Q2)
@@ -1603,7 +1614,7 @@ else
             float m90Hi = array.get(m90_dfr_hi, m90DfrIdx)
             float m90Lo = array.get(m90_dfr_lo, m90DfrIdx)
             box m90Box = array.get(m90_dfr_box, m90DfrIdx)
-            if not na(m90Q1) and not na(m90Q2) and not na(m90Hi) and not na(m90Lo)
+            if showDfrOutline and not na(m90Q1) and not na(m90Q2) and not na(m90Hi) and not na(m90Lo)
                 int m90Start = m90Q1 + int((m90Q2 - m90Q1) / 3)
                 m90Box := f_set_or_make_box(m90Box, m90Start, m90Hi, m90Q2, m90Lo, COL_Q1)
             else
@@ -1647,39 +1658,42 @@ else
                 m90LvlIdx += 1
             m90StdvIdx += 1
 
+prevShow90mTf := show90mTf
+
 if not showNanoTf
-    vset_clear(nanoV)
-    projQ2  := f_kill(projQ2)
-    projQ3  := f_kill(projQ3)
-    projQ4  := f_kill(projQ4)
-    projEnd := f_kill(projEnd)
-    int nStdvClear = array.size(nano_l_stdv) - 1
-    while nStdvClear >= 0
-        line nStdvLn = array.get(nano_l_stdv, nStdvClear)
-        if not na(nStdvLn)
-            line.delete(nStdvLn)
-        label nStdvLbl = array.get(nano_l_stdv_lbl, nStdvClear)
-        if not na(nStdvLbl)
-            label.delete(nStdvLbl)
-        array.set(nano_l_stdv, nStdvClear, na)
-        array.set(nano_l_stdv_lbl, nStdvClear, na)
-        nStdvClear -= 1
-    int i = array.size(histStart) - 1
-    while i >= 0
-        f_hist_kill_at(i)
-        i -= 1
-    f_clear_boxes(dfr_box)
-    array.clear(histStart), array.clear(histEnd)
-    array.clear(h_q1o), array.clear(h_q1oTs)
-    array.clear(h_q2o), array.clear(h_q2oTs)
-    array.clear(h_q3o), array.clear(h_q3oTs)
-    array.clear(h_q4o), array.clear(h_q4oTs)
-    array.clear(dfr_hi), array.clear(dfr_lo)
-    array.clear(dfr_box)
-    array.clear(l_q1o), array.clear(l_q2o), array.clear(l_q3o), array.clear(l_q4o)
-    array.clear(nano_l_stdv)
-    array.clear(nano_l_stdv_lbl)
-    array.clear(nanoStarts)
+    if prevShowNanoTf
+        vset_clear(nanoV)
+        projQ2  := f_kill(projQ2)
+        projQ3  := f_kill(projQ3)
+        projQ4  := f_kill(projQ4)
+        projEnd := f_kill(projEnd)
+        int nStdvClear = array.size(nano_l_stdv) - 1
+        while nStdvClear >= 0
+            line nStdvLn = array.get(nano_l_stdv, nStdvClear)
+            if not na(nStdvLn)
+                line.delete(nStdvLn)
+            label nStdvLbl = array.get(nano_l_stdv_lbl, nStdvClear)
+            if not na(nStdvLbl)
+                label.delete(nStdvLbl)
+            array.set(nano_l_stdv, nStdvClear, na)
+            array.set(nano_l_stdv_lbl, nStdvClear, na)
+            nStdvClear -= 1
+        int i = array.size(histStart) - 1
+        while i >= 0
+            f_hist_kill_at(i)
+            i -= 1
+        f_clear_boxes(dfr_box)
+        array.clear(histStart), array.clear(histEnd)
+        array.clear(h_q1o), array.clear(h_q1oTs)
+        array.clear(h_q2o), array.clear(h_q2oTs)
+        array.clear(h_q3o), array.clear(h_q3oTs)
+        array.clear(h_q4o), array.clear(h_q4oTs)
+        array.clear(dfr_hi), array.clear(dfr_lo)
+        array.clear(dfr_box)
+        array.clear(l_q1o), array.clear(l_q2o), array.clear(l_q3o), array.clear(l_q4o)
+        array.clear(nano_l_stdv)
+        array.clear(nano_l_stdv_lbl)
+        array.clear(nanoStarts)
 else
     if not na(n.q2Ts)
         projQ2 := tc > n.q2Ts ? f_kill(projQ2) : f_set_or_make_vline(projQ2, n.q2Ts, COL_Q2)
@@ -1782,7 +1796,7 @@ else
             float nHi = array.get(dfr_hi, nDfrIdx)
             float nLo = array.get(dfr_lo, nDfrIdx)
             box nBox = array.get(dfr_box, nDfrIdx)
-            if not na(nQ1) and not na(nQ2) and not na(nHi) and not na(nLo)
+            if showDfrOutline and not na(nQ1) and not na(nQ2) and not na(nHi) and not na(nLo)
                 int nStart = nQ1 + int((nQ2 - nQ1) / 3)
                 nBox := f_set_or_make_box(nBox, nStart, nHi, nQ2, nLo, COL_Q1)
             else
@@ -1825,6 +1839,8 @@ else
                 array.set(nano_l_stdv_lbl, nLineIdx, nLbl)
                 nLvlIdx += 1
             nStdvIdx += 1
+
+prevShowNanoTf := showNanoTf
 
 if drawNow
     // Parent cycle opens (thicker lines)

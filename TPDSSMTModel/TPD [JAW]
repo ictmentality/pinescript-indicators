@@ -447,8 +447,8 @@ bool tpd_show_icons = (tpd_mode == "Icons Only" or tpd_mode == "Both")
 bool tpd_show_body  = (tpd_mode == "Body Only" or tpd_mode == "Both")
 tpd_use_smt_filter = input.bool(false, "Require SMT (C2→C3)", group=group_tpd_adv)
 
-tpd_bull_color = input.color(color.new(color.blue, 50), "Bullish Icon", inline="tpd_style", group=group_tpd_adv)
-tpd_bear_color = input.color(color.new(color.red, 50), "Bearish Icon", inline="tpd_style", group=group_tpd_adv)
+tpd_bull_color = input.color(color.blue, "Bullish Icon", inline="tpd_style", group=group_tpd_adv)
+tpd_bear_color = input.color(color.red, "Bearish Icon", inline="tpd_style", group=group_tpd_adv)
 
 tpd_bull_shape = input.string("▲", "Shape", options=["●", "✦", "▲", "♦", "♟"], inline="tpd_icon", group=group_tpd_adv)
 tpd_bear_shape = input.string("▼", "Shape", options=["●", "✦", "▼", "♦", "♟"], inline="tpd_icon", group=group_tpd_adv)
@@ -512,12 +512,12 @@ f_tpd(_htf, _show_tpd, _size) =>
             bear_tpd := bear_tpd and bear_smt
 
         if bear_tpd and tpd_show_icons
-            lblbear := label.new(mh1t, mh1, text=f_text(_htf)+ '\n' + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family = target_font)
+            lblbear := label.new(mh1t, mh1, text=f_text(_htf)+ '\n' + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family = target_font)
             array.push(tpd_labels, lblbear)
             if array.size(tpd_labels) > max_tpd_bars
                 label.delete(array.shift(tpd_labels))
         if bull_tpd and tpd_show_icons
-            lblbull := label.new(ml1t, ml1, text=tpd_bull_shape+ '\n'+ f_text(_htf), xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family = target_font)
+            lblbull := label.new(ml1t, ml1, text=tpd_bull_shape+ '\n'+ f_text(_htf), xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family = target_font)
             array.push(tpd_labels, lblbull)
             if array.size(tpd_labels) > max_tpd_bars
                 label.delete(array.shift(tpd_labels))
@@ -567,12 +567,12 @@ f_tpd_triad(_htf, _show_tpd, _size)=>
             bear_tpd := bear_tpd and bear_smt
 
         if bear_tpd and tpd_show_icons
-            lblbear := label.new(mh1t, mh1, text=f_text(_htf)+ '\n' + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family = target_font)
+            lblbear := label.new(mh1t, mh1, text=f_text(_htf)+ '\n' + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family = target_font)
             array.push(tpd_labels, lblbear)
             if array.size(tpd_labels) > max_tpd_bars
                 label.delete(array.shift(tpd_labels))
         if bull_tpd and tpd_show_icons
-            lblbull := label.new(ml1t, ml1, text=tpd_bull_shape + '\n'+ f_text(_htf) , xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray,100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family = target_font)
+            lblbull := label.new(ml1t, ml1, text=tpd_bull_shape + '\n'+ f_text(_htf) , xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family = target_font)
             array.push(tpd_labels, lblbull)
             if array.size(tpd_labels) > max_tpd_bars
                 label.delete(array.shift(tpd_labels))
@@ -613,7 +613,7 @@ barcolor(tpd_body_color)
 // ============================================
 // TPD DEBUG WINDOW
 // ============================================
-var table tpd_debug_tbl = table.new(position.top_right, 2, 14, border_width=1)
+var table tpd_debug_tbl = table.new(position.top_right, 2, 15, border_width=1)
 [dbg_mh2,dbg_ml2,dbg_mc2,dbg_mo2,dbg_mt2,dbg_mh1,dbg_ml1,dbg_mc1,dbg_mo1,dbg_mt1,dbg_mh0,dbg_ml0,dbg_mc0,dbg_mo0,dbg_mt0,dbg_mup1,dbg_mdw1,dbg_ml1t,dbg_mh1t] = f_live_sym(close, open, high, low, time, timeframe.period)
 [dbg_oh2,dbg_ol2,dbg_oc2,dbg_oo2,dbg_ot2,dbg_oh1,dbg_ol1,dbg_oc1,dbg_oo1,dbg_ot1,dbg_oh0,dbg_ol0,dbg_oc0,dbg_oo0,dbg_ot0,dbg_oup1,dbg_odw1,dbg_ol1t,dbg_oh1t] = f_live_sym(xc0, xo0, xh0, xl0, xt0, timeframe.period)
 [dbg_ph2,dbg_pl2,dbg_pc2,dbg_po2,dbg_pt2,dbg_ph1,dbg_pl1,dbg_pc1,dbg_po1,dbg_pt1,dbg_ph0,dbg_pl0,dbg_pc0,dbg_po0,dbg_pt0,dbg_pup1,dbg_pdw1,dbg_pl1t,dbg_ph1t] = f_live_sym(yc0, yo0, yh0, yl0, yt0, timeframe.period)
@@ -687,6 +687,8 @@ if barstate.islast
         dyad_c3_c = ""
 
         dbg_flags = (use_triad_dbg or use_dyad_dbg) ? ("cr1 " + str.tostring(dbg_crack1) + " cr2 " + str.tostring(dbg_crack2) + " hi " + str.tostring(dbg_con_high) + " lo " + str.tostring(dbg_con_low) + " b " + str.tostring(dbg_bear) + " u " + str.tostring(dbg_bull)) : ""
+        dbg_bull_opacity = "Bull Opacity " + str.tostring(100 - color.t(tpd_bull_color))
+        dbg_bear_opacity = "Bear Opacity " + str.tostring(100 - color.t(tpd_bear_color))
         header_bg = color.new(color.gray, 85)
         body_bg = color.white
         table.cell(tpd_debug_tbl, 0, 0, "Triad", text_color=color.black, bgcolor=header_bg, text_size=size.small)
@@ -704,6 +706,7 @@ if barstate.islast
         table.cell(tpd_debug_tbl, 0, 11, triad_c3_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(tpd_debug_tbl, 0, 12, triad_c3_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(tpd_debug_tbl, 0, 13, use_triad_dbg ? dbg_flags : "", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 14, dbg_bull_opacity, text_color=color.black, bgcolor=body_bg, text_size=size.small)
 
         table.cell(tpd_debug_tbl, 1, 1, dyad_r1, text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(tpd_debug_tbl, 1, 2, dyad_r2, text_color=color.black, bgcolor=body_bg, text_size=size.small)
@@ -718,5 +721,6 @@ if barstate.islast
         table.cell(tpd_debug_tbl, 1, 11, dyad_c3_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(tpd_debug_tbl, 1, 12, dyad_c3_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(tpd_debug_tbl, 1, 13, use_dyad_dbg ? dbg_flags : "", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 14, dbg_bear_opacity, text_color=color.black, bgcolor=body_bg, text_size=size.small)
     else
-        table.clear(tpd_debug_tbl, 0, 0, 1, 13)
+        table.clear(tpd_debug_tbl, 0, 0, 1, 14)
