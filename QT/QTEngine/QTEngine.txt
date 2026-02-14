@@ -1318,6 +1318,9 @@ export qt_nano_aligned_ohlc_debug() =>
 export qt_m90_aligned_ohlc_debug() =>
     f_pack_to_tuple(f_ingest_pack_m90())
 
+export qt_daily_aligned_ohlc_debug() =>
+    f_pack_to_tuple(f_ingest_pack_daily())
+
 export qt_micro_aligned_qr_debug(CycleState st) =>
     [st.micro.aq1, st.micro.aq2, st.micro.aq3, st.micro.aq4]
 

@@ -1,0 +1,607 @@
+//@version=6
+indicator("2CiC State", shorttitle="2CiC State", overlay=true, max_labels_count=500, dynamic_requests=true)
+import Jaw1312/QTEngine/34 as qt
+
+// ============================================
+//  DYAD SYMBOLS
+// ============================================
+
+// Hidden Hardcoded Pairs for Auto Mode (Not visible in Settings)
+s1 = "CAPITALCOM:US100", s2 = "CAPITALCOM:US500"
+s3 = "OANDA:XAUUSD",      s4 = "OANDA:XAGUSD"
+s5 = "FOREXCOM:EURUSD",   s6 = "FOREXCOM:GBPUSD"
+s7 = "BINANCE:BTCUSDT.P",s8 = "BINANCE:ETHUSDT.P"
+s9 = "CME_MINI:MNQ1!", s10 = "CME_MINI:MES1!"
+s11 = "COMEX:GC1!", s12 = "COMEX:SI1!"
+s13 = "COMEX:MGC1!", s14 = "COMEX:SIL1!"
+
+//Groups
+g2 = "TPD"
+g12 = "Dyad"
+g_fut = "Futures"
+
+// Futures settings
+badj = input.bool(defval = true, title = "Backadjust (Futures)", group = g_fut)
+
+// Correlated pair context
+sym_id = syminfo.tickerid
+sym = str.contains(sym_id, "replay-feed") ? (syminfo.prefix + ":" + syminfo.ticker) : sym_id
+var string current_ticker = syminfo.ticker
+
+// ----------------------------------------------------------------------------
+dyad_selection_mode = input.string("Manual", "Dyad Selection", options = ["Auto", "Manual", "Off"], group = g12, inline="dyad_mode", tooltip = "Auto: \n CAPITALCOM=US100:US500 \n OANDA=XAUUSD:XAGUSD \n FOREXCOM=URUSD:GBPUSD \n BINANCE=BTCUSDT.P:ETHUSDT.P: \n NQ1:ES1 \n GC,SI")
+
+enable_dyad_m1 = input.bool(true, "Dyad 1", group=g12, inline="dyad_m1")
+dyad_m1_sym1     = input.symbol("COMEX_MINI:MGC1!","", group = g12, inline="dyad_m1")
+dyad_m1_sym2     = input.symbol("COMEX_MINI:SIL1!", "&", group = g12, inline="dyad_m1")
+inv_dyad_m1 = input.bool(false, "Inverse", group=g12, inline="dyad_m1")
+
+enable_dyad_m2 = input.bool(false, "Dyad 2", group=g12, inline="dyad_m2")
+dyad_m2_sym1     = input.symbol("","", group = g12, inline="dyad_m2")
+dyad_m2_sym2     = input.symbol("", "&", group = g12, inline="dyad_m2")
+inv_dyad_m2 = input.bool(false, "Inverse", group=g12, inline="dyad_m2")
+
+enable_dyad_m3 = input.bool(false, "Dyad 3", group=g12, inline="dyad_m3")
+dyad_m3_sym1     = input.symbol("","", group = g12, inline="dyad_m3")
+dyad_m3_sym2     = input.symbol("", "&", group = g12, inline="dyad_m3")
+inv_dyad_m3 = input.bool(false, "Inverse", group=g12, inline="dyad_m3")
+
+enable_dyad_m4 = input.bool(false, "Dyad 4", group=g12, inline="dyad_m4")
+dyad_m4_sym1     = input.symbol("","", group = g12, inline="dyad_m4")
+dyad_m4_sym2     = input.symbol("", "&", group = g12, inline="dyad_m4")
+inv_dyad_m4 = input.bool(false, "Inverse", group=g12, inline="dyad_m4")
+
+enable_dyad_m5 = input.bool(false, "Dyad 5", group=g12, inline="dyad_m5")
+dyad_m5_sym1     = input.symbol("","", group = g12, inline="dyad_m5")
+dyad_m5_sym2     = input.symbol("", "&", group = g12, inline="dyad_m5")
+inv_dyad_m5 = input.bool(false, "Inverse", group=g12, inline="dyad_m5")
+
+// ============================================
+// TPD SETTINGS
+// ============================================
+const string TPD_SCAN_TF = "360"
+
+group_tpd_adv = "TPD Settings"
+
+max_tpd_bars = input.int(500, "Max TPD Markers", minval=1, group=group_tpd_adv)
+
+use_expansion_invalidation = input.bool(true, "Expansion Invalidation", group=group_tpd_adv)
+tcisd_level_color = color.rgb(128, 0, 32)
+setup_invalidation_color = color.red
+
+tpd_bull_color = input.color(color.blue, "Bullish Icon", inline="tpd_style", group=group_tpd_adv)
+tpd_bear_color = input.color(color.red, "Bearish Icon", inline="tpd_style", group=group_tpd_adv)
+
+tpd_bull_shape = input.string("▲", "Shape", options=["●", "✦", "▲", "♦", "♟"], inline="tpd_icon", group=group_tpd_adv)
+tpd_bear_shape = input.string("▼", "Shape", options=["●", "✦", "▼", "♦", "♟"], inline="tpd_icon", group=group_tpd_adv)
+
+tpd_size_str = input.string("Tiny", "Size", options=["Tiny", "Small", "Normal", "Large", "Huge", "Auto"], inline="tpd_icon", group=group_tpd_adv)
+tpd_lbl_size = switch tpd_size_str
+    "Tiny"   => size.tiny
+    "Small"  => size.small
+    "Normal" => size.normal
+    "Large"  => size.large
+    "Huge"   => size.huge
+    "Auto"   => size.auto
+    => size.small
+
+group_tpd_debug = "State Window"
+show_tpd_alert_debug = input.bool(true, "Show State Window", group=group_tpd_debug)
+
+// ============================================
+// HELPERS
+// ============================================
+f_check_match(input_sym) =>
+    if str.length(input_sym) == 0 or not str.contains(input_sym, ":")
+        false
+    else
+        t_sym = array.get(str.split(input_sym, ":"), 1)
+        (current_ticker == t_sym) or str.contains(sym, t_sym) or str.contains(input_sym, current_ticker)
+
+f_text(string _tf) =>
+    float _tf_num = str.tonumber(_tf)
+    int _tf_int = int(na)
+    string _text = _tf
+    if not na(_tf_num)
+        _tf_int := int(_tf_num)
+    if _tf == "1D"
+        _text := "D"
+    else if _tf == "1W"
+        _text := "W"
+    else if _tf == "1M"
+        _text := "M"
+    else if not na(_tf_int)
+        if _tf_int < 60
+            _text := "m" + _tf
+        else if _tf_int % 60 == 0
+            _text := "H" + str.tostring(_tf_int / 60)
+        else
+            _text := "m" + _tf
+    _text
+
+f_yn(bool _v) =>
+    _v ? "Y" : "N"
+
+f_sm_state_text(_s) =>
+    _s == 0 ? "IDLE" : _s == 1 ? "C3_TRACKING" : "UNKNOWN"
+
+f_snap_to_containing_bar_open(int _ts) =>
+    int snapped = ta.valuewhen(time <= _ts and time_close > _ts, time, 0)
+    na(snapped) ? _ts : snapped
+
+f_qt_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3, qt.QuarterRecord q4) =>
+    qt.QuarterRecord out = q1
+    if idx == 2
+        out := q2
+    else if idx == 3
+        out := q3
+    else if idx == 4
+        out := q4
+    out
+
+f_qt_daily_c123() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    [st0, d] = qt.qt_daily_update(st, cfg, time, time_close)
+    st := st0
+
+    qt.QuarterRecord qcur = f_qt_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
+    qt.QuarterRecord qprev = d.curQuarterIndex == 1 ? st.daily.prev1 : d.curQuarterIndex == 2 ? d.q1 : d.curQuarterIndex == 3 ? d.q2 : d.q3
+    qt.QuarterRecord qprev2 = d.curQuarterIndex == 1 ? st.daily.prev2 : d.curQuarterIndex == 2 ? st.daily.prev1 : d.curQuarterIndex == 3 ? d.q1 : d.q2
+    bool qprev_up = qprev.has and not na(qprev.c) and not na(qprev.o) and qprev.c > qprev.o
+    bool qprev_down = qprev.has and not na(qprev.c) and not na(qprev.o) and qprev.c < qprev.o
+    [a_o, a_h, a_l, a_c, a_t, a_actual_o, a_actual_o_ts, a_actual_boundary_ts, a_actual_qi] = qt.qt_daily_aligned_ohlc_debug()
+
+    [qprev2.h, qprev2.l, qprev2.c, qprev2.o, qprev2.boundaryTs, qprev.h, qprev.l, qprev.c, qprev.o, qprev.boundaryTs, qcur.h, qcur.l, qcur.c, qcur.o, qcur.boundaryTs, qprev_up, qprev_down, qprev.lTs, qprev.hTs, a_c, a_o, a_t]
+
+// ============================================
+// DYAD RESOLUTION
+// ============================================
+is_nq_asset = str.contains(sym, "NQ") or str.contains(sym, "MNQ")
+is_es_asset = str.contains(sym, "ES") or str.contains(sym, "MES")
+is_gc_asset = str.contains(sym, "GC") or str.contains(sym, "MGC")
+is_si_asset = str.contains(sym, "SI") or str.contains(sym, "MSI")
+is_mgc_asset = str.contains(sym, "MGC")
+is_sil_asset = str.contains(sym, "SIL")
+
+string csym = sym
+if dyad_selection_mode != "Off"
+    if dyad_selection_mode == "Manual"
+        is_on_dyad_m1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
+        is_on_dyad_m2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
+        is_on_dyad_m3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
+        is_on_dyad_m4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
+        is_on_dyad_m5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
+
+        if is_on_dyad_m1
+            csym := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
+        else if is_on_dyad_m2
+            csym := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
+        else if is_on_dyad_m3
+            csym := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
+        else if is_on_dyad_m4
+            csym := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
+        else if is_on_dyad_m5
+            csym := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
+    else if dyad_selection_mode == "Auto"
+        if str.contains(sym, s1) or sym == s1
+            csym := s2
+        else if str.contains(sym, s2) or sym == s2
+            csym := s1
+        else if str.contains(sym, s3) or sym == s3
+            csym := s4
+        else if str.contains(sym, s4) or sym == s4
+            csym := s3
+        else if str.contains(sym, s5) or sym == s5
+            csym := s6
+        else if str.contains(sym, s6) or sym == s6
+            csym := s5
+        else if str.contains(sym, s7) or sym == s7
+            csym := s8
+        else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
+            csym := s7
+        else if is_nq_asset
+            csym := s10
+        else if is_es_asset
+            csym := s9
+        else if is_mgc_asset
+            csym := s14
+        else if is_sil_asset
+            csym := s13
+        else if is_gc_asset
+            csym := s12
+        else if is_si_asset
+            csym := s11
+
+    if dyad_selection_mode == "Manual" and syminfo.type == "futures" and str.contains(csym, ":")
+        csym := syminfo.prefix + ":" + array.get(str.split(csym, ":"), 1)
+
+if dyad_selection_mode != "Off" and str.length(csym) > 0 and syminfo.type == "futures"
+    csym := ticker.modify(csym, session = syminfo.session, backadjustment = badj ? backadjustment.on : backadjustment.off)
+
+bool dyad_ok = dyad_selection_mode != "Off" and csym != sym
+
+// ============================================
+// STATE MACHINE (ITERATION B: 15m QTEngine STAGE 1 + STAGE 2 + INVALIDATION + EXPIRY)
+// ============================================
+const int SM_IDLE = 0
+const int SM_C3_TRACKING = 1
+
+f_tpd_state_iter_a_15(_pair_sym, _active) =>
+    var int sm_state = SM_IDLE
+    var bool bearish_valid_tpd = false
+    var bool bearish_valid_tpd_ssmt = false
+    var bool setup_confirmed = false
+    var bool purge_is_main = false
+    var bool failure_is_main = false
+    var bool c2_high_swept = false
+    var bool purge_seen = false
+    var float htf_c2_high_main = na
+    var float htf_c2_high_pair = na
+    var float m15_tcisd_level = na
+    var int m15_tcisd_ts = int(na)
+    var float m15_tcisd_purge_level = na
+    var int m15_tcisd_purge_ts = int(na)
+    var float purge_line_level = na
+    var int purge_line_ts = int(na)
+    var float setup_inv_level = na
+    var int setup_inv_ts = int(na)
+    var int main_high_purge_ts = int(na)
+    var int pair_high_purge_ts = int(na)
+    var int c4_open_ts = int(na)
+    var int stage1_seq = 0
+    var int stage2_seq = 0
+    var int stage3_seq = 0
+    var int expired_seq = 0
+    var int invalidated_seq = 0
+    var int stage1_ts = int(na)
+    var float stage1_price = na
+
+    bool dbg_crack1_out = false
+    bool dbg_crack2_out = false
+    bool dbg_c2_high_swept_out = false
+    bool dbg_purge_seen_out = false
+
+    if _active
+        [mh2,ml2,mc2,mo2,mt2,mh1,ml1,mc1,mo1,mt1,mh0,ml0,mc0,mo0,mt0,mup1,mdw1,ml1t,mh1t,mcb0,mob0,mtb0] = request.security(syminfo.tickerid, "15", f_qt_daily_c123(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [oh2,ol2,oc2,oo2,ot2,oh1,ol1,oc1,oo1,ot1,oh0,ol0,oc0,oo0,ot0,oup1,odw1,ol1t,oh1t,pcb0,pob0,ptb0] = request.security(_pair_sym, "15", f_qt_daily_c123(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+        bool htf_boundary = timeframe.change(TPD_SCAN_TF)
+        int htf_span_sec = timeframe.in_seconds(TPD_SCAN_TF)
+        bool have_hist = not na(mc2) and not na(oc2) and not na(mh1) and not na(oh1)
+
+        bool main_c2_up = mc1 > mo1
+        bool main_c2_down = mc1 < mo1
+        bool pair_c2_up = oc1 > oo1
+        bool pair_c2_down = oc1 < oo1
+        bool crack1 = have_hist and ((main_c2_up and pair_c2_down) or (main_c2_down and pair_c2_up))
+
+        bool main_c3_open_above_c1_close = mo0 > mc2
+        bool main_c3_open_below_c1_close = mo0 < mc2
+        bool pair_c3_open_above_c1_close = oo0 > oc2
+        bool pair_c3_open_below_c1_close = oo0 < oc2
+        bool crack2 = have_hist and ((main_c3_open_above_c1_close and pair_c3_open_below_c1_close) or (main_c3_open_below_c1_close and pair_c3_open_above_c1_close))
+
+        bool purge_is_main_now = main_c3_open_above_c1_close and pair_c3_open_below_c1_close
+        bool failure_is_main_now = main_c3_open_below_c1_close and pair_c3_open_above_c1_close
+
+        bool valid_bearish_tpd_now = crack1 and crack2
+        int next_htf_open_ts = not na(htf_span_sec) ? mt0 + int(htf_span_sec * 1000) : int(na)
+
+        dbg_crack1_out := crack1
+        dbg_crack2_out := crack2
+
+        if htf_boundary
+            if sm_state == SM_C3_TRACKING and not setup_confirmed
+                bearish_valid_tpd := false
+                bearish_valid_tpd_ssmt := false
+                setup_confirmed := false
+                purge_is_main := false
+                failure_is_main := false
+                c2_high_swept := false
+                purge_seen := false
+                htf_c2_high_main := na
+                htf_c2_high_pair := na
+                m15_tcisd_level := na
+                m15_tcisd_ts := int(na)
+                m15_tcisd_purge_level := na
+                m15_tcisd_purge_ts := int(na)
+                purge_line_level := na
+                purge_line_ts := int(na)
+                setup_inv_level := na
+                setup_inv_ts := int(na)
+                main_high_purge_ts := int(na)
+                pair_high_purge_ts := int(na)
+                c4_open_ts := int(na)
+                expired_seq += 1
+                sm_state := SM_IDLE
+            else if sm_state == SM_C3_TRACKING and setup_confirmed
+                bearish_valid_tpd := false
+                bearish_valid_tpd_ssmt := false
+                setup_confirmed := false
+                purge_is_main := false
+                failure_is_main := false
+                c2_high_swept := false
+                purge_seen := false
+                htf_c2_high_main := na
+                htf_c2_high_pair := na
+                m15_tcisd_level := na
+                m15_tcisd_ts := int(na)
+                m15_tcisd_purge_level := na
+                m15_tcisd_purge_ts := int(na)
+                purge_line_level := na
+                purge_line_ts := int(na)
+                setup_inv_level := na
+                setup_inv_ts := int(na)
+                main_high_purge_ts := int(na)
+                pair_high_purge_ts := int(na)
+                c4_open_ts := int(na)
+                sm_state := SM_IDLE
+
+            if sm_state == SM_IDLE and valid_bearish_tpd_now and (purge_is_main_now or failure_is_main_now)
+                bearish_valid_tpd := true
+                bearish_valid_tpd_ssmt := false
+                setup_confirmed := false
+                purge_is_main := purge_is_main_now
+                failure_is_main := failure_is_main_now
+                c2_high_swept := false
+                purge_seen := false
+                htf_c2_high_main := mh1
+                htf_c2_high_pair := oh1
+                m15_tcisd_level := na
+                m15_tcisd_ts := int(na)
+                m15_tcisd_purge_level := na
+                m15_tcisd_purge_ts := int(na)
+                purge_line_level := purge_is_main_now ? mh1 : oh1
+                purge_line_ts := purge_is_main_now ? mh1t : oh1t
+                setup_inv_level := failure_is_main_now ? mh1 : oh1
+                setup_inv_ts := failure_is_main_now ? mh1t : oh1t
+                main_high_purge_ts := int(na)
+                pair_high_purge_ts := int(na)
+                c4_open_ts := next_htf_open_ts
+                stage1_seq += 1
+                stage1_ts := mh1t
+                stage1_price := mh1
+                sm_state := SM_C3_TRACKING
+
+        bool main_sweeps_c2_high = not na(htf_c2_high_main) and not na(mh0) and mh0 > htf_c2_high_main
+        bool pair_sweeps_c2_high = not na(htf_c2_high_pair) and not na(oh0) and oh0 > htf_c2_high_pair
+        if sm_state == SM_C3_TRACKING
+            if na(main_high_purge_ts) and main_sweeps_c2_high
+                main_high_purge_ts := int(mtb0)
+            if na(pair_high_purge_ts) and pair_sweeps_c2_high
+                pair_high_purge_ts := int(ptb0)
+        int bear_potential_tcisd_ts = failure_is_main ? pair_high_purge_ts : main_high_purge_ts
+        int bear_potential_tcisd_match_bar = ta.valuewhen(mtb0 == bear_potential_tcisd_ts, bar_index, 0)
+        int bear_potential_tcisd_back = na(bear_potential_tcisd_match_bar) ? int(na) : bar_index - bear_potential_tcisd_match_bar
+        int bear_potential_purge_tcisd_ts = purge_is_main ? main_high_purge_ts : pair_high_purge_ts
+        int bear_potential_purge_tcisd_match_bar = ta.valuewhen(mtb0 == bear_potential_purge_tcisd_ts, bar_index, 0)
+        int bear_potential_purge_tcisd_back = na(bear_potential_purge_tcisd_match_bar) ? int(na) : bar_index - bear_potential_purge_tcisd_match_bar
+
+        if sm_state == SM_C3_TRACKING
+            bool either_sweeps_c2_high = main_sweeps_c2_high or pair_sweeps_c2_high
+            bool failure_sweeps_c2_high = failure_is_main ? main_sweeps_c2_high : pair_sweeps_c2_high
+            bool purge_sweeps_c2_high = purge_is_main ? main_sweeps_c2_high : pair_sweeps_c2_high
+
+            if either_sweeps_c2_high
+                c2_high_swept := true
+
+            // Invalidation must be processed before Stage 2.
+            if failure_sweeps_c2_high and not setup_confirmed
+                bearish_valid_tpd := false
+                bearish_valid_tpd_ssmt := false
+                setup_confirmed := false
+                purge_is_main := false
+                failure_is_main := false
+                c2_high_swept := false
+                purge_seen := false
+                htf_c2_high_main := na
+                htf_c2_high_pair := na
+                m15_tcisd_level := na
+                m15_tcisd_ts := int(na)
+                m15_tcisd_purge_level := na
+                m15_tcisd_purge_ts := int(na)
+                purge_line_level := na
+                purge_line_ts := int(na)
+                setup_inv_level := na
+                setup_inv_ts := int(na)
+                main_high_purge_ts := int(na)
+                pair_high_purge_ts := int(na)
+                c4_open_ts := int(na)
+                invalidated_seq += 1
+                sm_state := SM_IDLE
+
+            if sm_state == SM_C3_TRACKING and c2_high_swept and purge_sweeps_c2_high and not purge_seen
+                purge_seen := true
+                bearish_valid_tpd_ssmt := true
+                stage2_seq += 1
+            if sm_state == SM_C3_TRACKING and purge_seen and na(m15_tcisd_level) and not na(bear_potential_tcisd_back)
+                int bear_fail_back0 = bear_potential_tcisd_back
+                int bear_fail_back1 = bear_potential_tcisd_back + 1
+                if failure_is_main
+                    bool bear_fail_match0 = bear_fail_back0 <= bar_index and mcb0[bear_fail_back0] > mob0[bear_fail_back0]
+                    bool bear_fail_match1 = bear_fail_back1 <= bar_index and mcb0[bear_fail_back1] > mob0[bear_fail_back1]
+                    if bear_fail_match0
+                        m15_tcisd_level := mob0[bear_fail_back0]
+                        m15_tcisd_ts := int(mtb0[bear_fail_back0])
+                    else if bear_fail_match1
+                        m15_tcisd_level := mob0[bear_fail_back1]
+                        m15_tcisd_ts := int(mtb0[bear_fail_back1])
+                else
+                    bool bear_fail_match0 = bear_fail_back0 <= bar_index and pcb0[bear_fail_back0] > pob0[bear_fail_back0]
+                    bool bear_fail_match1 = bear_fail_back1 <= bar_index and pcb0[bear_fail_back1] > pob0[bear_fail_back1]
+                    if bear_fail_match0
+                        m15_tcisd_level := pob0[bear_fail_back0]
+                        m15_tcisd_ts := int(ptb0[bear_fail_back0])
+                    else if bear_fail_match1
+                        m15_tcisd_level := pob0[bear_fail_back1]
+                        m15_tcisd_ts := int(ptb0[bear_fail_back1])
+            if sm_state == SM_C3_TRACKING and purge_seen and na(m15_tcisd_purge_level) and not na(bear_potential_purge_tcisd_back)
+                int bear_purge_back0 = bear_potential_purge_tcisd_back
+                int bear_purge_back1 = bear_potential_purge_tcisd_back + 1
+                if purge_is_main
+                    bool bear_purge_match0 = bear_purge_back0 <= bar_index and mcb0[bear_purge_back0] > mob0[bear_purge_back0]
+                    bool bear_purge_match1 = bear_purge_back1 <= bar_index and mcb0[bear_purge_back1] > mob0[bear_purge_back1]
+                    if bear_purge_match0
+                        m15_tcisd_purge_level := mob0[bear_purge_back0]
+                        m15_tcisd_purge_ts := int(mtb0[bear_purge_back0])
+                    else if bear_purge_match1
+                        m15_tcisd_purge_level := mob0[bear_purge_back1]
+                        m15_tcisd_purge_ts := int(mtb0[bear_purge_back1])
+                else
+                    bool bear_purge_match0 = bear_purge_back0 <= bar_index and pcb0[bear_purge_back0] > pob0[bear_purge_back0]
+                    bool bear_purge_match1 = bear_purge_back1 <= bar_index and pcb0[bear_purge_back1] > pob0[bear_purge_back1]
+                    if bear_purge_match0
+                        m15_tcisd_purge_level := pob0[bear_purge_back0]
+                        m15_tcisd_purge_ts := int(ptb0[bear_purge_back0])
+                    else if bear_purge_match1
+                        m15_tcisd_purge_level := pob0[bear_purge_back1]
+                        m15_tcisd_purge_ts := int(ptb0[bear_purge_back1])
+            bool in_c3_window = na(c4_open_ts) ? true : mtb0 < c4_open_ts
+            if sm_state == SM_C3_TRACKING and purge_seen and not setup_confirmed and in_c3_window and not na(m15_tcisd_level)
+                float bear_fail_c_now = failure_is_main ? mcb0 : pcb0
+                if bear_fail_c_now < m15_tcisd_level
+                    setup_confirmed := true
+                    stage3_seq += 1
+    else
+        bearish_valid_tpd := false
+        bearish_valid_tpd_ssmt := false
+        setup_confirmed := false
+        purge_is_main := false
+        failure_is_main := false
+        c2_high_swept := false
+        purge_seen := false
+        htf_c2_high_main := na
+        htf_c2_high_pair := na
+        m15_tcisd_level := na
+        m15_tcisd_ts := int(na)
+        m15_tcisd_purge_level := na
+        m15_tcisd_purge_ts := int(na)
+        purge_line_level := na
+        purge_line_ts := int(na)
+        setup_inv_level := na
+        setup_inv_ts := int(na)
+        main_high_purge_ts := int(na)
+        pair_high_purge_ts := int(na)
+        c4_open_ts := int(na)
+        sm_state := SM_IDLE
+
+    dbg_c2_high_swept_out := c2_high_swept
+    dbg_purge_seen_out := purge_seen
+
+    [bearish_valid_tpd, bearish_valid_tpd_ssmt, setup_confirmed, sm_state, dbg_crack1_out, dbg_crack2_out, dbg_c2_high_swept_out, dbg_purge_seen_out, stage1_seq, stage2_seq, stage3_seq, expired_seq, invalidated_seq, stage1_ts, stage1_price, m15_tcisd_level, m15_tcisd_ts, m15_tcisd_purge_level, m15_tcisd_purge_ts, purge_line_level, purge_line_ts, setup_inv_level, setup_inv_ts, c4_open_ts]
+
+tpd_active = dyad_ok
+[bearishValidTPD, bearishValidTPD_SSMT, setupConfirmed, sm_state, dbg_crack1, dbg_crack2, dbg_c2_high_swept, dbg_purge_seen, stage1_seq_now, stage2_seq_now, stage3_seq_now, expired_seq_now, invalidated_seq_now, stage1_ts_now, stage1_price_now, m15_tcisd_level_now, m15_tcisd_ts_now, m15_tcisd_purge_level_now, m15_tcisd_purge_ts_now, purge_line_level_now, purge_line_ts_now, setup_inv_level_now, setup_inv_ts_now, c4_open_ts_now] = request.security(syminfo.tickerid, "15", f_tpd_state_iter_a_15(csym, tpd_active), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+stage1_bear = stage1_seq_now > nz(stage1_seq_now[1], 0)
+stage2_bear = stage2_seq_now > nz(stage2_seq_now[1], 0)
+stage3_bear = stage3_seq_now > nz(stage3_seq_now[1], 0)
+expired_now = expired_seq_now > nz(expired_seq_now[1], 0)
+invalidated_now = invalidated_seq_now > nz(invalidated_seq_now[1], 0)
+stage1_ts_snapped_now = f_snap_to_containing_bar_open(stage1_ts_now)
+
+var label bear_tpd_icon = na
+var line bear_tcisd_line = na
+var label bear_tcisd_lbl = na
+var line bear_tcisd_purge_line = na
+var label bear_tcisd_purge_lbl = na
+var line bear_purge_line = na
+var line bear_setup_inv_line = na
+is_m15_chart = timeframe.in_seconds(timeframe.period) == 15 * 60
+if stage1_bear and not na(stage1_ts_now) and not na(stage1_price_now)
+    int stage1_draw_ts = stage1_ts_now
+    if timeframe.in_seconds(timeframe.period) == timeframe.in_seconds(TPD_SCAN_TF)
+        stage1_draw_ts := stage1_ts_snapped_now
+    if not na(bear_tpd_icon)
+        label.delete(bear_tpd_icon)
+    bear_tpd_icon := label.new(stage1_draw_ts, stage1_price_now, text=f_text(TPD_SCAN_TF) + "\n" + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, style=label.style_label_down, size=tpd_lbl_size, color=color.new(color.gray, 100), textcolor=tpd_bear_color, tooltip="Bearish Valid TPD (Stage 1)")
+    if not na(bear_tcisd_line)
+        line.delete(bear_tcisd_line)
+        bear_tcisd_line := na
+    if not na(bear_tcisd_lbl)
+        label.delete(bear_tcisd_lbl)
+        bear_tcisd_lbl := na
+    if not na(bear_tcisd_purge_line)
+        line.delete(bear_tcisd_purge_line)
+        bear_tcisd_purge_line := na
+    if not na(bear_tcisd_purge_lbl)
+        label.delete(bear_tcisd_purge_lbl)
+        bear_tcisd_purge_lbl := na
+    if not na(bear_purge_line)
+        line.delete(bear_purge_line)
+        bear_purge_line := na
+    if not na(bear_setup_inv_line)
+        line.delete(bear_setup_inv_line)
+        bear_setup_inv_line := na
+if is_m15_chart and sm_state == SM_C3_TRACKING and dbg_purge_seen and not na(m15_tcisd_level_now) and not na(m15_tcisd_ts_now) and not na(c4_open_ts_now) and na(bear_tcisd_line)
+    bear_tcisd_line := line.new(m15_tcisd_ts_now, m15_tcisd_level_now, c4_open_ts_now, m15_tcisd_level_now, xloc=xloc.bar_time, extend=extend.none, color=tcisd_level_color, width=1)
+    if not na(bear_tcisd_lbl)
+        label.delete(bear_tcisd_lbl)
+    bear_tcisd_lbl := label.new(c4_open_ts_now, m15_tcisd_level_now, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black)
+if is_m15_chart and sm_state == SM_C3_TRACKING and dbg_purge_seen and not na(m15_tcisd_purge_level_now) and not na(m15_tcisd_purge_ts_now) and not na(c4_open_ts_now) and na(bear_tcisd_purge_line)
+    bear_tcisd_purge_line := line.new(m15_tcisd_purge_ts_now, m15_tcisd_purge_level_now, c4_open_ts_now, m15_tcisd_purge_level_now, xloc=xloc.bar_time, extend=extend.none, color=tcisd_level_color, width=1)
+    if not na(bear_tcisd_purge_lbl)
+        label.delete(bear_tcisd_purge_lbl)
+    bear_tcisd_purge_lbl := label.new(c4_open_ts_now, m15_tcisd_purge_level_now, "m15 tCISD (Purge)", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black)
+if is_m15_chart and sm_state == SM_C3_TRACKING and not na(purge_line_level_now) and not na(purge_line_ts_now) and na(bear_purge_line)
+    int purge_end_time = na(c4_open_ts_now) ? time : c4_open_ts_now
+    bear_purge_line := line.new(purge_line_ts_now, purge_line_level_now, purge_end_time, purge_line_level_now, xloc=xloc.bar_time, extend=extend.none, color=color.new(tpd_bear_color, 50), width=1)
+if is_m15_chart and sm_state == SM_C3_TRACKING and not na(setup_inv_level_now) and not na(setup_inv_ts_now) and not na(c4_open_ts_now) and na(bear_setup_inv_line)
+    bear_setup_inv_line := line.new(setup_inv_ts_now, setup_inv_level_now, c4_open_ts_now, setup_inv_level_now, xloc=xloc.bar_time, extend=extend.none, color=setup_invalidation_color, width=1) // Setup Invalidation
+if (expired_now or invalidated_now) and not na(bear_tpd_icon)
+    label.delete(bear_tpd_icon)
+    bear_tpd_icon := na
+if expired_now or invalidated_now
+    if not na(bear_tcisd_line)
+        line.delete(bear_tcisd_line)
+        bear_tcisd_line := na
+    if not na(bear_tcisd_lbl)
+        label.delete(bear_tcisd_lbl)
+        bear_tcisd_lbl := na
+    if not na(bear_tcisd_purge_line)
+        line.delete(bear_tcisd_purge_line)
+        bear_tcisd_purge_line := na
+    if not na(bear_tcisd_purge_lbl)
+        label.delete(bear_tcisd_purge_lbl)
+        bear_tcisd_purge_lbl := na
+    if not na(bear_purge_line)
+        line.delete(bear_purge_line)
+        bear_purge_line := na
+    if not na(bear_setup_inv_line)
+        line.delete(bear_setup_inv_line)
+        bear_setup_inv_line := na
+
+alertcondition(stage1_bear, "2CiC Stage 1 Bearish TPD", "Stage 1: HTF C3 open with bearish valid TPD")
+alertcondition(stage2_bear, "2CiC Stage 2 Bearish Valid TPD/SSMT", "Stage 2: Bearish purge complete (Valid TPD/SSMT)")
+alertcondition(stage3_bear, "2CiC Stage 3 Bearish Setup Confirmed", "Stage 3: Bearish setup confirmed (m15 tCISD)")
+
+// ============================================
+// DEBUG TABLE
+// ============================================
+var table sm_state_tbl = table.new(position.bottom_right, 2, 8, border_width=1)
+
+if barstate.islast
+    if show_tpd_alert_debug
+        header_bg = color.new(color.gray, 85)
+        body_bg = color.white
+        table.cell(sm_state_tbl, 0, 0, "2CiC State", text_color=color.black, bgcolor=header_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 0, f_sm_state_text(sm_state), text_color=color.black, bgcolor=header_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 1, "Chart TF", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 1, timeframe.period, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 2, "Valid TPD", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 2, f_yn(bearishValidTPD), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 3, "Valid TPD/SSMT", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 3, f_yn(bearishValidTPD_SSMT), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 4, "Setup Confirmed", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 4, f_yn(setupConfirmed), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 5, "Crack1/Crack2", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 5, f_yn(dbg_crack1) + "/" + f_yn(dbg_crack2), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 6, "C2Sweep/Purge", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 6, f_yn(dbg_c2_high_swept) + "/" + f_yn(dbg_purge_seen), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 7, "S1/S2/S3/I/E", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 7, f_yn(stage1_bear) + "/" + f_yn(stage2_bear) + "/" + f_yn(stage3_bear) + "/" + f_yn(invalidated_now) + "/" + f_yn(expired_now), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+    else
+        table.clear(sm_state_tbl, 0, 0, 1, 7)
+
+plot(na)

@@ -1,4 +1,4 @@
 //@version=6
 indicator("SSMT Rooftop Reversal", overlay=true, max_lines_count=500, max_labels_count=500)
 
-import Jaw1312/QTEngine/33 as qt
+import Jaw1312/QTEngine/34 as qt

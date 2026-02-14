@@ -15,7 +15,7 @@ the fixed NY 18:00 anchor regardless of cfg.tz (library request.* constraint).
 
 ## Quick start
 ```pinescript
-import Jaw1312/QTEngine/33 as qt
+import Jaw1312/QTEngine/34 as qt
 
 var qt.QTConfig cfg = qt.qt_config_default()
 var qt.CycleState st = qt.qt_state_new()
@@ -43,7 +43,7 @@ Engine step:
 - f_qt_step(eng, t, tClose) -> QtEngineState
 
 Debug (read-only):
-- qt_micro_aligned_ohlc_debug(), qt_nano_aligned_ohlc_debug(), qt_m90_aligned_ohlc_debug()
+- qt_micro_aligned_ohlc_debug(), qt_nano_aligned_ohlc_debug(), qt_m90_aligned_ohlc_debug(), qt_daily_aligned_ohlc_debug()
 - qt_micro_aligned_qr_debug(st), qt_nano_aligned_qr_debug(st)
 
 ## Data shapes

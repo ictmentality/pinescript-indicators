@@ -6,7 +6,7 @@
 - Use QTEngine quarter data.
 
 ## QTEngine Integration
-- Import: `import Jaw1312/QTEngine/33 as qt` (confirmed).
+- Import: `import Jaw1312/QTEngine/34 as qt` (confirmed).
 - Cycle scope for v1: **Daily**.
 - SSMT detection timeframe alignment:
 1. Daily cycle SSMT on aligned `15m`.

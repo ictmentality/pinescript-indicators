@@ -1,8 +1,8 @@
 // This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// © ENIGMA_001
 
 //@version=6
-indicator("TPDSSMT [JAW]", shorttitle="TPDSSMT[JAW]", overlay=true, max_labels_count=500, max_lines_count=100, dynamic_requests=true)
+indicator("TPDSSMT [JAW]", shorttitle="TPDSSMT", overlay=true, max_labels_count=500, max_lines_count=100, dynamic_requests=true)
+import Jaw1312/QTEngine/34 as qt
 
 // ============================================
 //  DYAD SYMBOLS
@@ -150,10 +150,11 @@ if dyad_selection_mode != "Off"
         else if is_si_asset
             csym := s11
 
+    if dyad_selection_mode == "Manual" and syminfo.type == "futures" and str.contains(csym, ":")
+        csym := syminfo.prefix + ":" + array.get(str.split(csym, ":"), 1)
+
     csym_raw := csym
     csym  := syminfo.type == "futures" ? (ticker.modify(csym,session = syminfo.session,backadjustment=badj ? backadjustment.on:backadjustment.off) ) :csym
-
-dyad_ok = dyad_selection_mode != "Off" and sym != csym
 
 // Pair data
 float xc0 = na
@@ -220,6 +221,42 @@ f_live_sym(_xc0,_xo0,_xh0,_xl0,_xt0,_tf)=>
 
     [_h2,_l2,_c2,_o2,_t2,_h1,_l1,_c1,_o1,_t1,_h0,_l0,_c0,_o0,_t0,up1,dw1,_l1t,_h1t]
 
+f_qt_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3, qt.QuarterRecord q4) =>
+    qt.QuarterRecord out = q1
+    if idx == 2
+        out := q2
+    else if idx == 3
+        out := q3
+    else if idx == 4
+        out := q4
+    out
+
+f_qt_daily_c123() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    [st0, d] = qt.qt_daily_update(st, cfg, time, time_close)
+    st := st0
+
+    qt.QuarterRecord qcur = f_qt_pick_qr(d.curQuarterIndex, d.q1, d.q2, d.q3, d.q4)
+    qt.QuarterRecord qprev = d.curQuarterIndex == 1 ? st.daily.prev1 : d.curQuarterIndex == 2 ? d.q1 : d.curQuarterIndex == 3 ? d.q2 : d.q3
+    qt.QuarterRecord qprev2 = d.curQuarterIndex == 1 ? st.daily.prev2 : d.curQuarterIndex == 2 ? st.daily.prev1 : d.curQuarterIndex == 3 ? d.q1 : d.q2
+    bool qprev_up = qprev.has and not na(qprev.c) and not na(qprev.o) and qprev.c > qprev.o
+    bool qprev_down = qprev.has and not na(qprev.c) and not na(qprev.o) and qprev.c < qprev.o
+
+    [qprev2.h, qprev2.l, qprev2.c, qprev2.o, qprev2.boundaryTs, qprev.h, qprev.l, qprev.c, qprev.o, qprev.boundaryTs, qcur.h, qcur.l, qcur.c, qcur.o, qcur.boundaryTs, qprev_up, qprev_down, qprev.lTs, qprev.hTs]
+
+f_main_c123(_htf) =>
+    if timeframe.in_seconds(_htf) == 6 * 60 * 60
+        request.security(syminfo.type == "futures" ? ticker.modify(sym, session = syminfo.session, backadjustment=badj ? backadjustment.on:backadjustment.off) : sym, "15", f_qt_daily_c123(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    else
+        f_live_sym(close, open, high, low, time, _htf)
+
+f_pair_c123(_htf, _csym, _xc0, _xo0, _xh0, _xl0, _xt0) =>
+    if timeframe.in_seconds(_htf) == 6 * 60 * 60
+        request.security(_csym, "15", f_qt_daily_c123(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    else
+        f_live_sym(_xc0, _xo0, _xh0, _xl0, _xt0, _htf)
+
 f_text(string _tf)=>
     float _tf_num = str.tonumber(_tf)
     int _tf_int = int(na)
@@ -269,19 +306,12 @@ f_smt_pair(_lo_c2_a, _lo_c3_a, _hi_c2_a, _hi_c3_a, _lo_c2_b, _lo_c3_b, _hi_c2_b,
 // ============================================
 // TPD SETTINGS
 // ============================================
-tpd_tf = input.timeframe("", "Timeframe", group=g2, tooltip="Timeframe used for TPD/alerts. Leave blank for Chart.")
+const string TPD_SCAN_TF = "360"
 
 group_tpd_adv = "Advanced TPD Settings"
 
-use_tpd_adv  = input.bool(true, "Enable Advanced TPD", group=group_tpd_adv)
 max_tpd_bars = input.int(500, "Max TPD Markers", minval=10, group=group_tpd_adv)
 
-tpd_vis_limit = input.timeframe("", "Show on Timeframes >=", group=group_tpd_adv, tooltip="The TPD will only be visible if the Chart Timeframe is Greater Than or Equal to this setting.")
-
-tpd_mode = input.string("Icons Only", "Display Mode", options=["Icons Only", "Body Only", "Both"], group=group_tpd_adv)
-
-bool tpd_show_icons = (tpd_mode == "Icons Only" or tpd_mode == "Both")
-bool tpd_show_body  = (tpd_mode == "Body Only" or tpd_mode == "Both")
 tpd_use_smt_filter = input.bool(false, "Require SMT (C2→C3)", group=group_tpd_adv)
 use_expansion_invalidation = input.bool(true, "Expansion Invalidation", group=group_tpd_adv)
 
@@ -301,9 +331,6 @@ tpd_lbl_size = switch tpd_size_str
     "Auto"   => size.auto
     => size.small
 
-tpd_bull_body = input.color(color.new(color.blue, 50), "Bull Body", inline="tpd_body", group=group_tpd_adv)
-tpd_bear_body = input.color(color.new(color.red, 50), "Bear Body", inline="tpd_body", group=group_tpd_adv)
-
 var label[] tpd_labels = array.new<label>()
 var line[] purge_lines = array.new<line>()
 max_purge_lines = 100
@@ -311,26 +338,12 @@ expansion_invalidation_color = color.gray
 setup_invalidation_color = color.red
 tcisd_level_color = color.rgb(128, 0, 32)
 bull_tcisd_level_color = color.rgb(27, 94, 32)
-tpd_vis_limit_sec = timeframe.in_seconds(tpd_vis_limit)
-bool tpd_is_visible = na(tpd_vis_limit_sec) ? true : timeframe.in_seconds(timeframe.period) >= tpd_vis_limit_sec
-
-tpd_tf_final = tpd_tf == "" ? timeframe.period : tpd_tf
-
 group_tpd_debug = "TPD Debug"
-show_tpd_debug = input.bool(true, "Show Debug Window", group=group_tpd_debug)
 show_tpd_alert_debug = input.bool(true, "Show Alert Debug Window", group=group_tpd_debug)
-var bool tpd_dbg_has_anchor = false
-var string tpd_dbg_sym = ""
-var string tpd_dbg_csym = ""
-var string tpd_dbg_c1_a = ""
-var string tpd_dbg_c1_b = ""
-var string tpd_dbg_c2_a = ""
-var string tpd_dbg_c2_b = ""
-var string tpd_dbg_c3_a = ""
-var string tpd_dbg_c3_b = ""
-var string tpd_dbg_dir = ""
-var bool tpd_dbg_main_c23_sweep = false
-var bool tpd_dbg_pair_c23_sweep = false
+
+// Legacy TPDSSMT execution block is intentionally disabled.
+// It contains extra logic beyond the current State Machine Specs
+// (bull path, expansion invalidation, tCISD retest/entry, RR, and debug plumbing).
 
 // ---------------------------------------------------------------
 // FUNCTION: DYAD TPD (2 Pairs)
@@ -341,18 +354,6 @@ f_tpd(_htf, _show_tpd, _size) =>
     var bool bull_smt_out = false
     var bool bear_smt_out = false
     var bool c2_close_out = false
-    var bool dbg_anchor_out = false
-    var string dbg_sym_out = ""
-    var string dbg_csym_out = ""
-    var string dbg_c1_a_out = ""
-    var string dbg_c1_b_out = ""
-    var string dbg_c2_a_out = ""
-    var string dbg_c2_b_out = ""
-    var string dbg_c3_a_out = ""
-    var string dbg_c3_b_out = ""
-    var string dbg_dir_out = ""
-    var bool dbg_main_c23_sweep_out = false
-    var bool dbg_pair_c23_sweep_out = false
     var bool tcisd_scope_out = false
     var bool bull_setup_seen_out = false
     var bool bear_setup_seen_out = false
@@ -385,6 +386,8 @@ f_tpd(_htf, _show_tpd, _size) =>
     var bool bear_expansion_invalidation_hit = false
     var bool bull_rr25_hit = false
     var bool bear_rr25_hit = false
+    var bool bull_fully_valid_latched = false
+    var bool bear_fully_valid_latched = false
     var int main_high_purge_ts = int(na)
     var int pair_high_purge_ts = int(na)
     var int main_low_purge_ts = int(na)
@@ -407,6 +410,10 @@ f_tpd(_htf, _show_tpd, _size) =>
     var line bear_expansion_inv_line = na
     var line bull_setup_inv_line = na
     var line bear_setup_inv_line = na
+    var label bull_tcisd_lbl = na
+    var label bear_tcisd_lbl = na
+    var label bull_tcisd_purge_lbl = na
+    var label bear_tcisd_purge_lbl = na
     var label lblbear = na
     var label lblbull = na
     bull_tpd_out := false
@@ -414,18 +421,6 @@ f_tpd(_htf, _show_tpd, _size) =>
     bull_smt_out := false
     bear_smt_out := false
     c2_close_out := false
-    dbg_anchor_out := false
-    dbg_sym_out := ""
-    dbg_csym_out := ""
-    dbg_c1_a_out := ""
-    dbg_c1_b_out := ""
-    dbg_c2_a_out := ""
-    dbg_c2_b_out := ""
-    dbg_c3_a_out := ""
-    dbg_c3_b_out := ""
-    dbg_dir_out := ""
-    dbg_main_c23_sweep_out := false
-    dbg_pair_c23_sweep_out := false
     tcisd_scope_out := false
     bull_setup_seen_out := false
     bear_setup_seen_out := false
@@ -442,8 +437,8 @@ f_tpd(_htf, _show_tpd, _size) =>
     rr25_hit_out := false
 
     if _show_tpd and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(_htf)
-        [mh2,ml2,mc2,mo2,mt2,mh1,ml1,mc1,mo1,mt1,mh0,ml0,mc0,mo0,mt0,mup1,mdw1,ml1t,mh1t] = f_live_sym(close,open,high,low,time,_htf)
-        [oh2,ol2,oc2,oo2,ot2,oh1,ol1,oc1,oo1,ot1,oh0,ol0,oc0,oo0,ot0,oup1,odw1,ol1t,oh1t] = f_live_sym(xc0,xo0,xh0,xl0,xt0,_htf)
+        [mh2,ml2,mc2,mo2,mt2,mh1,ml1,mc1,mo1,mt1,mh0,ml0,mc0,mo0,mt0,mup1,mdw1,ml1t,mh1t] = f_main_c123(_htf)
+        [oh2,ol2,oc2,oo2,ot2,oh1,ol1,oc1,oo1,ot1,oh0,ol0,oc0,oo0,ot0,oup1,odw1,ol1t,oh1t] = f_pair_c123(_htf, csym, xc0, xo0, xh0, xl0, xt0)
         arr_crack1 = array.from(mc1 > mo1, oc1 > oo1)
         crack1 = not array.every(arr_crack1) and array.some(arr_crack1)
         arr_crack2 = array.from(mc2 > mo0 , oc2 > oo0)
@@ -527,7 +522,7 @@ f_tpd(_htf, _show_tpd, _size) =>
             bull_tpd := bull_tpd and bull_smt
             bear_tpd := bear_tpd and bear_smt
         if timeframe.change(_htf)
-            if bull_tcisd_drawn and na(bull_tcisd_confirm_ts)
+            if bull_tcisd_drawn and not bull_fully_valid_latched
                 if not na(bull_tcisd_line)
                     line.delete(bull_tcisd_line)
                 if not na(bull_tcisd_purge_line)
@@ -538,7 +533,13 @@ f_tpd(_htf, _show_tpd, _size) =>
                     line.delete(bull_expansion_inv_line)
                 if not na(bull_setup_inv_line)
                     line.delete(bull_setup_inv_line)
-            if bear_tcisd_drawn and na(bear_tcisd_confirm_ts)
+                if not na(bull_tcisd_lbl)
+                    label.delete(bull_tcisd_lbl)
+                if not na(bull_tcisd_purge_lbl)
+                    label.delete(bull_tcisd_purge_lbl)
+                if not na(lblbull)
+                    label.delete(lblbull)
+            if bear_tcisd_drawn and not bear_fully_valid_latched
                 if not na(bear_tcisd_line)
                     line.delete(bear_tcisd_line)
                 if not na(bear_tcisd_purge_line)
@@ -549,6 +550,12 @@ f_tpd(_htf, _show_tpd, _size) =>
                     line.delete(bear_expansion_inv_line)
                 if not na(bear_setup_inv_line)
                     line.delete(bear_setup_inv_line)
+                if not na(bear_tcisd_lbl)
+                    label.delete(bear_tcisd_lbl)
+                if not na(bear_tcisd_purge_lbl)
+                    label.delete(bear_tcisd_purge_lbl)
+                if not na(lblbear)
+                    label.delete(lblbear)
             bull_setup_seen := false
             bear_setup_seen := false
             bull_purge_drawn := false
@@ -589,6 +596,14 @@ f_tpd(_htf, _show_tpd, _size) =>
             bear_expansion_inv_line := na
             bull_setup_inv_line := na
             bear_setup_inv_line := na
+            bull_tcisd_lbl := na
+            bear_tcisd_lbl := na
+            bull_tcisd_purge_lbl := na
+            bear_tcisd_purge_lbl := na
+            lblbull := na
+            lblbear := na
+            bull_fully_valid_latched := false
+            bear_fully_valid_latched := false
         if na(main_high_purge_ts) and not na(mh1) and high > mh1
             main_high_purge_ts := time
         if na(pair_high_purge_ts) and not na(oh1) and xh0 > oh1
@@ -707,7 +722,7 @@ f_tpd(_htf, _show_tpd, _size) =>
             bear_setup_seen := true
         bool bull_tcisd_confirmed_in_c3_now = not na(bull_tcisd_confirm_ts) and not na(bull_htf_end_time_close) and bull_tcisd_confirm_ts >= bull_fail_c3_t and bull_tcisd_confirm_ts <= bull_htf_end_time_close
         bool bear_tcisd_confirmed_in_c3_now = not na(bear_tcisd_confirm_ts) and not na(bear_htf_end_time_close) and bear_tcisd_confirm_ts >= bear_fail_c3_t and bear_tcisd_confirm_ts <= bear_htf_end_time_close
-        if bull_same_side_c23_sweep and not bull_tcisd_confirmed_in_c3_now
+        if bull_same_side_c23_sweep and not bull_tcisd_confirmed_in_c3_now and not bull_fully_valid_latched
             bull_setup_seen := false
             bull_tcisd_pending := false
             bull_tcisd_drawn := false
@@ -730,12 +745,21 @@ f_tpd(_htf, _show_tpd, _size) =>
                 line.delete(bull_expansion_inv_line)
             if not na(bull_setup_inv_line)
                 line.delete(bull_setup_inv_line)
+            if not na(bull_tcisd_lbl)
+                label.delete(bull_tcisd_lbl)
+            if not na(bull_tcisd_purge_lbl)
+                label.delete(bull_tcisd_purge_lbl)
+            if not na(lblbull)
+                label.delete(lblbull)
             bull_tcisd_line := na
             bull_tcisd_purge_line := na
             bull_purge_line := na
             bull_expansion_inv_line := na
             bull_setup_inv_line := na
-        if bear_same_side_c23_sweep and not bear_tcisd_confirmed_in_c3_now
+            bull_tcisd_lbl := na
+            bull_tcisd_purge_lbl := na
+            lblbull := na
+        if bear_same_side_c23_sweep and not bear_tcisd_confirmed_in_c3_now and not bear_fully_valid_latched
             bear_setup_seen := false
             bear_tcisd_pending := false
             bear_tcisd_drawn := false
@@ -758,11 +782,20 @@ f_tpd(_htf, _show_tpd, _size) =>
                 line.delete(bear_expansion_inv_line)
             if not na(bear_setup_inv_line)
                 line.delete(bear_setup_inv_line)
+            if not na(bear_tcisd_lbl)
+                label.delete(bear_tcisd_lbl)
+            if not na(bear_tcisd_purge_lbl)
+                label.delete(bear_tcisd_purge_lbl)
+            if not na(lblbear)
+                label.delete(lblbear)
             bear_tcisd_line := na
             bear_tcisd_purge_line := na
             bear_purge_line := na
             bear_expansion_inv_line := na
             bear_setup_inv_line := na
+            bear_tcisd_lbl := na
+            bear_tcisd_purge_lbl := na
+            lblbear := na
 
         float bull_fail_o_now = bull_failure_is_main ? open : xo0
         float bull_fail_h_now = bull_failure_is_main ? high : xh0
@@ -780,6 +813,80 @@ f_tpd(_htf, _show_tpd, _size) =>
             bull_expansion_invalidation_hit := true
         if use_expansion_invalidation and bear_setup_seen and not bear_expansion_invalidation_hit and (bear_fail_o_now > bear_c2_expansion_invalidation or bear_fail_h_now > bear_c2_expansion_invalidation)
             bear_expansion_invalidation_hit := true
+        bool bull_invalid_preconfirm = (bull_setup_seen or bull_tcisd_pending or bull_tcisd_drawn) and (bull_invalidation_hit or (use_expansion_invalidation and bull_expansion_invalidation_hit)) and na(bull_tcisd_confirm_ts) and not bull_fully_valid_latched
+        bool bear_invalid_preconfirm = (bear_setup_seen or bear_tcisd_pending or bear_tcisd_drawn) and (bear_invalidation_hit or (use_expansion_invalidation and bear_expansion_invalidation_hit)) and na(bear_tcisd_confirm_ts) and not bear_fully_valid_latched
+        if bull_invalid_preconfirm
+            bull_setup_seen := false
+            bull_tcisd_pending := false
+            bull_tcisd_drawn := false
+            bull_tcisd_anchor_o := na
+            bull_tcisd_anchor_c := na
+            bull_tcisd_anchor_ts := int(na)
+            bull_tcisd_confirm_ts := int(na)
+            bull_tcisd_retest_hit := false
+            bull_rr25_hit := false
+            bull_purge_drawn := false
+            bull_inv_drawn := false
+            if not na(bull_tcisd_line)
+                line.delete(bull_tcisd_line)
+            if not na(bull_tcisd_purge_line)
+                line.delete(bull_tcisd_purge_line)
+            if not na(bull_purge_line)
+                line.delete(bull_purge_line)
+            if not na(bull_expansion_inv_line)
+                line.delete(bull_expansion_inv_line)
+            if not na(bull_setup_inv_line)
+                line.delete(bull_setup_inv_line)
+            if not na(bull_tcisd_lbl)
+                label.delete(bull_tcisd_lbl)
+            if not na(bull_tcisd_purge_lbl)
+                label.delete(bull_tcisd_purge_lbl)
+            if not na(lblbull)
+                label.delete(lblbull)
+            bull_tcisd_line := na
+            bull_tcisd_purge_line := na
+            bull_purge_line := na
+            bull_expansion_inv_line := na
+            bull_setup_inv_line := na
+            bull_tcisd_lbl := na
+            bull_tcisd_purge_lbl := na
+            lblbull := na
+        if bear_invalid_preconfirm
+            bear_setup_seen := false
+            bear_tcisd_pending := false
+            bear_tcisd_drawn := false
+            bear_tcisd_anchor_o := na
+            bear_tcisd_anchor_c := na
+            bear_tcisd_anchor_ts := int(na)
+            bear_tcisd_confirm_ts := int(na)
+            bear_tcisd_retest_hit := false
+            bear_rr25_hit := false
+            bear_purge_drawn := false
+            bear_inv_drawn := false
+            if not na(bear_tcisd_line)
+                line.delete(bear_tcisd_line)
+            if not na(bear_tcisd_purge_line)
+                line.delete(bear_tcisd_purge_line)
+            if not na(bear_purge_line)
+                line.delete(bear_purge_line)
+            if not na(bear_expansion_inv_line)
+                line.delete(bear_expansion_inv_line)
+            if not na(bear_setup_inv_line)
+                line.delete(bear_setup_inv_line)
+            if not na(bear_tcisd_lbl)
+                label.delete(bear_tcisd_lbl)
+            if not na(bear_tcisd_purge_lbl)
+                label.delete(bear_tcisd_purge_lbl)
+            if not na(lblbear)
+                label.delete(lblbear)
+            bear_tcisd_line := na
+            bear_tcisd_purge_line := na
+            bear_purge_line := na
+            bear_expansion_inv_line := na
+            bear_setup_inv_line := na
+            bear_tcisd_lbl := na
+            bear_tcisd_purge_lbl := na
+            lblbear := na
 
         if bull_tcisd_drawn and not bull_tcisd_retest_hit and not na(bull_tcisd_anchor_o) and not na(bull_tcisd_anchor_ts) and not na(bull_tcisd_confirm_ts) and time > bull_tcisd_confirm_ts and time > bull_tcisd_anchor_ts and bull_fail_l_now <= bull_tcisd_anchor_o and bull_fail_h_now >= bull_tcisd_anchor_o
             bull_tcisd_retest_hit := true
@@ -814,8 +921,10 @@ f_tpd(_htf, _show_tpd, _size) =>
                         line.delete(array.shift(purge_lines))
                     bear_tcisd_line := line.new(bear_tcisd_anchor_ts, bear_tcisd_anchor_o, bear_htf_end_time_close, bear_tcisd_anchor_o, xloc=xloc.bar_time, extend=extend.none, color=tcisd_level_color, width=1)
                     array.push(purge_lines, bear_tcisd_line)
-                    label tcisd_lbl_bear = label.new(bear_htf_end_time_close, bear_tcisd_anchor_o, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
-                    array.push(tpd_labels, tcisd_lbl_bear)
+                    if not na(bear_tcisd_lbl)
+                        label.delete(bear_tcisd_lbl)
+                    bear_tcisd_lbl := label.new(bear_htf_end_time_close, bear_tcisd_anchor_o, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
+                    array.push(tpd_labels, bear_tcisd_lbl)
                     if array.size(tpd_labels) > max_tpd_bars
                         label.delete(array.shift(tpd_labels))
                     if not na(bear_purge_anchor_ts_now) and not na(bear_purge_anchor_o_now) and not na(bear_htf_end_time_close_purge)
@@ -823,8 +932,10 @@ f_tpd(_htf, _show_tpd, _size) =>
                             line.delete(array.shift(purge_lines))
                         bear_tcisd_purge_line := line.new(bear_purge_anchor_ts_now, bear_purge_anchor_o_now, bear_htf_end_time_close_purge, bear_purge_anchor_o_now, xloc=xloc.bar_time, extend=extend.none, color=tcisd_level_color, width=1)
                         array.push(purge_lines, bear_tcisd_purge_line)
-                        label tcisd_lbl_bear_purge = label.new(bear_htf_end_time_close_purge, bear_purge_anchor_o_now, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
-                        array.push(tpd_labels, tcisd_lbl_bear_purge)
+                        if not na(bear_tcisd_purge_lbl)
+                            label.delete(bear_tcisd_purge_lbl)
+                        bear_tcisd_purge_lbl := label.new(bear_htf_end_time_close_purge, bear_purge_anchor_o_now, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
+                        array.push(tpd_labels, bear_tcisd_purge_lbl)
                         if array.size(tpd_labels) > max_tpd_bars
                             label.delete(array.shift(tpd_labels))
                 bear_tcisd_pending := false
@@ -835,8 +946,10 @@ f_tpd(_htf, _show_tpd, _size) =>
                         line.delete(array.shift(purge_lines))
                     bull_tcisd_line := line.new(bull_tcisd_anchor_ts, bull_tcisd_anchor_o, bull_htf_end_time_close, bull_tcisd_anchor_o, xloc=xloc.bar_time, extend=extend.none, color=bull_tcisd_level_color, width=1)
                     array.push(purge_lines, bull_tcisd_line)
-                    label tcisd_lbl_bull = label.new(bull_htf_end_time_close, bull_tcisd_anchor_o, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
-                    array.push(tpd_labels, tcisd_lbl_bull)
+                    if not na(bull_tcisd_lbl)
+                        label.delete(bull_tcisd_lbl)
+                    bull_tcisd_lbl := label.new(bull_htf_end_time_close, bull_tcisd_anchor_o, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
+                    array.push(tpd_labels, bull_tcisd_lbl)
                     if array.size(tpd_labels) > max_tpd_bars
                         label.delete(array.shift(tpd_labels))
                     if not na(bull_purge_anchor_ts_now) and not na(bull_purge_anchor_o_now) and not na(bull_htf_end_time_close_purge)
@@ -844,8 +957,10 @@ f_tpd(_htf, _show_tpd, _size) =>
                             line.delete(array.shift(purge_lines))
                         bull_tcisd_purge_line := line.new(bull_purge_anchor_ts_now, bull_purge_anchor_o_now, bull_htf_end_time_close_purge, bull_purge_anchor_o_now, xloc=xloc.bar_time, extend=extend.none, color=bull_tcisd_level_color, width=1)
                         array.push(purge_lines, bull_tcisd_purge_line)
-                        label tcisd_lbl_bull_purge = label.new(bull_htf_end_time_close_purge, bull_purge_anchor_o_now, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
-                        array.push(tpd_labels, tcisd_lbl_bull_purge)
+                        if not na(bull_tcisd_purge_lbl)
+                            label.delete(bull_tcisd_purge_lbl)
+                        bull_tcisd_purge_lbl := label.new(bull_htf_end_time_close_purge, bull_purge_anchor_o_now, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family = target_font)
+                        array.push(tpd_labels, bull_tcisd_purge_lbl)
                         if array.size(tpd_labels) > max_tpd_bars
                             label.delete(array.shift(tpd_labels))
                 bull_tcisd_pending := false
@@ -878,6 +993,16 @@ f_tpd(_htf, _show_tpd, _size) =>
 
         bool bull_tcisd_confirmed_in_c3 = not na(bull_tcisd_confirm_ts) and not na(bull_htf_end_time_close) and bull_tcisd_confirm_ts >= bull_fail_c3_t and bull_tcisd_confirm_ts <= bull_htf_end_time_close
         bool bear_tcisd_confirmed_in_c3 = not na(bear_tcisd_confirm_ts) and not na(bear_htf_end_time_close) and bear_tcisd_confirm_ts >= bear_fail_c3_t and bear_tcisd_confirm_ts <= bear_htf_end_time_close
+        bool bull_setup_active = bull_setup_seen and not same_side_c23_sweep
+        bool bear_setup_active = bear_setup_seen and not same_side_c23_sweep
+        bool bull_setup_tradeable = bull_setup_active and not bull_invalidation_hit and (not use_expansion_invalidation or not bull_expansion_invalidation_hit)
+        bool bear_setup_tradeable = bear_setup_active and not bear_invalidation_hit and (not use_expansion_invalidation or not bear_expansion_invalidation_hit)
+        bool bull_fully_valid_now = bull_setup_active and bull_tcisd_confirmed_in_c3 and not bull_invalidation_hit and (not use_expansion_invalidation or not bull_expansion_invalidation_hit)
+        bool bear_fully_valid_now = bear_setup_active and bear_tcisd_confirmed_in_c3 and not bear_invalidation_hit and (not use_expansion_invalidation or not bear_expansion_invalidation_hit)
+        if bull_fully_valid_now
+            bull_fully_valid_latched := true
+        if bear_fully_valid_now
+            bear_fully_valid_latched := true
 
         tcisd_scope_out := tcisd_daily_scope
         bull_setup_seen_out := bull_setup_seen
@@ -888,15 +1013,13 @@ f_tpd(_htf, _show_tpd, _size) =>
         bear_tcisd_drawn_out := bear_tcisd_drawn
         bull_tcisd_info_out := "Bull aTs " + f_fmt_time(bull_tcisd_anchor_ts) + " aO " + f_fmt(bull_tcisd_anchor_o) + " c3 " + f_fmt_time(bull_fail_c3_t) + " end " + f_fmt_time(bull_htf_end_time_close)
         bear_tcisd_info_out := "Bear aTs " + f_fmt_time(bear_tcisd_anchor_ts) + " aO " + f_fmt(bear_tcisd_anchor_o) + " c3 " + f_fmt_time(bear_fail_c3_t) + " end " + f_fmt_time(bear_htf_end_time_close)
-        bool bull_setup_active = bull_setup_seen and not same_side_c23_sweep
-        bool bear_setup_active = bear_setup_seen and not same_side_c23_sweep
-        if bull_setup_active and not bear_setup_active
+        if bull_setup_tradeable and not bear_setup_tradeable
             tcisd_confirmed_out := bull_tcisd_confirmed_in_c3
             tcisd_retest_out := bull_tcisd_retest_hit
             invalidation_hit_out := bull_invalidation_hit
             expansion_invalidation_hit_out := bull_expansion_invalidation_hit
             rr25_hit_out := bull_rr25_hit
-        else if bear_setup_active and not bull_setup_active
+        else if bear_setup_tradeable and not bull_setup_tradeable
             tcisd_confirmed_out := bear_tcisd_confirmed_in_c3
             tcisd_retest_out := bear_tcisd_retest_hit
             invalidation_hit_out := bear_invalidation_hit
@@ -908,25 +1031,9 @@ f_tpd(_htf, _show_tpd, _size) =>
             invalidation_hit_out := false
             expansion_invalidation_hit_out := false
             rr25_hit_out := false
-        if bull_tpd or bear_tpd
-            dbg_anchor_out := true
-            dbg_sym_out := syminfo.ticker
-            dbg_csym_out := f_short_sym(csym_raw)
-            dbg_c1_a_out := dbg_sym_out + " C1 O" + f_fmt(mo2) + " H" + f_fmt(mh2) + " L" + f_fmt(ml2) + " C" + f_fmt(mc2)
-            dbg_c1_b_out := dbg_csym_out + " C1 O" + f_fmt(oo2) + " H" + f_fmt(oh2) + " L" + f_fmt(ol2) + " C" + f_fmt(oc2)
-            dbg_c2_a_out := dbg_sym_out + " C2 O" + f_fmt(mo1) + " H" + f_fmt(mh1) + " L" + f_fmt(ml1) + " C" + f_fmt(mc1)
-            dbg_c2_b_out := dbg_csym_out + " C2 O" + f_fmt(oo1) + " H" + f_fmt(oh1) + " L" + f_fmt(ol1) + " C" + f_fmt(oc1)
-            dbg_c3_a_out := dbg_sym_out + " C3 O" + f_fmt(mo0) + " H" + f_fmt(mh0) + " L" + f_fmt(ml0) + " C" + f_fmt(mc0)
-            dbg_c3_b_out := dbg_csym_out + " C3 O" + f_fmt(oo0) + " H" + f_fmt(oh0) + " L" + f_fmt(ol0) + " C" + f_fmt(oc0)
-            dbg_dir_out := bull_tpd ? "Bullish" : "Bearish"
-            dbg_main_c23_sweep_out := main_low_purge or main_high_purge
-            dbg_pair_c23_sweep_out := pair_low_purge or pair_high_purge
-
         bull_smt_out := tpd and bull_smt_trigger
         bear_smt_out := tpd and bear_smt_trigger
         c2_close_out := tpd and c2_close
-        bear_tpd_prev = bar_index > 0 ? bear_tpd[1] : false
-        bull_tpd_prev = bar_index > 0 ? bull_tpd[1] : false
 
         bool bull_lines_active = bull_setup_seen or not na(bull_tcisd_confirm_ts)
         bool bear_lines_active = bear_setup_seen or not na(bear_tcisd_confirm_ts)
@@ -968,12 +1075,12 @@ f_tpd(_htf, _show_tpd, _size) =>
             array.push(purge_lines, bull_setup_inv_line)
             bull_inv_drawn := true
 
-        if bear_tpd and tpd_show_icons
+        if bear_tpd and not bear_same_side_c23_sweep and c2_close
             lblbear := label.new(mh1t, mh1, text=f_text(_htf)+ '\n' + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family = target_font)
             array.push(tpd_labels, lblbear)
             if array.size(tpd_labels) > max_tpd_bars
                 label.delete(array.shift(tpd_labels))
-        if bull_tpd and tpd_show_icons
+        if bull_tpd and not bull_same_side_c23_sweep and c2_close
             lblbull := label.new(ml1t, ml1, text=tpd_bull_shape+ '\n'+ f_text(_htf), xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family = target_font)
             array.push(tpd_labels, lblbull)
             if array.size(tpd_labels) > max_tpd_bars
@@ -982,171 +1089,507 @@ f_tpd(_htf, _show_tpd, _size) =>
         bear_tpd_out := bear_tpd
         bull_tpd_out := bull_tpd
 
-    [bull_tpd_out, bear_tpd_out, bull_smt_out, bear_smt_out, c2_close_out, dbg_anchor_out, dbg_sym_out, dbg_csym_out, dbg_c1_a_out, dbg_c1_b_out, dbg_c2_a_out, dbg_c2_b_out, dbg_c3_a_out, dbg_c3_b_out, dbg_dir_out, dbg_main_c23_sweep_out, dbg_pair_c23_sweep_out, tcisd_scope_out, bull_setup_seen_out, bear_setup_seen_out, bull_tcisd_pending_out, bear_tcisd_pending_out, bull_tcisd_drawn_out, bear_tcisd_drawn_out, bull_tcisd_info_out, bear_tcisd_info_out, tcisd_confirmed_out, tcisd_retest_out, invalidation_hit_out, expansion_invalidation_hit_out, rr25_hit_out]
+    [bull_tpd_out, bear_tpd_out, bull_smt_out, bear_smt_out, c2_close_out, tcisd_scope_out, bull_setup_seen_out, bear_setup_seen_out, bull_tcisd_pending_out, bear_tcisd_pending_out, bull_tcisd_drawn_out, bear_tcisd_drawn_out, bull_tcisd_info_out, bear_tcisd_info_out, tcisd_confirmed_out, tcisd_retest_out, invalidation_hit_out, expansion_invalidation_hit_out, rr25_hit_out]
 
 // ---------------------------------------------------------------
 // TPD EXECUTION
 // ---------------------------------------------------------------
-tpd_tf_run = timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tpd_tf_final)
-tpd_active = use_tpd_adv and tpd_is_visible and dyad_selection_mode != "Off"
-
-[tpd_bull, tpd_bear, smt_bull, smt_bear, c2_close, tpd_dbg_anchor_now, tpd_dbg_sym_now, tpd_dbg_csym_now, tpd_dbg_c1_a_now, tpd_dbg_c1_b_now, tpd_dbg_c2_a_now, tpd_dbg_c2_b_now, tpd_dbg_c3_a_now, tpd_dbg_c3_b_now, tpd_dbg_dir_now, tpd_dbg_main_c23_sweep_now, tpd_dbg_pair_c23_sweep_now, tcisd_scope_dbg, bull_setup_seen_dbg, bear_setup_seen_dbg, bull_tcisd_pending_dbg, bear_tcisd_pending_dbg, bull_tcisd_drawn_dbg, bear_tcisd_drawn_dbg, bull_tcisd_info_dbg, bear_tcisd_info_dbg, tcisd_confirmed_dbg, tcisd_retest_dbg, invalidation_hit_dbg, expansion_invalidation_hit_dbg, rr25_hit_dbg] = f_tpd(tpd_tf_final, tpd_active and tpd_tf_run, tpd_lbl_size)
-if tpd_dbg_anchor_now
-    tpd_dbg_has_anchor := true
-    tpd_dbg_sym := tpd_dbg_sym_now
-    tpd_dbg_csym := tpd_dbg_csym_now
-    tpd_dbg_c1_a := tpd_dbg_c1_a_now
-    tpd_dbg_c1_b := tpd_dbg_c1_b_now
-    tpd_dbg_c2_a := tpd_dbg_c2_a_now
-    tpd_dbg_c2_b := tpd_dbg_c2_b_now
-    tpd_dbg_c3_a := tpd_dbg_c3_a_now
-    tpd_dbg_c3_b := tpd_dbg_c3_b_now
-    tpd_dbg_dir := tpd_dbg_dir_now
-    tpd_dbg_main_c23_sweep := tpd_dbg_main_c23_sweep_now
-    tpd_dbg_pair_c23_sweep := tpd_dbg_pair_c23_sweep_now
-
-tpd_bull_any = tpd_bull
-tpd_bear_any = tpd_bear
-smt_bull_any = smt_bull
-smt_bear_any = smt_bear
-c2_close_any = c2_close
-setup_alert = tpd_use_smt_filter ? (smt_bull_any or smt_bear_any) : c2_close_any
-bullish_alert = tpd_use_smt_filter ? smt_bull_any : (setup_alert and tpd_bull_any)
-bearish_alert = tpd_use_smt_filter ? smt_bear_any : (setup_alert and tpd_bear_any)
-scan_tf_alert = f_text(tpd_tf_final)
-
-alertcondition(setup_alert, "TPDSSMT Setup", "TPDSSMT setup formed")
-alertcondition(bullish_alert, "TPDSSMT Bullish Setup", "TPDSSMT Bullish setup formed")
-alertcondition(bearish_alert, "TPDSSMT Bearish Setup", "TPDSSMT Bearish setup formed")
-
-if bullish_alert
-    alert("TPDSSMT Bullish setup formed | Scan TF: " + scan_tf_alert, alert.freq_once_per_bar_close)
-if bearish_alert
-    alert("TPDSSMT Bearish setup formed | Scan TF: " + scan_tf_alert, alert.freq_once_per_bar_close)
-
-// TPD BODY COLOR
-tpd_body_color = tpd_show_body and tpd_active ? (tpd_bull_any ? tpd_bull_body : tpd_bear_any ? tpd_bear_body : na) : na
-barcolor(tpd_body_color)
-
+// is_m15_model_chart = timeframe.in_seconds(timeframe.period) == 15 * 60
+// is_h6_model_chart = timeframe.in_seconds(timeframe.period) == 6 * 60 * 60
+// model_chart_ok = is_m15_model_chart or is_h6_model_chart
+// tpd_active = dyad_selection_mode != "Off" and model_chart_ok
+// 
+// [tpd_bull, tpd_bear, smt_bull, smt_bear, c2_close, tcisd_scope_dbg, bull_setup_seen_dbg, bear_setup_seen_dbg, bull_tcisd_pending_dbg, bear_tcisd_pending_dbg, bull_tcisd_drawn_dbg, bear_tcisd_drawn_dbg, bull_tcisd_info_dbg, bear_tcisd_info_dbg, tcisd_confirmed_dbg, tcisd_retest_dbg, invalidation_hit_dbg, expansion_invalidation_hit_dbg, rr25_hit_dbg] = f_tpd(TPD_SCAN_TF, tpd_active, tpd_lbl_size)
+// 
+// tpd_bull_any = tpd_bull
+// tpd_bear_any = tpd_bear
+// smt_bull_any = smt_bull
+// smt_bear_any = smt_bear
+// c2_close_any = c2_close
+// scan_tf_alert = f_text(TPD_SCAN_TF)
+// alert_time = f_fmt_time(time)
+// 
+// stage1_bull = c2_close_any and tpd_bull_any
+// stage1_bear = c2_close_any and tpd_bear_any
+// stage2_bull = smt_bull_any
+// stage2_bear = smt_bear_any
+// stage3_confirmed = tcisd_confirmed_dbg and not tcisd_confirmed_dbg[1] and not invalidation_hit_dbg and not expansion_invalidation_hit_dbg
+// stage4_entry = tcisd_retest_dbg and not tcisd_retest_dbg[1] and not invalidation_hit_dbg and not expansion_invalidation_hit_dbg
+// stage3_bull = stage3_confirmed and bull_setup_seen_dbg and not bear_setup_seen_dbg
+// stage3_bear = stage3_confirmed and bear_setup_seen_dbg and not bull_setup_seen_dbg
+// stage3_neutral = stage3_confirmed and not stage3_bull and not stage3_bear
+// stage4_bull = stage4_entry and bull_setup_seen_dbg and not bear_setup_seen_dbg
+// stage4_bear = stage4_entry and bear_setup_seen_dbg and not bull_setup_seen_dbg
+// stage4_neutral = stage4_entry and not stage4_bull and not stage4_bear
+// 
+// alertcondition(stage1_bull, "TPDSSMT Stage 1 Bullish TPD", "Stage 1: HTF C3 open with bullish TPD")
+// alertcondition(stage1_bear, "TPDSSMT Stage 1 Bearish TPD", "Stage 1: HTF C3 open with bearish TPD")
+// alertcondition(stage2_bull, "TPDSSMT Stage 2 Bullish SMT Purge", "Stage 2: Bullish SMT purge; awaiting tCISD confirmation")
+// alertcondition(stage2_bear, "TPDSSMT Stage 2 Bearish SMT Purge", "Stage 2: Bearish SMT purge; awaiting tCISD confirmation")
+// alertcondition(stage3_confirmed, "TPDSSMT Stage 3 Setup Confirmed", "Stage 3: Setup confirmed (tCISD confirmed)")
+// alertcondition(stage4_entry, "TPDSSMT Stage 4 Entry", "Stage 4: Entry (tCISD retest)")
+// 
+// if stage1_bull
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bullish TPD, " + alert_time, alert.freq_once_per_bar_close)
+// if stage1_bear
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bearish TPD, " + alert_time, alert.freq_once_per_bar_close)
+// if stage2_bull
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bullish SMT Purge (Awaiting tCISD confirmation), " + alert_time, alert.freq_once_per_bar_close)
+// if stage2_bear
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bearish SMT Purge (Awaiting tCISD confirmation), " + alert_time, alert.freq_once_per_bar_close)
+// if stage3_bull
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bullish Setup Confirmed (tCISD confirmed), " + alert_time, alert.freq_once_per_bar_close)
+// if stage3_bear
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bearish Setup Confirmed (tCISD confirmed), " + alert_time, alert.freq_once_per_bar_close)
+// if stage3_neutral
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Setup Confirmed (tCISD confirmed), " + alert_time, alert.freq_once_per_bar_close)
+// if stage4_bull
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bullish Entry (tCISD retest), " + alert_time, alert.freq_once_per_bar_close)
+// if stage4_bear
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Bearish Entry (tCISD retest), " + alert_time, alert.freq_once_per_bar_close)
+// if stage4_neutral
+//     alert(syminfo.ticker + ", " + scan_tf_alert + ", Entry (tCISD retest), " + alert_time, alert.freq_once_per_bar_close)
+// 
 // ============================================
 // TPD DEBUG WINDOW
 // ============================================
-var table tpd_debug_tbl = table.new(position.top_right, 1, 15, border_width=1)
-var table tpd_alert_tbl = table.new(position.bottom_right, 1, 8, border_width=1)
-[dbg_mh2,dbg_ml2,dbg_mc2,dbg_mo2,dbg_mt2,dbg_mh1,dbg_ml1,dbg_mc1,dbg_mo1,dbg_mt1,dbg_mh0,dbg_ml0,dbg_mc0,dbg_mo0,dbg_mt0,dbg_mup1,dbg_mdw1,dbg_ml1t,dbg_mh1t] = f_live_sym(close, open, high, low, time, timeframe.period)
-[dbg_oh2,dbg_ol2,dbg_oc2,dbg_oo2,dbg_ot2,dbg_oh1,dbg_ol1,dbg_oc1,dbg_oo1,dbg_ot1,dbg_oh0,dbg_ol0,dbg_oc0,dbg_oo0,dbg_ot0,dbg_oup1,dbg_odw1,dbg_ol1t,dbg_oh1t] = f_live_sym(xc0, xo0, xh0, xl0, xt0, timeframe.period)
+// var table tpd_alert_tbl = table.new(position.bottom_right, 1, 8, border_width=1)
+// [dbg_mh2,dbg_ml2,dbg_mc2,dbg_mo2,dbg_mt2,dbg_mh1,dbg_ml1,dbg_mc1,dbg_mo1,dbg_mt1,dbg_mh0,dbg_ml0,dbg_mc0,dbg_mo0,dbg_mt0,dbg_mup1,dbg_mdw1,dbg_ml1t,dbg_mh1t] = f_live_sym(close, open, high, low, time, timeframe.period)
+// [dbg_oh2,dbg_ol2,dbg_oc2,dbg_oo2,dbg_ot2,dbg_oh1,dbg_ol1,dbg_oc1,dbg_oo1,dbg_ot1,dbg_oh0,dbg_ol0,dbg_oc0,dbg_oo0,dbg_ot0,dbg_oup1,dbg_odw1,dbg_ol1t,dbg_oh1t] = f_live_sym(xc0, xo0, xh0, xl0, xt0, timeframe.period)
+// 
+// if barstate.islast
+//     if show_tpd_alert_debug
+//         header_bg = color.new(color.gray, 85)
+//         body_bg = color.white
+//         table.cell(tpd_alert_tbl, 0, 0, "Alerts", text_color=color.black, bgcolor=header_bg, text_size=size.small)
+//         valid_tpd_dbg = tpd_bull_any or tpd_bear_any
+//         main_low_c23_sweep_dbg = not na(dbg_ml1) and not na(dbg_ml0) and dbg_ml0 < dbg_ml1
+//         pair_low_c23_sweep_dbg = not na(dbg_ol1) and not na(dbg_ol0) and dbg_ol0 < dbg_ol1
+//         main_high_c23_sweep_dbg = not na(dbg_mh1) and not na(dbg_mh0) and dbg_mh0 > dbg_mh1
+//         pair_high_c23_sweep_dbg = not na(dbg_oh1) and not na(dbg_oh0) and dbg_oh0 > dbg_oh1
+//         same_side_c23_sweep_dbg = (main_low_c23_sweep_dbg and pair_low_c23_sweep_dbg) or (main_high_c23_sweep_dbg and pair_high_c23_sweep_dbg)
+//         tpd_w_ssmt_dbg = (bull_setup_seen_dbg or bear_setup_seen_dbg) and not same_side_c23_sweep_dbg
+//         table.cell(tpd_alert_tbl, 0, 1, "Valid TPD " + str.tostring(valid_tpd_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+//         table.cell(tpd_alert_tbl, 0, 2, "TPD w SSMT " + str.tostring(tpd_w_ssmt_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+//         table.cell(tpd_alert_tbl, 0, 3, "tCISD Confirmed " + str.tostring(tcisd_confirmed_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+//         table.cell(tpd_alert_tbl, 0, 4, "tCISD Retest (Entry) " + str.tostring(tcisd_retest_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+//         table.cell(tpd_alert_tbl, 0, 5, "Invalidation Hit " + str.tostring(invalidation_hit_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+//         table.cell(tpd_alert_tbl, 0, 6, "Expansion Invalidation Hit " + str.tostring(expansion_invalidation_hit_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+//         table.cell(tpd_alert_tbl, 0, 7, "2.5R Hit " + str.tostring(rr25_hit_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+//     else
+//         table.clear(tpd_alert_tbl, 0, 0, 0, 7)
+
+
+// ---------------------------------------------------------------
+// FUNCTION: BEARISH STATE MACHINE (SPEC-ONLY)
+// ---------------------------------------------------------------
+const int SM_IDLE = 0
+const int SM_C3_TRACKING = 1
+const int SM_CONFIRMED = 2
+const int SM_INVALIDATED = 3
+const int SM_EXPIRED = 4
+
+f_tpd_state_bear(_htf, _show_tpd, _size) =>
+    var int sm_state = SM_IDLE
+    var bool bearish_valid_tpd = false
+    var bool bearish_valid_tpd_ssmt = false
+    var bool setup_confirmed = false
+    var bool c2_high_swept = false
+    var bool purge_seen = false
+    var bool purge_is_main = false
+    var bool failure_is_main = false
+    var float htf_c2_high_main = na
+    var float htf_c2_high_pair = na
+    var float m15_tcisd_level = na
+    var int m15_tcisd_ts = int(na)
+    var int main_high_purge_ts = int(na)
+    var int pair_high_purge_ts = int(na)
+    var int c4_open_ts = int(na)
+    var label bear_tpd_icon = na
+    var label bear_c1_lbl = na
+    var label bear_c2_lbl = na
+    var label bear_c3_lbl = na
+    var line bear_purge_line = na
+    var line bear_tcisd_line = na
+    var label bear_tcisd_lbl = na
+
+    bool stage1_bear_evt = false
+    bool stage2_bear_evt = false
+    bool stage3_bear_evt = false
+    bool invalidated_evt = false
+    bool expired_evt = false
+    bool dbg_crack1_out = false
+    bool dbg_crack2_out = false
+    bool dbg_con_hgh_out = false
+    bool dbg_tie_rule_out = false
+    bool dbg_purge_is_main_out = false
+    bool dbg_failure_is_main_out = false
+    bool dbg_c2_high_swept_out = false
+    bool dbg_purge_seen_out = false
+    bool dbg_in_c3_window_out = false
+
+    if _show_tpd and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(_htf)
+        [mh2,ml2,mc2,mo2,mt2,mh1,ml1,mc1,mo1,mt1,mh0,ml0,mc0,mo0,mt0,mup1,mdw1,ml1t,mh1t] = f_main_c123(_htf)
+        [oh2,ol2,oc2,oo2,ot2,oh1,ol1,oc1,oo1,ot1,oh0,ol0,oc0,oo0,ot0,oup1,odw1,ol1t,oh1t] = f_pair_c123(_htf, csym, xc0, xo0, xh0, xl0, xt0)
+
+        bool htf_boundary = timeframe.change(_htf)
+        int htf_span_sec = timeframe.in_seconds(_htf)
+        int next_htf_open_ts = not na(htf_span_sec) ? mt0 + int(htf_span_sec * 1000) : int(na)
+        bool is_m15_chart = timeframe.in_seconds(timeframe.period) == 15 * 60
+
+        bool main_c2_up = mc1 > mo1
+        bool main_c2_down = mc1 < mo1
+        bool pair_c2_up = oc1 > oo1
+        bool pair_c2_down = oc1 < oo1
+        bool crack1 = (main_c2_up and pair_c2_down) or (main_c2_down and pair_c2_up)
+
+        bool main_c3_open_above_c1_close = mo0 > mc2
+        bool main_c3_open_below_c1_close = mo0 < mc2
+        bool pair_c3_open_above_c1_close = oo0 > oc2
+        bool pair_c3_open_below_c1_close = oo0 < oc2
+        bool purge_is_main_now = main_c3_open_above_c1_close and pair_c3_open_below_c1_close
+        bool failure_is_main_now = main_c3_open_below_c1_close and pair_c3_open_above_c1_close
+        bool crack2 = (main_c3_open_above_c1_close and pair_c3_open_below_c1_close) or (main_c3_open_below_c1_close and pair_c3_open_above_c1_close)
+        bool tie_rule = (mo0 == mc2) or (oo0 == oc2)
+
+        hgh0 = array.from(mh2,mh1,mh0), hgh1 = array.from(oh2,oh1,oh0)
+        bool con_hgh0 = array.max(hgh0) == mh1
+        bool con_hgh1 = array.max(hgh1) == oh1
+        bool con_hgh = failure_is_main_now ? con_hgh0 : purge_is_main_now ? con_hgh1 : false
+        bool valid_bearish_tpd_now = crack1 and crack2 and con_hgh and not tie_rule
+        dbg_crack1_out := crack1
+        dbg_crack2_out := crack2
+        dbg_con_hgh_out := con_hgh
+        dbg_tie_rule_out := tie_rule
+
+        bool main_sweeps_c2_high = not na(mh1) and high > mh1
+        bool pair_sweeps_c2_high = not na(oh1) and xh0 > oh1
+        bool either_sweeps_c2_high = main_sweeps_c2_high or pair_sweeps_c2_high
+        int bear_potential_tcisd_ts = failure_is_main ? pair_high_purge_ts : main_high_purge_ts
+        int bear_potential_tcisd_back = int(ta.barssince(time == bear_potential_tcisd_ts))
+
+        if htf_boundary
+            // C4 open reset behavior for prior active instance.
+            if sm_state == SM_C3_TRACKING and not setup_confirmed
+                bearish_valid_tpd := false
+                bearish_valid_tpd_ssmt := false
+                setup_confirmed := false
+                c2_high_swept := false
+                purge_seen := false
+                purge_is_main := false
+                failure_is_main := false
+                htf_c2_high_main := na
+                htf_c2_high_pair := na
+                m15_tcisd_level := na
+                m15_tcisd_ts := int(na)
+                main_high_purge_ts := int(na)
+                pair_high_purge_ts := int(na)
+                c4_open_ts := int(na)
+                if not na(bear_tpd_icon)
+                    label.delete(bear_tpd_icon)
+                    bear_tpd_icon := na
+                if not na(bear_c1_lbl)
+                    label.delete(bear_c1_lbl)
+                    bear_c1_lbl := na
+                if not na(bear_c2_lbl)
+                    label.delete(bear_c2_lbl)
+                    bear_c2_lbl := na
+                if not na(bear_c3_lbl)
+                    label.delete(bear_c3_lbl)
+                    bear_c3_lbl := na
+                if not na(bear_purge_line)
+                    line.delete(bear_purge_line)
+                    bear_purge_line := na
+                if not na(bear_tcisd_line)
+                    line.delete(bear_tcisd_line)
+                    bear_tcisd_line := na
+                if not na(bear_tcisd_lbl)
+                    label.delete(bear_tcisd_lbl)
+                    bear_tcisd_lbl := na
+                expired_evt := true
+                sm_state := SM_EXPIRED
+            else if sm_state == SM_CONFIRMED
+                // For confirmed setups, reset runtime state at C4 open but keep drawings.
+                bearish_valid_tpd := false
+                bearish_valid_tpd_ssmt := false
+                setup_confirmed := false
+                c2_high_swept := false
+                purge_seen := false
+                purge_is_main := false
+                failure_is_main := false
+                htf_c2_high_main := na
+                htf_c2_high_pair := na
+                m15_tcisd_level := na
+                m15_tcisd_ts := int(na)
+                main_high_purge_ts := int(na)
+                pair_high_purge_ts := int(na)
+                c4_open_ts := int(na)
+                sm_state := SM_IDLE
+
+            if sm_state == SM_EXPIRED or sm_state == SM_INVALIDATED
+                sm_state := SM_IDLE
+
+            // IDLE -> C3_TRACKING entry gate.
+            if sm_state == SM_IDLE and valid_bearish_tpd_now
+                purge_is_main := purge_is_main_now
+                failure_is_main := failure_is_main_now
+                if purge_is_main or failure_is_main
+                    bearish_valid_tpd := true
+                    bearish_valid_tpd_ssmt := false
+                    setup_confirmed := false
+                    c2_high_swept := false
+                    purge_seen := false
+                    htf_c2_high_main := mh1
+                    htf_c2_high_pair := oh1
+                    m15_tcisd_level := na
+                    m15_tcisd_ts := int(na)
+                    main_high_purge_ts := int(na)
+                    pair_high_purge_ts := int(na)
+                    c4_open_ts := next_htf_open_ts
+                    if not na(bear_tpd_icon)
+                        label.delete(bear_tpd_icon)
+                    if not na(bear_c1_lbl)
+                        label.delete(bear_c1_lbl)
+                    if not na(bear_c2_lbl)
+                        label.delete(bear_c2_lbl)
+                    if not na(bear_c3_lbl)
+                        label.delete(bear_c3_lbl)
+                    bear_tpd_icon := label.new(mh1t, mh1, text=f_text(_htf) + "\n" + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish Valid TPD", text_font_family=target_font)
+                    array.push(tpd_labels, bear_tpd_icon)
+                    if array.size(tpd_labels) > max_tpd_bars
+                        label.delete(array.shift(tpd_labels))
+                    bear_c1_lbl := label.new(mt2, mh2, "C1", xloc=xloc.bar_time, yloc=yloc.abovebar, style=label.style_label_down, size=size.tiny, color=color.new(color.white, 100), textcolor=tpd_bear_color, tooltip="Bearish TPD C1", text_font_family=target_font)
+                    array.push(tpd_labels, bear_c1_lbl)
+                    if array.size(tpd_labels) > max_tpd_bars
+                        label.delete(array.shift(tpd_labels))
+                    bear_c2_lbl := label.new(mt1, mh1, "C2", xloc=xloc.bar_time, yloc=yloc.abovebar, style=label.style_label_down, size=size.tiny, color=color.new(color.white, 100), textcolor=tpd_bear_color, tooltip="Bearish TPD C2", text_font_family=target_font)
+                    array.push(tpd_labels, bear_c2_lbl)
+                    if array.size(tpd_labels) > max_tpd_bars
+                        label.delete(array.shift(tpd_labels))
+                    bear_c3_lbl := label.new(mt0, mh0, "C3", xloc=xloc.bar_time, yloc=yloc.abovebar, style=label.style_label_down, size=size.tiny, color=color.new(color.white, 100), textcolor=tpd_bear_color, tooltip="Bearish TPD C3", text_font_family=target_font)
+                    array.push(tpd_labels, bear_c3_lbl)
+                    if array.size(tpd_labels) > max_tpd_bars
+                        label.delete(array.shift(tpd_labels))
+                    stage1_bear_evt := true
+                    sm_state := SM_C3_TRACKING
+
+        if sm_state == SM_C3_TRACKING
+            bool failure_sweeps_c2_high = failure_is_main ? main_sweeps_c2_high : pair_sweeps_c2_high
+            bool purge_sweeps_c2_high = purge_is_main ? main_sweeps_c2_high : pair_sweeps_c2_high
+            bool is_h6_chart = timeframe.in_seconds(timeframe.period) == 6 * 60 * 60
+
+            if either_sweeps_c2_high
+                c2_high_swept := true
+            if na(main_high_purge_ts) and not na(mh1) and high > mh1
+                main_high_purge_ts := time
+            if na(pair_high_purge_ts) and not na(oh1) and xh0 > oh1
+                pair_high_purge_ts := time
+
+            // Invalidation must win over confirmation.
+            if failure_sweeps_c2_high and not setup_confirmed
+                bearish_valid_tpd := false
+                bearish_valid_tpd_ssmt := false
+                setup_confirmed := false
+                c2_high_swept := false
+                purge_seen := false
+                purge_is_main := false
+                failure_is_main := false
+                htf_c2_high_main := na
+                htf_c2_high_pair := na
+                m15_tcisd_level := na
+                m15_tcisd_ts := int(na)
+                main_high_purge_ts := int(na)
+                pair_high_purge_ts := int(na)
+                c4_open_ts := int(na)
+                if not na(bear_tpd_icon)
+                    label.delete(bear_tpd_icon)
+                    bear_tpd_icon := na
+                if not na(bear_c1_lbl)
+                    label.delete(bear_c1_lbl)
+                    bear_c1_lbl := na
+                if not na(bear_c2_lbl)
+                    label.delete(bear_c2_lbl)
+                    bear_c2_lbl := na
+                if not na(bear_c3_lbl)
+                    label.delete(bear_c3_lbl)
+                    bear_c3_lbl := na
+                if not na(bear_purge_line)
+                    line.delete(bear_purge_line)
+                    bear_purge_line := na
+                if not na(bear_tcisd_line)
+                    line.delete(bear_tcisd_line)
+                    bear_tcisd_line := na
+                if not na(bear_tcisd_lbl)
+                    label.delete(bear_tcisd_lbl)
+                    bear_tcisd_lbl := na
+                invalidated_evt := true
+                sm_state := SM_INVALIDATED
+
+            if sm_state == SM_C3_TRACKING and c2_high_swept and purge_sweeps_c2_high and not purge_seen
+                purge_seen := true
+                bearish_valid_tpd_ssmt := true
+                stage2_bear_evt := true
+                float purge_level = purge_is_main ? htf_c2_high_main : htf_c2_high_pair
+                int purge_time = purge_is_main ? mh1t : oh1t
+                int purge_end_time = na(c4_open_ts) ? time : c4_open_ts
+                if not na(bear_purge_line)
+                    line.delete(bear_purge_line)
+                bear_purge_line := line.new(purge_time, purge_level, purge_end_time, purge_level, xloc=xloc.bar_time, extend=extend.none, color=color.new(tpd_bear_color, 50), width=1)
+                array.push(purge_lines, bear_purge_line)
+                if array.size(purge_lines) > max_purge_lines
+                    line.delete(array.shift(purge_lines))
+
+            if sm_state == SM_C3_TRACKING and purge_seen and na(m15_tcisd_level) and not na(bear_potential_tcisd_back)
+                int bear_fail_back0 = bear_potential_tcisd_back
+                int bear_fail_back1 = bear_potential_tcisd_back + 1
+                if failure_is_main
+                    bool bear_fail_match0 = bear_fail_back0 <= bar_index and close[bear_fail_back0] > open[bear_fail_back0]
+                    bool bear_fail_match1 = bear_fail_back1 <= bar_index and close[bear_fail_back1] > open[bear_fail_back1]
+                    if bear_fail_match0
+                        m15_tcisd_level := open[bear_fail_back0]
+                        m15_tcisd_ts := int(time[bear_fail_back0])
+                    else if bear_fail_match1
+                        m15_tcisd_level := open[bear_fail_back1]
+                        m15_tcisd_ts := int(time[bear_fail_back1])
+                else
+                    bool bear_fail_match0 = bear_fail_back0 <= bar_index and xc0[bear_fail_back0] > xo0[bear_fail_back0]
+                    bool bear_fail_match1 = bear_fail_back1 <= bar_index and xc0[bear_fail_back1] > xo0[bear_fail_back1]
+                    if bear_fail_match0
+                        m15_tcisd_level := xo0[bear_fail_back0]
+                        m15_tcisd_ts := int(time[bear_fail_back0])
+                    else if bear_fail_match1
+                        m15_tcisd_level := xo0[bear_fail_back1]
+                        m15_tcisd_ts := int(time[bear_fail_back1])
+
+            if sm_state == SM_C3_TRACKING and purge_seen and is_m15_chart and not na(m15_tcisd_level) and not na(m15_tcisd_ts) and not na(c4_open_ts) and na(bear_tcisd_line)
+                if array.size(purge_lines) >= max_purge_lines
+                    line.delete(array.shift(purge_lines))
+                bear_tcisd_line := line.new(m15_tcisd_ts, m15_tcisd_level, c4_open_ts, m15_tcisd_level, xloc=xloc.bar_time, extend=extend.none, color=tcisd_level_color, width=1)
+                array.push(purge_lines, bear_tcisd_line)
+                if not na(bear_tcisd_lbl)
+                    label.delete(bear_tcisd_lbl)
+                bear_tcisd_lbl := label.new(c4_open_ts, m15_tcisd_level, "m15 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black, text_font_family=target_font)
+                array.push(tpd_labels, bear_tcisd_lbl)
+                if array.size(tpd_labels) > max_tpd_bars
+                    label.delete(array.shift(tpd_labels))
+
+            bool in_c3_window = na(c4_open_ts) ? true : time < c4_open_ts
+            if sm_state == SM_C3_TRACKING and purge_seen and in_c3_window and not na(m15_tcisd_level)
+                bool confirm_now = false
+                if is_m15_chart
+                    float bear_fail_c_now = failure_is_main ? close : xc0
+                    confirm_now := barstate.isconfirmed and bear_fail_c_now < m15_tcisd_level
+                else if is_h6_chart
+                    float main_m15_close_min = na
+                    float pair_m15_close_min = na
+                    array<float> main_m15_close_arr = request.security_lower_tf(sym, "15", close)
+                    array<float> pair_m15_close_arr = request.security_lower_tf(csym, "15", close, ignore_invalid_symbol = true)
+                    if array.size(main_m15_close_arr) > 0
+                        main_m15_close_min := array.min(main_m15_close_arr)
+                    if array.size(pair_m15_close_arr) > 0
+                        pair_m15_close_min := array.min(pair_m15_close_arr)
+                    float failure_m15_close_min = failure_is_main ? main_m15_close_min : pair_m15_close_min
+                    confirm_now := not na(failure_m15_close_min) and failure_m15_close_min < m15_tcisd_level
+                if confirm_now
+                    setup_confirmed := true
+                    stage3_bear_evt := true
+                    sm_state := SM_CONFIRMED
+
+        if sm_state == SM_INVALIDATED
+            sm_state := SM_IDLE
+        if sm_state == SM_EXPIRED
+            sm_state := SM_IDLE
+        dbg_purge_is_main_out := purge_is_main
+        dbg_failure_is_main_out := failure_is_main
+        dbg_c2_high_swept_out := c2_high_swept
+        dbg_purge_seen_out := purge_seen
+        dbg_in_c3_window_out := na(c4_open_ts) ? true : time < c4_open_ts
+
+    [bearish_valid_tpd, bearish_valid_tpd_ssmt, setup_confirmed, stage1_bear_evt, stage2_bear_evt, stage3_bear_evt, invalidated_evt, expired_evt, sm_state, dbg_crack1_out, dbg_crack2_out, dbg_con_hgh_out, dbg_tie_rule_out, dbg_purge_is_main_out, dbg_failure_is_main_out, dbg_c2_high_swept_out, dbg_purge_seen_out, dbg_in_c3_window_out]
+
+// ---------------------------------------------------------------
+// SPEC-ONLY EXECUTION (H6->m15, BEARISH)
+// ---------------------------------------------------------------
+is_m15_model_chart = timeframe.in_seconds(timeframe.period) == 15 * 60
+is_h6_model_chart = timeframe.in_seconds(timeframe.period) == 6 * 60 * 60
+model_chart_ok = is_m15_model_chart or is_h6_model_chart
+tpd_active = dyad_selection_mode != "Off" and model_chart_ok
+
+[bearishValidTPD, bearishValidTPD_SSMT, setupConfirmed, stage1_bear, stage2_bear, stage3_bear, invalidated_now, expired_now, sm_state_now, dbg_crack1, dbg_crack2, dbg_con_hgh, dbg_tie_rule, dbg_purge_is_main, dbg_failure_is_main, dbg_c2_high_swept, dbg_purge_seen, dbg_in_c3_window] = f_tpd_state_bear(TPD_SCAN_TF, tpd_active, tpd_lbl_size)
+
+scan_tf_alert = f_text(TPD_SCAN_TF)
+alert_time = f_fmt_time(time)
+
+alertcondition(stage1_bear, "TPDSSMT Stage 1 Bearish TPD", "Stage 1: HTF C3 open with bearish valid TPD")
+alertcondition(stage2_bear, "TPDSSMT Stage 2 Bearish Valid TPD/SSMT", "Stage 2: Bearish purge complete (Valid TPD/SSMT)")
+alertcondition(stage3_bear, "TPDSSMT Stage 3 Bearish Setup Confirmed", "Stage 3: Bearish setup confirmed (m15 tCISD)")
+
+if stage1_bear
+    alert(syminfo.ticker + ", " + scan_tf_alert + ", Bearish Valid TPD, " + alert_time, alert.freq_once_per_bar_close)
+if stage2_bear
+    alert(syminfo.ticker + ", " + scan_tf_alert + ", Bearish Valid TPD/SSMT, " + alert_time, alert.freq_once_per_bar_close)
+if stage3_bear
+    alert(syminfo.ticker + ", " + scan_tf_alert + ", Bearish Setup Confirmed (tCISD), " + alert_time, alert.freq_once_per_bar_close)
+
+// ============================================
+// SPEC DEBUG TABLE
+// ============================================
+var table sm_state_tbl = table.new(position.bottom_right, 4, 7, border_width=1)
+
+f_sm_state_text(_s) =>
+    _s == SM_IDLE ? "IDLE" : _s == SM_C3_TRACKING ? "C3_TRACKING" : _s == SM_CONFIRMED ? "CONFIRMED" : _s == SM_INVALIDATED ? "INVALIDATED" : _s == SM_EXPIRED ? "EXPIRED" : "UNKNOWN"
+
+f_yn(bool _v) =>
+    _v ? "Y" : "N"
 
 if barstate.islast
-    if show_tpd_debug or show_tpd_alert_debug
-        curr_sym_dbg = syminfo.ticker
-        curr_csym_dbg = f_short_sym(csym_raw)
-        curr_c1_a = curr_sym_dbg + " C1 O" + f_fmt(dbg_mo2) + " H" + f_fmt(dbg_mh2) + " L" + f_fmt(dbg_ml2) + " C" + f_fmt(dbg_mc2)
-        curr_c1_b = curr_csym_dbg + " C1 O" + f_fmt(dbg_oo2) + " H" + f_fmt(dbg_oh2) + " L" + f_fmt(dbg_ol2) + " C" + f_fmt(dbg_oc2)
-        curr_c2_a = curr_sym_dbg + " C2 O" + f_fmt(dbg_mo1) + " H" + f_fmt(dbg_mh1) + " L" + f_fmt(dbg_ml1) + " C" + f_fmt(dbg_mc1)
-        curr_c2_b = curr_csym_dbg + " C2 O" + f_fmt(dbg_oo1) + " H" + f_fmt(dbg_oh1) + " L" + f_fmt(dbg_ol1) + " C" + f_fmt(dbg_oc1)
-        curr_c3_a = curr_sym_dbg + " C3 O" + f_fmt(dbg_mo0) + " H" + f_fmt(dbg_mh0) + " L" + f_fmt(dbg_ml0) + " C" + f_fmt(dbg_mc0)
-        curr_c3_b = curr_csym_dbg + " C3 O" + f_fmt(dbg_oo0) + " H" + f_fmt(dbg_oh0) + " L" + f_fmt(dbg_ol0) + " C" + f_fmt(dbg_oc0)
-        curr_tpd_dir = tpd_bull_any ? "Bullish" : tpd_bear_any ? "Bearish" : ""
-
-        has_last_tpd_debug = tpd_dbg_has_anchor
-        last_sym_dbg = tpd_dbg_sym
-        last_csym_dbg = tpd_dbg_csym
-        last_c1_a = tpd_dbg_c1_a
-        last_c1_b = tpd_dbg_c1_b
-        last_c2_a = tpd_dbg_c2_a
-        last_c2_b = tpd_dbg_c2_b
-        last_c3_a = tpd_dbg_c3_a
-        last_c3_b = tpd_dbg_c3_b
-        last_tpd_dir = tpd_dbg_dir
-
-        sym_dbg = curr_sym_dbg
-        csym_dbg = curr_csym_dbg
-        use_dyad_dbg = has_last_tpd_debug or dyad_ok
-        d_c1_main = dbg_mc1 > dbg_mo1
-        d_c1_pair = dbg_oc1 > dbg_oo1
-        d_c3_main = dbg_mc2 > dbg_mo0
-        d_c3_pair = dbg_oc2 > dbg_oo0
-
-        d_crack1 = not array.every(array.from(d_c1_main, d_c1_pair)) and array.some(array.from(d_c1_main, d_c1_pair))
-        d_crack2 = not array.every(array.from(d_c3_main, d_c3_pair)) and array.some(array.from(d_c3_main, d_c3_pair))
-
-        d_con_low = array.some(array.from(array.min(array.from(dbg_ml2, dbg_ml1, dbg_ml0)) == dbg_ml1, array.min(array.from(dbg_ol2, dbg_ol1, dbg_ol0)) == dbg_ol1))
-        d_con_high = array.some(array.from(array.max(array.from(dbg_mh2, dbg_mh1, dbg_mh0)) == dbg_mh1, array.max(array.from(dbg_oh2, dbg_oh1, dbg_oh0)) == dbg_oh1))
-
-        dbg_crack1 = d_crack1
-        dbg_crack2 = d_crack2
-        dbg_con_low = d_con_low
-        dbg_con_high = d_con_high
-        dbg_bear = dbg_con_high and dbg_crack1 and dbg_crack2
-        dbg_bull = dbg_con_low and dbg_crack1 and dbg_crack2
-
-        dyad_r1 = use_dyad_dbg ? sym_dbg : ""
-        dyad_r2 = use_dyad_dbg ? csym_dbg : ""
-        tpd_dir_dbg = curr_tpd_dir
-        dyad_r3 = use_dyad_dbg and str.length(tpd_dir_dbg) > 0 ? ("TPD " + tpd_dir_dbg) : ""
-
-        c1_a = curr_c1_a
-        c1_b = curr_c1_b
-        c2_a = curr_c2_a
-        c2_b = curr_c2_b
-        c3_a = curr_c3_a
-        c3_b = curr_c3_b
-
-        dyad_c1_a = use_dyad_dbg ? c1_a : ""
-        dyad_c1_b = use_dyad_dbg ? c1_b : ""
-        dyad_c1_c = ""
-        dyad_c2_a = use_dyad_dbg ? c2_a : ""
-        dyad_c2_b = use_dyad_dbg ? c2_b : ""
-        dyad_c2_c = ""
-        dyad_c3_a = use_dyad_dbg ? c3_a : ""
-        dyad_c3_b = use_dyad_dbg ? c3_b : ""
-        dyad_c3_c = ""
-        curr_main_c23_sweep_dbg = (not na(dbg_ml1) and not na(dbg_ml0) and dbg_ml0 < dbg_ml1) or (not na(dbg_mh1) and not na(dbg_mh0) and dbg_mh0 > dbg_mh1)
-        curr_pair_c23_sweep_dbg = (not na(dbg_ol1) and not na(dbg_ol0) and dbg_ol0 < dbg_ol1) or (not na(dbg_oh1) and not na(dbg_oh0) and dbg_oh0 > dbg_oh1)
-        main_c23_sweep_dbg = curr_main_c23_sweep_dbg
-        pair_c23_sweep_dbg = curr_pair_c23_sweep_dbg
-        dyad_c23_sweep_a = use_dyad_dbg ? (dyad_r1 + " C2->C3 Sweep " + str.tostring(main_c23_sweep_dbg)) : ""
-        dyad_c23_sweep_b = ""
-
-        header_bg = color.new(color.gray, 85)
+    if show_tpd_alert_debug
+        header_bg = color.new(color.gray, 82)
         body_bg = color.white
-        if show_tpd_debug
-            table.cell(tpd_debug_tbl, 0, 0, "Dyad", text_color=color.black, bgcolor=header_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 1, dyad_r1, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 2, dyad_r2, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 3, dyad_r3, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 4, dyad_c1_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 5, dyad_c1_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 6, dyad_c1_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 7, dyad_c2_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 8, dyad_c2_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 9, dyad_c2_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 10, dyad_c3_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 11, dyad_c3_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 12, dyad_c3_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 13, dyad_c23_sweep_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_debug_tbl, 0, 14, dyad_c23_sweep_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
-        else
-            table.clear(tpd_debug_tbl, 0, 0, 0, 14)
+        ok_bg = color.new(color.lime, 70)
+        pending_bg = color.new(color.yellow, 78)
+        off_bg = color.new(color.gray, 88)
+        level3_bg = off_bg
+        level2_bg = bearishValidTPD_SSMT ? ok_bg : bearishValidTPD ? pending_bg : body_bg
+        level1_bg = bearishValidTPD ? ok_bg : body_bg
+        state_txt = f_sm_state_text(sm_state_now)
+        tf_htf = f_text(TPD_SCAN_TF)
+        purge_side = dbg_purge_is_main ? "Main" : dbg_failure_is_main ? "Pair" : "--"
+        fail_side = dbg_failure_is_main ? "Main" : dbg_purge_is_main ? "Pair" : "--"
 
-        if show_tpd_alert_debug
-            table.cell(tpd_alert_tbl, 0, 0, "Alerts", text_color=color.black, bgcolor=header_bg, text_size=size.small)
-            valid_tpd_dbg = tpd_bull_any or tpd_bear_any
-            main_low_c23_sweep_dbg = not na(dbg_ml1) and not na(dbg_ml0) and dbg_ml0 < dbg_ml1
-            pair_low_c23_sweep_dbg = not na(dbg_ol1) and not na(dbg_ol0) and dbg_ol0 < dbg_ol1
-            main_high_c23_sweep_dbg = not na(dbg_mh1) and not na(dbg_mh0) and dbg_mh0 > dbg_mh1
-            pair_high_c23_sweep_dbg = not na(dbg_oh1) and not na(dbg_oh0) and dbg_oh0 > dbg_oh1
-            same_side_c23_sweep_dbg = (main_low_c23_sweep_dbg and pair_low_c23_sweep_dbg) or (main_high_c23_sweep_dbg and pair_high_c23_sweep_dbg)
-            tpd_w_ssmt_dbg = (bull_setup_seen_dbg or bear_setup_seen_dbg) and not same_side_c23_sweep_dbg
-            table.cell(tpd_alert_tbl, 0, 1, "Valid TPD " + str.tostring(valid_tpd_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_alert_tbl, 0, 2, "TPD w SSMT " + str.tostring(tpd_w_ssmt_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_alert_tbl, 0, 3, "tCISD Confirmed " + str.tostring(tcisd_confirmed_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_alert_tbl, 0, 4, "tCISD Retest (Entry) " + str.tostring(tcisd_retest_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_alert_tbl, 0, 5, "Invalidation Hit " + str.tostring(invalidation_hit_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_alert_tbl, 0, 6, "Expansion Invalidation Hit " + str.tostring(expansion_invalidation_hit_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
-            table.cell(tpd_alert_tbl, 0, 7, "2.5R Hit " + str.tostring(rr25_hit_dbg), text_color=color.black, bgcolor=body_bg, text_size=size.small)
-        else
-            table.clear(tpd_alert_tbl, 0, 0, 0, 7)
+        table.cell(sm_state_tbl, 0, 0, "Auto " + state_txt, text_color=color.black, bgcolor=header_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 0, "Level 3", text_color=color.black, bgcolor=header_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 2, 0, "Level 2", text_color=color.black, bgcolor=header_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 3, 0, "Level 1", text_color=color.black, bgcolor=header_bg, text_size=size.small)
+
+        table.cell(sm_state_tbl, 0, 1, "TF", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 1, "m15", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 2, 1, tf_htf, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 3, 1, tf_htf, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+
+        table.cell(sm_state_tbl, 0, 2, "State", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 2, "Disabled", text_color=color.black, bgcolor=level3_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 2, 2, bearishValidTPD_SSMT ? "Reached" : bearishValidTPD ? "Tracking" : "--", text_color=color.black, bgcolor=level2_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 3, 2, bearishValidTPD ? "Reached" : "--", text_color=color.black, bgcolor=level1_bg, text_size=size.small)
+
+        table.cell(sm_state_tbl, 0, 3, "Time Phase", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 3, "tCISD Off", text_color=color.black, bgcolor=level3_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 2, 3, dbg_purge_seen ? "Purge Seen" : dbg_c2_high_swept ? "C2 Swept" : "--", text_color=color.black, bgcolor=level2_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 3, 3, bearishValidTPD ? "C3 Tracking" : "--", text_color=color.black, bgcolor=level1_bg, text_size=size.small)
+
+        table.cell(sm_state_tbl, 0, 4, "Gate Check", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 4, "C3:" + f_yn(dbg_in_c3_window), text_color=color.black, bgcolor=level3_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 2, 4, "C2:" + f_yn(dbg_c2_high_swept) + " P:" + f_yn(dbg_purge_seen), text_color=color.black, bgcolor=level2_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 3, 4, "C1:" + f_yn(dbg_crack1) + " C2:" + f_yn(dbg_crack2) + " CH:" + f_yn(dbg_con_hgh) + " T:" + f_yn(dbg_tie_rule), text_color=color.black, bgcolor=level1_bg, text_size=size.small)
+
+        table.cell(sm_state_tbl, 0, 5, "Role", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 5, "--", text_color=color.black, bgcolor=level3_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 2, 5, "Purge " + purge_side, text_color=color.black, bgcolor=level2_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 3, 5, "Fail " + fail_side, text_color=color.black, bgcolor=level1_bg, text_size=size.small)
+
+        table.cell(sm_state_tbl, 0, 6, "Last Event", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 6, stage3_bear ? "Stage3" : "--", text_color=color.black, bgcolor=level3_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 2, 6, stage2_bear ? "Stage2" : invalidated_now ? "Invalid" : "--", text_color=color.black, bgcolor=level2_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 3, 6, stage1_bear ? "Stage1" : expired_now ? "Expired" : "--", text_color=color.black, bgcolor=level1_bg, text_size=size.small)
     else
-        table.clear(tpd_debug_tbl, 0, 0, 0, 14)
-        table.clear(tpd_alert_tbl, 0, 0, 0, 7)
+        table.clear(sm_state_tbl, 0, 0, 3, 6)
