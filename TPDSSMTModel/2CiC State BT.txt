@@ -400,11 +400,10 @@ f_tpd_state_iter_a_15(_pair_sym, _active) =>
 
         bool main_sweeps_c2_high = not na(htf_c2_high_main) and not na(mh0) and mh0 > htf_c2_high_main
         bool pair_sweeps_c2_high = not na(htf_c2_high_pair) and not na(oh0) and oh0 > htf_c2_high_pair
-        if sm_state == SM_C3_TRACKING
-            if na(main_high_purge_ts) and main_sweeps_c2_high
-                main_high_purge_ts := int(mtb0)
-            if na(pair_high_purge_ts) and pair_sweeps_c2_high
-                pair_high_purge_ts := int(ptb0)
+        if na(main_high_purge_ts) and main_sweeps_c2_high
+            main_high_purge_ts := int(mtb0)
+        if na(pair_high_purge_ts) and pair_sweeps_c2_high
+            pair_high_purge_ts := int(ptb0)
         int bear_potential_tcisd_ts = failure_is_main ? pair_high_purge_ts : main_high_purge_ts
         int bear_potential_tcisd_match_bar = ta.valuewhen(mtb0 == bear_potential_tcisd_ts, bar_index, 0)
         int bear_potential_tcisd_back = na(bear_potential_tcisd_match_bar) ? int(na) : bar_index - bear_potential_tcisd_match_bar
