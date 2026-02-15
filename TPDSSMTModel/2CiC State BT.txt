@@ -274,6 +274,8 @@ f_tpd_state_iter_a_15(_pair_sym, _active) =>
     bool dbg_crack2_out = false
     bool dbg_c2_high_swept_out = false
     bool dbg_purge_seen_out = false
+    bool dbg_tcisd_back_valid_out = false
+    bool dbg_tcisd_fail_match_out = false
 
     if _active
         [mh2,ml2,mc2,mo2,mt2,mh1,ml1,mc1,mo1,mt1,mh0,ml0,mc0,mo0,mt0,mup1,mdw1,ml1t,mh1t,mcb0,mob0,mtb0] = request.security(syminfo.tickerid, "15", f_qt_daily_c123(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
@@ -411,6 +413,19 @@ f_tpd_state_iter_a_15(_pair_sym, _active) =>
         int bear_potential_purge_tcisd_back = na(bear_potential_purge_tcisd_match_bar) ? int(na) : bar_index - bear_potential_purge_tcisd_match_bar
         bool bear_tcisd_back_valid = not na(bear_potential_tcisd_back) and bear_potential_tcisd_back >= 0 and bear_potential_tcisd_back <= TCISD_MAX_LOOKBACK_BARS
         bool bear_purge_tcisd_back_valid = not na(bear_potential_purge_tcisd_back) and bear_potential_purge_tcisd_back >= 0 and bear_potential_purge_tcisd_back <= TCISD_MAX_LOOKBACK_BARS
+        bool bear_fail_match0_dbg = false
+        bool bear_fail_match1_dbg = false
+        if bear_tcisd_back_valid
+            int bear_fail_back0_dbg = bear_potential_tcisd_back
+            int bear_fail_back1_dbg = bear_potential_tcisd_back + 1
+            if failure_is_main
+                bear_fail_match0_dbg := bear_fail_back0_dbg <= bar_index and mcb0[bear_fail_back0_dbg] > mob0[bear_fail_back0_dbg]
+                bear_fail_match1_dbg := bear_fail_back1_dbg <= bar_index and mcb0[bear_fail_back1_dbg] > mob0[bear_fail_back1_dbg]
+            else
+                bear_fail_match0_dbg := bear_fail_back0_dbg <= bar_index and pcb0[bear_fail_back0_dbg] > pob0[bear_fail_back0_dbg]
+                bear_fail_match1_dbg := bear_fail_back1_dbg <= bar_index and pcb0[bear_fail_back1_dbg] > pob0[bear_fail_back1_dbg]
+        dbg_tcisd_back_valid_out := bear_tcisd_back_valid
+        dbg_tcisd_fail_match_out := bear_fail_match0_dbg or bear_fail_match1_dbg
 
         if sm_state == SM_C3_TRACKING
             bool either_sweeps_c2_high = main_sweeps_c2_high or pair_sweeps_c2_high
@@ -536,10 +551,10 @@ f_tpd_state_iter_a_15(_pair_sym, _active) =>
     dbg_c2_high_swept_out := c2_high_swept
     dbg_purge_seen_out := purge_seen
 
-    [bearish_valid_tpd, bearish_valid_tpd_ssmt, setup_confirmed, sm_state, dbg_crack1_out, dbg_crack2_out, dbg_c2_high_swept_out, dbg_purge_seen_out, stage1_seq, stage2_seq, stage3_seq, expired_seq, invalidated_seq, stage1_ts, stage1_price, m15_tcisd_level, m15_tcisd_ts, m15_tcisd_purge_level, m15_tcisd_purge_ts, purge_line_level, purge_line_ts, setup_inv_level, setup_inv_ts, expansion_inv_level, purge_is_main, c4_open_ts, plan_seq, plan_entry, plan_stop, plan_target, plan_cancel_ts]
+    [bearish_valid_tpd, bearish_valid_tpd_ssmt, setup_confirmed, sm_state, dbg_crack1_out, dbg_crack2_out, dbg_c2_high_swept_out, dbg_purge_seen_out, dbg_tcisd_back_valid_out, dbg_tcisd_fail_match_out, stage1_seq, stage2_seq, stage3_seq, expired_seq, invalidated_seq, stage1_ts, stage1_price, m15_tcisd_level, m15_tcisd_ts, m15_tcisd_purge_level, m15_tcisd_purge_ts, purge_line_level, purge_line_ts, setup_inv_level, setup_inv_ts, expansion_inv_level, purge_is_main, c4_open_ts, plan_seq, plan_entry, plan_stop, plan_target, plan_cancel_ts]
 
 tpd_active = dyad_ok
-[bearishValidTPD, bearishValidTPD_SSMT, setupConfirmed, sm_state, dbg_crack1, dbg_crack2, dbg_c2_high_swept, dbg_purge_seen, stage1_seq_now, stage2_seq_now, stage3_seq_now, expired_seq_now, invalidated_seq_now, stage1_ts_now, stage1_price_now, m15_tcisd_level_now, m15_tcisd_ts_now, m15_tcisd_purge_level_now, m15_tcisd_purge_ts_now, purge_line_level_now, purge_line_ts_now, setup_inv_level_now, setup_inv_ts_now, expansion_inv_level_now, purge_is_main_now, c4_open_ts_now, plan_seq_now, plan_entry_now, plan_stop_now, plan_target_now, plan_cancel_ts_now] = request.security(syminfo.tickerid, "15", f_tpd_state_iter_a_15(csym, tpd_active), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[bearishValidTPD, bearishValidTPD_SSMT, setupConfirmed, sm_state, dbg_crack1, dbg_crack2, dbg_c2_high_swept, dbg_purge_seen, dbg_tcisd_back_valid, dbg_tcisd_fail_match, stage1_seq_now, stage2_seq_now, stage3_seq_now, expired_seq_now, invalidated_seq_now, stage1_ts_now, stage1_price_now, m15_tcisd_level_now, m15_tcisd_ts_now, m15_tcisd_purge_level_now, m15_tcisd_purge_ts_now, purge_line_level_now, purge_line_ts_now, setup_inv_level_now, setup_inv_ts_now, expansion_inv_level_now, purge_is_main_now, c4_open_ts_now, plan_seq_now, plan_entry_now, plan_stop_now, plan_target_now, plan_cancel_ts_now] = request.security(syminfo.tickerid, "15", f_tpd_state_iter_a_15(csym, tpd_active), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
 
 stage1_bear = stage1_seq_now > nz(stage1_seq_now[1], 0)
 stage2_bear = stage2_seq_now > nz(stage2_seq_now[1], 0)
@@ -845,7 +860,7 @@ if (expired_now or invalidated_now) and not stage1_bear and not active_setup_con
 // ============================================
 // DEBUG TABLE
 // ============================================
-var table sm_state_tbl = table.new(position.bottom_right, 2, 18, border_width=1)
+var table sm_state_tbl = table.new(position.bottom_right, 2, 20, border_width=1)
 
 if barstate.islast
     if show_tpd_alert_debug
@@ -887,7 +902,11 @@ if barstate.islast
         table.cell(sm_state_tbl, 1, 16, f_yn(bt_active_entry_limit_touched), text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(sm_state_tbl, 0, 17, "Order Placed", text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(sm_state_tbl, 1, 17, bt_order_placed_text, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 18, "tCISD Back OK", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 18, f_yn(dbg_tcisd_back_valid), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 19, "tCISD Fail Match", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 19, f_yn(dbg_tcisd_fail_match), text_color=color.black, bgcolor=body_bg, text_size=size.small)
     else
-        table.clear(sm_state_tbl, 0, 0, 1, 17)
+        table.clear(sm_state_tbl, 0, 0, 1, 19)
 
 plot(na)
