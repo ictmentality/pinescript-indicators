@@ -656,23 +656,25 @@ if bt_new_trade_plan and bt_within_c3_window
         bt_last_reject_code := BT_REJECT_NONE
 bool bt_has_pending_order = not na(bt_active_entry_limit) and not na(bt_active_qty)
 bool bt_pending_within_c3_window = not na(bt_active_cancel_ts) and time_close < bt_active_cancel_ts
-bool bt_should_cancel_pending = expired_now or invalidated_now or not bt_pending_within_c3_window
-if strategy.position_size == 0 and bt_has_pending_order
+bool bt_setup_still_valid_for_pending = sm_state == SM_C3_TRACKING and setupConfirmed and bt_trade_on_this_chart
+bool bt_should_cancel_pending = expired_now or invalidated_now or not bt_pending_within_c3_window or not bt_setup_still_valid_for_pending
+if strategy.position_size == 0
     if bt_should_cancel_pending
         strategy.cancel("S")
         strategy.cancel("S-X")
-        if invalidated_now
-            bt_cancel_invalidated_count += 1
-        else if expired_now or not bt_pending_within_c3_window
-            bt_cancel_expired_count += 1
-        bt_active_entry_limit := na
-        bt_active_qty := na
-        bt_active_stop := na
-        bt_active_target := na
-        bt_active_cancel_ts := int(na)
-        bt_order_placed_ts := int(na)
-        bt_order_state := BT_ORDER_CANCELLED
-    else
+        if bt_has_pending_order
+            if invalidated_now
+                bt_cancel_invalidated_count += 1
+            else if expired_now or not bt_pending_within_c3_window
+                bt_cancel_expired_count += 1
+            bt_active_entry_limit := na
+            bt_active_qty := na
+            bt_active_stop := na
+            bt_active_target := na
+            bt_active_cancel_ts := int(na)
+            bt_order_placed_ts := int(na)
+            bt_order_state := BT_ORDER_CANCELLED
+    else if bt_has_pending_order
         bool bt_first_submit_now = bt_order_state != BT_ORDER_WORKING
         strategy.entry("S", strategy.short, qty=bt_active_qty, limit=bt_active_entry_limit, comment="2CiC Stage3 LMT")
         strategy.exit("S-X", "S", stop=bt_active_stop, limit=bt_active_target)
@@ -686,14 +688,13 @@ if strategy.position_size < 0 and strategy.position_size[1] == 0
     bt_order_state := BT_ORDER_FILLED
 bool bt_exit_level_hit_now = not na(bt_active_stop) and not na(bt_active_target) and (high >= bt_active_stop or low <= bt_active_target)
 if strategy.position_size == 0 and strategy.position_size[1] < 0
-    if bt_exit_level_hit_now
-        bt_active_entry_limit := na
-        bt_active_qty := na
-        bt_active_stop := na
-        bt_active_target := na
-        bt_active_cancel_ts := int(na)
-        bt_order_placed_ts := int(na)
-        bt_order_state := BT_ORDER_IDLE
+    bt_active_entry_limit := na
+    bt_active_qty := na
+    bt_active_stop := na
+    bt_active_target := na
+    bt_active_cancel_ts := int(na)
+    bt_order_placed_ts := int(na)
+    bt_order_state := BT_ORDER_IDLE
 if bt_order_state == BT_ORDER_CANCELLED and strategy.position_size == 0 and na(bt_active_entry_limit) and na(bt_active_qty)
     bt_order_state := BT_ORDER_IDLE
 
