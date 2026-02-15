@@ -1,0 +1,316 @@
+# How to Create a TradingView Strategy in Pine Script v6 (Codex Guide)
+
+> Goal: give Codex (and you) a copy/paste-ready set of **patterns** for building Pine strategies: script header, inputs, HTF data, signals, entries, exits, and basic backtest controls.
+>
+> This guide includes a complete worked example based on the “Outside Month” idea (monthly volatility expansion → mean-reversion entry next month).
+
+---
+
+## 0) Minimal strategy skeleton (must-have)
+
+**Rules:**
+- A *strategy* script starts with `strategy(...)` (not `indicator(...)`).
+- Use `//@version=6`.
+- Put strategy configuration (position sizing, commission, slippage, pyramiding, etc.) in the `strategy()` call.
+
+```pine
+//@version=6
+strategy(
+     title = "My Strategy",
+     overlay = true,
+     initial_capital = 100000,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.01,   // 0.01% per trade
+     slippage = 1,              // ticks
+     pyramiding = 0,
+     process_orders_on_close = true,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 10
+)
+
+// ---- Your code below ----
+```
+
+---
+
+## 1) Inputs (user-configurable parameters)
+
+Use `input.*` so users can tune the strategy without editing code.
+
+```pine
+// Risk & exits
+stopPct   = input.float(2.0, "Stop %", step = 0.1, minval = 0.0) / 100.0
+targetPct = input.float(3.0, "Target %", step = 0.1, minval = 0.0) / 100.0
+
+// Filters
+minRangePct = input.float(5.0, "Min prev-month range %", step = 0.25, minval = 0.0) / 100.0
+
+// Backtest window
+useDateFilter = input.bool(true, "Use backtest dates")
+startTime     = input.time(timestamp("2018-01-01T00:00:00"), "Start", confirm = true)
+endTime       = input.time(timestamp("2026-01-01T00:00:00"), "End", confirm = true)
+```
+
+**Backtest gate:**
+
+```pine
+inDateRange = not useDateFilter or (time >= startTime and time < endTime)
+```
+
+---
+
+## 2) Pull higher-timeframe (HTF) data with `request.security()`
+
+For “Outside Month”, you typically:
+- run the strategy on **daily or intraday** charts
+- request **monthly** OHLC for pattern detection
+
+### 2.1 Request monthly OHLC (current + previous bars)
+
+```pine
+mOpen  = request.security(syminfo.tickerid, "M", open)
+mHigh  = request.security(syminfo.tickerid, "M", high)
+mLow   = request.security(syminfo.tickerid, "M", low)
+mClose = request.security(syminfo.tickerid, "M", close)
+
+// Previous month (inside the monthly context)
+mOpen_1  = request.security(syminfo.tickerid, "M", open[1])
+mHigh_1  = request.security(syminfo.tickerid, "M", high[1])
+mLow_1   = request.security(syminfo.tickerid, "M", low[1])
+mClose_1 = request.security(syminfo.tickerid, "M", close[1])
+
+// Two months ago (needed to test if last month engulfed the prior month)
+mHigh_2 = request.security(syminfo.tickerid, "M", high[2])
+mLow_2  = request.security(syminfo.tickerid, "M", low[2])
+```
+
+**Why request `high[1]` inside `request.security()`?**
+- You’re explicitly asking for “previous month high” from the monthly series, rather than trying to index a downsampled series later.
+
+> Implementation note: You can add `barmerge.gaps_off` and `barmerge.lookahead_off` as extra parameters if you want to be explicit.
+
+---
+
+## 3) Build the signal: “Outside Month” + “Large Range Month” (basic version)
+
+**Outside month definition (prev month engulfs the month before it):**
+- `prevMonthHigh > twoMonthsAgoHigh`
+- `prevMonthLow < twoMonthsAgoLow`
+
+```pine
+isOutsidePrevMonth = (mHigh_1 > mHigh_2) and (mLow_1 < mLow_2)
+```
+
+**Optional: range filter** (only trade if last month was “big”):
+- range% = (high-low)/close
+
+```pine
+prevMonthRangePct = (mHigh_1 - mLow_1) / mClose_1
+rangeOk = prevMonthRangePct >= minRangePct
+```
+
+---
+
+## 4) Decide *when* to trade: first bar of the new month
+
+On lower timeframes, use the monthly timestamp series to detect month changes.
+
+```pine
+newMonthBar = ta.change(time("M"))
+```
+
+**Interpretation:**
+- `newMonthBar == true` on the first bar that belongs to a new month on your chart timeframe.
+
+---
+
+## 5) Create the entry logic (mean reversion example)
+
+A simple “price recovery” approach:
+- If the prior month closed **bearish** (`close < open`) after an outside month, then **go long** at the start of the next month.
+- If the prior month closed **bullish** (`close > open`) after an outside month, then **go short**.
+
+```pine
+prevMonthBear = mClose_1 < mOpen_1
+prevMonthBull = mClose_1 > mOpen_1
+
+canTrade = inDateRange and newMonthBar and isOutsidePrevMonth and rangeOk and (strategy.position_size == 0)
+
+enterLong  = canTrade and prevMonthBear
+enterShort = canTrade and prevMonthBull
+```
+
+### 5.1 Place entry orders
+
+```pine
+if enterLong
+    strategy.entry("L", strategy.long)
+
+if enterShort
+    strategy.entry("S", strategy.short)
+```
+
+**Important:**
+- Use stable order IDs (`"L"` / `"S"`) so exits can reference them.
+
+---
+
+## 6) Add exits (stop-loss + take-profit bracket)
+
+A clean baseline is “% stop and % target from average entry price”.
+
+### 6.1 Calculate stop/target prices
+
+```pine
+isLong  = strategy.position_size > 0
+isShort = strategy.position_size < 0
+avg     = strategy.position_avg_price
+
+longStop   = avg * (1.0 - stopPct)
+longTarget = avg * (1.0 + targetPct)
+
+shortStop   = avg * (1.0 + stopPct)
+shortTarget = avg * (1.0 - targetPct)
+```
+
+### 6.2 Attach exits to the entries (`from_entry`)
+
+```pine
+// For a long, close if stop OR target hits
+strategy.exit("LX", from_entry = "L", stop = longStop,  limit = longTarget)
+
+// For a short, close if stop OR target hits
+strategy.exit("SX", from_entry = "S", stop = shortStop, limit = shortTarget)
+```
+
+---
+
+## 7) Optional: time-based exit (e.g., close at next month boundary)
+
+You might want “hold for one month max”.
+
+```pine
+if newMonthBar and strategy.position_size != 0 and not canTrade
+    // New month started and you're still in a trade from last month → close it.
+    strategy.close_all(comment = "Month rollover exit")
+```
+
+---
+
+## 8) Debugging: plot signals + key HTF values
+
+This is how you sanity-check a strategy.
+
+```pine
+plotchar(isOutsidePrevMonth, "Outside Prev Month", "O", location.top)
+plotchar(newMonthBar,       "New Month",          "M", location.top)
+
+plot(mHigh_1, "Prev Month High", display = display.none)
+plot(mLow_1,  "Prev Month Low",  display = display.none)
+
+plotshape(enterLong,  title="Enter Long",  style=shape.triangleup,   location=location.belowbar, size=size.tiny)
+plotshape(enterShort, title="Enter Short", style=shape.triangledown, location=location.abovebar, size=size.tiny)
+```
+
+---
+
+## 9) Full worked example: Outside Month → Mean Reversion (single-file strategy)
+
+Copy/paste this into TradingView as a new Pine Strategy:
+
+```pine
+//@version=6
+strategy(
+     title = "Outside Month Mean Reversion (Example)",
+     overlay = true,
+     initial_capital = 100000,
+     commission_type = strategy.commission.percent,
+     commission_value = 0.01,
+     slippage = 1,
+     pyramiding = 0,
+     process_orders_on_close = true,
+     default_qty_type = strategy.percent_of_equity,
+     default_qty_value = 10
+)
+
+// ===== Inputs
+stopPct      = input.float(2.0, "Stop %", step = 0.1, minval = 0.0) / 100.0
+targetPct    = input.float(3.0, "Target %", step = 0.1, minval = 0.0) / 100.0
+minRangePct  = input.float(5.0, "Min prev-month range %", step = 0.25, minval = 0.0) / 100.0
+
+useDateFilter = input.bool(true, "Use backtest dates")
+startTime     = input.time(timestamp("2018-01-01T00:00:00"), "Start", confirm = true)
+endTime       = input.time(timestamp("2026-01-01T00:00:00"), "End", confirm = true)
+inDateRange   = not useDateFilter or (time >= startTime and time < endTime)
+
+// ===== Monthly data
+mOpen_1  = request.security(syminfo.tickerid, "M", open[1])
+mHigh_1  = request.security(syminfo.tickerid, "M", high[1])
+mLow_1   = request.security(syminfo.tickerid, "M", low[1])
+mClose_1 = request.security(syminfo.tickerid, "M", close[1])
+
+mHigh_2  = request.security(syminfo.tickerid, "M", high[2])
+mLow_2   = request.security(syminfo.tickerid, "M", low[2])
+
+// ===== Signal
+isOutsidePrevMonth = (mHigh_1 > mHigh_2) and (mLow_1 < mLow_2)
+prevMonthRangePct  = (mHigh_1 - mLow_1) / mClose_1
+rangeOk            = prevMonthRangePct >= minRangePct
+
+newMonthBar = ta.change(time("M"))
+
+prevMonthBear = mClose_1 < mOpen_1
+prevMonthBull = mClose_1 > mOpen_1
+
+canTrade   = inDateRange and newMonthBar and isOutsidePrevMonth and rangeOk and (strategy.position_size == 0)
+enterLong  = canTrade and prevMonthBear
+enterShort = canTrade and prevMonthBull
+
+// ===== Entries
+if enterLong
+    strategy.entry("L", strategy.long)
+
+if enterShort
+    strategy.entry("S", strategy.short)
+
+// ===== Exits (bracket)
+avg = strategy.position_avg_price
+
+longStop   = avg * (1.0 - stopPct)
+longTarget = avg * (1.0 + targetPct)
+
+shortStop   = avg * (1.0 + stopPct)
+shortTarget = avg * (1.0 - targetPct)
+
+strategy.exit("LX", from_entry = "L", stop = longStop,  limit = longTarget)
+strategy.exit("SX", from_entry = "S", stop = shortStop, limit = shortTarget)
+
+// ===== Debug
+plotchar(isOutsidePrevMonth, "Outside Prev Month", "O", location.top)
+plotchar(newMonthBar,       "New Month",          "M", location.top)
+
+plotshape(enterLong,  title="Enter Long",  style=shape.triangleup,   location=location.belowbar, size=size.tiny)
+plotshape(enterShort, title="Enter Short", style=shape.triangledown, location=location.abovebar, size=size.tiny)
+```
+
+---
+
+## 10) How to use this with Codex (recommended prompt pattern)
+
+When you hand this to Codex, phrase tasks as discrete, testable edits:
+
+- “Add an input to select trade direction: (a) mean reversion, (b) trend-following.”
+- “Add a max-hold-days exit (close position after N daily bars).”
+- “Replace % stop/target with ATR-based stop/target; keep `from_entry` IDs.”
+- “Add a filter: only trade if previous month’s close is below the 10-month SMA (bear) or above (bull).”
+- “Add plots: prev month high/low, and a label at the new month bar showing range%.”
+
+---
+
+## 11) Common pitfalls (Codex should avoid)
+
+- **Forgetting `from_entry` in `strategy.exit()`** when you have both long and short entries. (Exit orders can apply to the wrong side if you don’t link them.)
+- **Using lookahead** (future leaks) in HTF requests. Default is safe; don’t set lookahead to on.
+- **Re-entering on every bar**: make entries conditional on an event like `newMonthBar` or a clear cross.
+- **No backtest window**: always provide a date filter if you want reproducible research.
+

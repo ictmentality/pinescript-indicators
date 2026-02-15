@@ -1,0 +1,5 @@
+﻿Trade #,Type,Date and time,Signal,Price USD,Position size (qty),Position size (value),Net P&L USD,Net P&L %,Favorable excursion USD,Favorable excursion %,Adverse excursion USD,Adverse excursion %,Cumulative P&L USD,Cumulative P&L %
+1,Exit short,2025-05-01 18:00,S-X,3410.1,3,101592,-711,-0.70,462,0.45,-711,-0.70,-711,-0.47
+1,Entry short,2025-05-01 11:00,2CiC Stage3 LMT,3386.4,3,101592,-711,-0.70,462,0.45,-711,-0.70,-711,-0.47
+2,Exit short,2025-05-28 16:45,S-X,3438.1,3,105009,1866,1.78,1866,1.78,-411,-0.39,1155,0.77
+2,Entry short,2025-05-25 20:00,2CiC Stage3 LMT,3500.3,3,105009,1866,1.78,1866,1.78,-411,-0.39,1155,0.77

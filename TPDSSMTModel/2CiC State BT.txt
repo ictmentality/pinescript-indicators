@@ -1,5 +1,5 @@
 //@version=6
-strategy("2CiC State BT", shorttitle="2CiC BT", overlay=true, max_labels_count=500, max_lines_count=500, dynamic_requests=true, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true, initial_capital=50000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
+strategy("2CiC State BT", shorttitle="2CiC BT", overlay=true, max_labels_count=500, max_lines_count=500, dynamic_requests=true, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true, initial_capital=150000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
 import Jaw1312/QTEngine/34 as qt
 
 // ============================================
@@ -91,7 +91,7 @@ group_tpd_debug = "State Window"
 show_tpd_alert_debug = input.bool(true, "Show State Window", group=group_tpd_debug)
 
 group_bt_risk = "Backtest Risk"
-bt_account_size = input.float(50000, "Account Size", minval=1, group=group_bt_risk)
+bt_account_size = input.float(150000, "Account Size", minval=1, group=group_bt_risk)
 bt_risk_pct = input.float(0.625, "Risk % Per Trade", minval=0.001, step=0.001, group=group_bt_risk)
 
 // ============================================
@@ -264,6 +264,11 @@ f_tpd_state_iter_a_15(_pair_sym, _active) =>
     var int invalidated_seq = 0
     var int stage1_ts = int(na)
     var float stage1_price = na
+    var int plan_seq = 0
+    var float plan_entry = na
+    var float plan_stop = na
+    var float plan_target = na
+    var int plan_cancel_ts = int(na)
 
     bool dbg_crack1_out = false
     bool dbg_crack2_out = false
@@ -493,6 +498,13 @@ f_tpd_state_iter_a_15(_pair_sym, _active) =>
                 if bear_fail_c_now < m15_tcisd_level
                     setup_confirmed := true
                     stage3_seq += 1
+                    if not purge_is_main and not na(setup_inv_level) and not na(c4_open_ts)
+                        float plan_target_now = m15_tcisd_level - ((setup_inv_level - m15_tcisd_level) * 2.5)
+                        plan_entry := m15_tcisd_level
+                        plan_stop := setup_inv_level
+                        plan_target := plan_target_now
+                        plan_cancel_ts := c4_open_ts
+                        plan_seq += 1
     else
         bearish_valid_tpd := false
         bearish_valid_tpd_ssmt := false
@@ -515,15 +527,19 @@ f_tpd_state_iter_a_15(_pair_sym, _active) =>
         main_high_purge_ts := int(na)
         pair_high_purge_ts := int(na)
         c4_open_ts := int(na)
+        plan_entry := na
+        plan_stop := na
+        plan_target := na
+        plan_cancel_ts := int(na)
         sm_state := SM_IDLE
 
     dbg_c2_high_swept_out := c2_high_swept
     dbg_purge_seen_out := purge_seen
 
-    [bearish_valid_tpd, bearish_valid_tpd_ssmt, setup_confirmed, sm_state, dbg_crack1_out, dbg_crack2_out, dbg_c2_high_swept_out, dbg_purge_seen_out, stage1_seq, stage2_seq, stage3_seq, expired_seq, invalidated_seq, stage1_ts, stage1_price, m15_tcisd_level, m15_tcisd_ts, m15_tcisd_purge_level, m15_tcisd_purge_ts, purge_line_level, purge_line_ts, setup_inv_level, setup_inv_ts, expansion_inv_level, purge_is_main, c4_open_ts]
+    [bearish_valid_tpd, bearish_valid_tpd_ssmt, setup_confirmed, sm_state, dbg_crack1_out, dbg_crack2_out, dbg_c2_high_swept_out, dbg_purge_seen_out, stage1_seq, stage2_seq, stage3_seq, expired_seq, invalidated_seq, stage1_ts, stage1_price, m15_tcisd_level, m15_tcisd_ts, m15_tcisd_purge_level, m15_tcisd_purge_ts, purge_line_level, purge_line_ts, setup_inv_level, setup_inv_ts, expansion_inv_level, purge_is_main, c4_open_ts, plan_seq, plan_entry, plan_stop, plan_target, plan_cancel_ts]
 
 tpd_active = dyad_ok
-[bearishValidTPD, bearishValidTPD_SSMT, setupConfirmed, sm_state, dbg_crack1, dbg_crack2, dbg_c2_high_swept, dbg_purge_seen, stage1_seq_now, stage2_seq_now, stage3_seq_now, expired_seq_now, invalidated_seq_now, stage1_ts_now, stage1_price_now, m15_tcisd_level_now, m15_tcisd_ts_now, m15_tcisd_purge_level_now, m15_tcisd_purge_ts_now, purge_line_level_now, purge_line_ts_now, setup_inv_level_now, setup_inv_ts_now, expansion_inv_level_now, purge_is_main_now, c4_open_ts_now] = request.security(syminfo.tickerid, "15", f_tpd_state_iter_a_15(csym, tpd_active), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[bearishValidTPD, bearishValidTPD_SSMT, setupConfirmed, sm_state, dbg_crack1, dbg_crack2, dbg_c2_high_swept, dbg_purge_seen, stage1_seq_now, stage2_seq_now, stage3_seq_now, expired_seq_now, invalidated_seq_now, stage1_ts_now, stage1_price_now, m15_tcisd_level_now, m15_tcisd_ts_now, m15_tcisd_purge_level_now, m15_tcisd_purge_ts_now, purge_line_level_now, purge_line_ts_now, setup_inv_level_now, setup_inv_ts_now, expansion_inv_level_now, purge_is_main_now, c4_open_ts_now, plan_seq_now, plan_entry_now, plan_stop_now, plan_target_now, plan_cancel_ts_now] = request.security(syminfo.tickerid, "15", f_tpd_state_iter_a_15(csym, tpd_active), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
 
 stage1_bear = stage1_seq_now > nz(stage1_seq_now[1], 0)
 stage2_bear = stage2_seq_now > nz(stage2_seq_now[1], 0)
@@ -557,11 +573,23 @@ var array<label> persisted_rr25_lbls = array.new<label>()
 is_m15_chart = timeframe.in_seconds(timeframe.period) == 15 * 60
 float bear_rr25_level_now = na(setup_inv_level_now) or na(m15_tcisd_level_now) ? na : (m15_tcisd_level_now - ((setup_inv_level_now - m15_tcisd_level_now) * 2.5))
 
+const int BT_ORDER_IDLE = 0
+const int BT_ORDER_ARMED = 1
+const int BT_ORDER_WORKING = 2
+const int BT_ORDER_FILLED = 3
+const int BT_ORDER_CANCELLED = 4
+
+const int BT_REJECT_NONE = 0
+const int BT_REJECT_SIDE = 1
+const int BT_REJECT_LEVELS = 2
+const int BT_REJECT_QTY = 3
+
 var int bt_last_traded_stage1_seq = 0
 var float bt_active_entry_limit = na
 var float bt_active_qty = na
 var float bt_active_stop = na
 var float bt_active_target = na
+var int bt_active_cancel_ts = int(na)
 var int bt_order_placed_ts = int(na)
 var int bt_stage3_seen_count = 0
 var int bt_orders_armed_count = 0
@@ -570,58 +598,104 @@ var int bt_reject_side_count = 0
 var int bt_reject_levels_count = 0
 var int bt_cancel_expired_count = 0
 var int bt_cancel_invalidated_count = 0
+var int bt_order_state = BT_ORDER_IDLE
+var int bt_last_reject_code = BT_REJECT_NONE
 bool bt_trade_on_this_chart = not purge_is_main_now
-bool bt_within_c3_window = not na(c4_open_ts_now) and time_close < c4_open_ts_now
-bool bt_new_stage3_setup = stage3_bear and stage1_seq_now > bt_last_traded_stage1_seq
+bool bt_within_c3_window = not na(plan_cancel_ts_now) and time_close < plan_cancel_ts_now
+bool bt_new_trade_plan = plan_seq_now > nz(plan_seq_now[1], 0)
 bool bt_active_entry_limit_touched = not na(bt_active_entry_limit) and high >= bt_active_entry_limit
 string bt_active_entry_limit_text = na(bt_active_entry_limit) ? "na" : str.tostring(bt_active_entry_limit, format.mintick)
 string bt_order_placed_text = na(bt_order_placed_ts) ? "na" : str.format_time(bt_order_placed_ts, "HH:mm", syminfo.timezone)
-float bt_entry_limit_now = m15_tcisd_level_now
-float bt_failure_swing_stop_now = setup_inv_level_now
-float bt_risk_usd_now = bt_account_size * (bt_risk_pct * 0.01)
+float bt_entry_limit_now_raw = plan_entry_now
+float bt_failure_swing_stop_now_raw = plan_stop_now
+float bt_target_now_raw = plan_target_now
+float bt_entry_limit_now = not na(bt_entry_limit_now_raw) ? math.round_to_mintick(bt_entry_limit_now_raw) : na
+float bt_failure_swing_stop_now = not na(bt_failure_swing_stop_now_raw) ? math.round_to_mintick(bt_failure_swing_stop_now_raw) : na
+float bt_target_now = not na(bt_target_now_raw) ? math.round_to_mintick(bt_target_now_raw) : na
+float bt_risk_usd_now = 900.0
 float bt_stop_dist_now = math.abs(bt_failure_swing_stop_now - bt_entry_limit_now)
 float bt_risk_per_unit_now = bt_stop_dist_now * syminfo.pointvalue
-float bt_qty_now = bt_risk_per_unit_now > 0 ? (bt_risk_usd_now / bt_risk_per_unit_now) : na
-bool bt_valid_levels = not na(bt_entry_limit_now) and not na(bt_failure_swing_stop_now) and not na(bear_rr25_level_now) and not na(bt_qty_now) and bt_qty_now > 0
-bool bt_new_confirmed_setup = bt_new_stage3_setup and bt_trade_on_this_chart and bt_within_c3_window
+float bt_qty_risk_now = bt_risk_per_unit_now > 0 ? (bt_risk_usd_now / bt_risk_per_unit_now) : na
+float bt_margin_worst_price_now = not na(bt_entry_limit_now) and not na(bt_failure_swing_stop_now) ? math.max(bt_entry_limit_now, bt_failure_swing_stop_now) : bt_entry_limit_now
+float bt_margin_budget_per_contract_now = not na(bt_margin_worst_price_now) and not na(bt_entry_limit_now) and syminfo.pointvalue > 0 ? ((bt_margin_worst_price_now + (bt_margin_worst_price_now - bt_entry_limit_now)) * syminfo.pointvalue) : na
+float bt_max_affordable_qty_now = not na(bt_margin_budget_per_contract_now) and bt_margin_budget_per_contract_now > 0 ? (strategy.equity / bt_margin_budget_per_contract_now) : na
+float bt_qty_capped_now = not na(bt_qty_risk_now) and not na(bt_max_affordable_qty_now) ? math.min(bt_qty_risk_now, bt_max_affordable_qty_now) : bt_qty_risk_now
+float bt_qty_step_now = syminfo.mincontract > 0 ? syminfo.mincontract : 1.0
+float bt_qty_now = not na(bt_qty_capped_now) ? (math.floor(bt_qty_capped_now / bt_qty_step_now) * bt_qty_step_now) : na
+float bt_min_level_dist_now = syminfo.mintick > 0 ? syminfo.mintick : 0.0
+bool bt_candidate_levels_ok = not na(bt_entry_limit_now) and not na(bt_failure_swing_stop_now) and not na(bt_target_now) and bt_failure_swing_stop_now > bt_entry_limit_now and bt_target_now < bt_entry_limit_now and (bt_failure_swing_stop_now - bt_entry_limit_now) >= bt_min_level_dist_now and (bt_entry_limit_now - bt_target_now) >= bt_min_level_dist_now
+bool bt_candidate_qty_ok = not na(bt_qty_now) and bt_qty_now > 0
+bool bt_candidate_valid = bt_candidate_levels_ok and bt_candidate_qty_ok
+float bt_candidate_entry_limit = bt_entry_limit_now
+float bt_candidate_stop = bt_failure_swing_stop_now
+float bt_candidate_target = bt_target_now
+float bt_candidate_qty = bt_qty_now
+int bt_candidate_ts = time_close
+int bt_candidate_cancel_ts = plan_cancel_ts_now
 if stage3_bear
     bt_stage3_seen_count += 1
-if bt_new_stage3_setup and not bt_trade_on_this_chart
-    bt_reject_side_count += 1
-if bt_new_confirmed_setup and not bt_valid_levels
-    bt_reject_levels_count += 1
-if strategy.position_size == 0 and bt_new_confirmed_setup and bt_valid_levels
-    bt_active_entry_limit := bt_entry_limit_now
-    bt_active_qty := bt_qty_now
-    bt_active_stop := bt_failure_swing_stop_now
-    bt_active_target := bear_rr25_level_now
-    bt_order_placed_ts := time_close
-    bt_last_traded_stage1_seq := stage1_seq_now
-    bt_orders_armed_count += 1
-if strategy.position_size == 0 and not na(bt_active_entry_limit) and not na(bt_active_qty)
-    if expired_now or invalidated_now or not bt_within_c3_window
+if bt_new_trade_plan and bt_within_c3_window
+    if not bt_trade_on_this_chart
+        bt_reject_side_count += 1
+        bt_last_reject_code := BT_REJECT_SIDE
+    else if not bt_candidate_levels_ok
+        bt_reject_levels_count += 1
+        bt_last_reject_code := BT_REJECT_LEVELS
+    else if not bt_candidate_qty_ok
+        bt_reject_levels_count += 1
+        bt_last_reject_code := BT_REJECT_QTY
+    else if strategy.position_size == 0 and bt_order_state == BT_ORDER_IDLE and bt_candidate_valid
+        bt_active_entry_limit := bt_candidate_entry_limit
+        bt_active_qty := bt_candidate_qty
+        bt_active_stop := bt_candidate_stop
+        bt_active_target := bt_candidate_target
+        bt_active_cancel_ts := bt_candidate_cancel_ts
+        bt_order_placed_ts := bt_candidate_ts
+        bt_last_traded_stage1_seq := stage1_seq_now
+        bt_order_state := BT_ORDER_ARMED
+        bt_last_reject_code := BT_REJECT_NONE
+bool bt_has_pending_order = not na(bt_active_entry_limit) and not na(bt_active_qty)
+bool bt_pending_within_c3_window = not na(bt_active_cancel_ts) and time_close < bt_active_cancel_ts
+bool bt_should_cancel_pending = expired_now or invalidated_now or not bt_pending_within_c3_window
+if strategy.position_size == 0 and bt_has_pending_order
+    if bt_should_cancel_pending
         strategy.cancel("S")
+        strategy.cancel("S-X")
         if invalidated_now
             bt_cancel_invalidated_count += 1
-        else if expired_now or not bt_within_c3_window
+        else if expired_now or not bt_pending_within_c3_window
             bt_cancel_expired_count += 1
         bt_active_entry_limit := na
         bt_active_qty := na
         bt_active_stop := na
         bt_active_target := na
+        bt_active_cancel_ts := int(na)
         bt_order_placed_ts := int(na)
+        bt_order_state := BT_ORDER_CANCELLED
     else
+        bool bt_first_submit_now = bt_order_state != BT_ORDER_WORKING
         strategy.entry("S", strategy.short, qty=bt_active_qty, limit=bt_active_entry_limit, comment="2CiC Stage3 LMT")
+        strategy.exit("S-X", "S", stop=bt_active_stop, limit=bt_active_target)
+        if bt_first_submit_now
+            bt_orders_armed_count += 1
+        bt_order_state := BT_ORDER_WORKING
 if strategy.position_size < 0 and not na(bt_active_stop) and not na(bt_active_target)
     strategy.exit("S-X", "S", stop=bt_active_stop, limit=bt_active_target)
 if strategy.position_size < 0 and strategy.position_size[1] == 0
     bt_fills_count += 1
+    bt_order_state := BT_ORDER_FILLED
+bool bt_exit_level_hit_now = not na(bt_active_stop) and not na(bt_active_target) and (high >= bt_active_stop or low <= bt_active_target)
 if strategy.position_size == 0 and strategy.position_size[1] < 0
-    bt_active_entry_limit := na
-    bt_active_qty := na
-    bt_active_stop := na
-    bt_active_target := na
-    bt_order_placed_ts := int(na)
+    if bt_exit_level_hit_now
+        bt_active_entry_limit := na
+        bt_active_qty := na
+        bt_active_stop := na
+        bt_active_target := na
+        bt_active_cancel_ts := int(na)
+        bt_order_placed_ts := int(na)
+        bt_order_state := BT_ORDER_IDLE
+if bt_order_state == BT_ORDER_CANCELLED and strategy.position_size == 0 and na(bt_active_entry_limit) and na(bt_active_qty)
+    bt_order_state := BT_ORDER_IDLE
 
 active_setup_confirmed_latched := stage3_seq_now > stage3_seq_at_last_stage1
 if stage1_bear and not na(stage1_ts_now) and not na(stage1_price_now)

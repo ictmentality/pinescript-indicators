@@ -1,0 +1,155 @@
+//@version=6
+strategy("TradePlan Strategy Skeleton (Entry/Stop/Target/CancelTs)", overlay=true, pyramiding=0, process_orders_on_close=true)
+
+//------------------------------------------------------------------------------
+// TradePlan "interface"
+// You will implement your own logic inside `f_build_plan()` to return a TradePlan.
+//
+// Units / conventions:
+// - entry/stop/target: price levels on the chart's symbol.
+// - cancelTs: UNIX timestamp in milliseconds (same unit as `time` / `time_close`).
+//   Example: timestamp("America/New_York", 2026, 2, 15, 10, 0)
+//
+// The strategy will:
+// - Submit ONE entry order per planKey.
+// - Attach stop/target exits.
+// - Cancel the entry if not filled by cancelTs.
+// - "Export" values through:
+//    (1) Data Window plots (Entry/Stop/Target/CancelTs)
+//    (2) Optional alert() JSON events: PLAN_SUBMIT / PLAN_CANCEL / PLAN_FILL / PLAN_EXIT
+//------------------------------------------------------------------------------
+
+// NOTE: Keep options as compile-time literals
+entryMode = input.string("Limit", "Entry Mode", options=("Limit", "Stop", "Market"))
+useAlerts = input.bool(true, "Emit alert() JSON events")
+
+// Custom type for your plan export
+type TradePlan
+    bool   valid
+    bool   isLong
+    float  entry
+    float  stop
+    float  target
+    int    cancelTs
+    string planKey
+
+f_empty_plan() =>
+    TradePlan.new(false, true, na, na, na, na, "")
+
+// IMPLEMENT THIS: build your entry/stop/target/cancelTs + a stable planKey.
+// Requirements for planKey:
+// - Must be stable for the life of the plan.
+// - Must change when you want to submit a new plan.
+// Common patterns:
+// - Use a timestamp string: str.tostring(time) or your own signal timestamp.
+// - Include direction/levels: "L_" + str.tostring(entry) + "_" + str.tostring(cancelTs)
+f_build_plan() =>
+    // TODO: Replace with your logic.
+    // Return f_empty_plan() when no setup is present.
+    f_empty_plan()
+
+//------------------------------------------------------------------------------
+// Internal state
+//------------------------------------------------------------------------------
+var string activePlanKey = ""
+var bool   planActive    = false
+var int    activeCancelTs = na
+
+entryId = "TP_ENTRY"
+exitId  = "TP_EXIT"
+
+// Helper formatting
+f_to_s_price(x) =>
+    na(x) ? "na" : str.tostring(x, format.mintick)
+
+f_to_s_int(x) =>
+    na(x) ? "na" : str.tostring(x)
+
+f_plan_json(event, p) =>
+    // Minimal JSON payload to integrate with external receivers
+    "{" +
+      "\"event\":\"" + event + "\"," +
+      "\"ticker\":\"" + syminfo.ticker + "\"," +
+      "\"tf\":\"" + timeframe.period + "\"," +
+      "\"dir\":\"" + (p.isLong ? "LONG" : "SHORT") + "\"," +
+      "\"planKey\":\"" + p.planKey + "\"," +
+      "\"entry\":\"" + f_to_s_price(p.entry) + "\"," +
+      "\"stop\":\"" + f_to_s_price(p.stop) + "\"," +
+      "\"target\":\"" + f_to_s_price(p.target) + "\"," +
+      "\"cancelTs\":\"" + f_to_s_int(p.cancelTs) + "\"," +
+      "\"barTime\":\"" + f_to_s_int(time) + "\"" +
+    "}"
+
+//------------------------------------------------------------------------------
+// Main loop
+//------------------------------------------------------------------------------
+p = f_build_plan()
+
+// Detect "new plan" (by planKey) and submit once
+isNewPlan = p.valid and p.planKey != "" and p.planKey != activePlanKey and strategy.position_size == 0 and not planActive
+
+if isNewPlan
+    // Submit entry
+    if entryMode == "Market"
+        strategy.entry(entryId, p.isLong ? strategy.long : strategy.short, alert_message=f_plan_json("PLAN_SUBMIT", p))
+    else if entryMode == "Limit"
+        strategy.entry(entryId, p.isLong ? strategy.long : strategy.short, limit=p.entry, alert_message=f_plan_json("PLAN_SUBMIT", p))
+    else
+        strategy.entry(entryId, p.isLong ? strategy.long : strategy.short, stop=p.entry, alert_message=f_plan_json("PLAN_SUBMIT", p))
+
+    // Attach exits (stop + target). Re-calling with same id updates the order.
+    strategy.exit(exitId, from_entry=entryId, stop=p.stop, limit=p.target, alert_message=f_plan_json("PLAN_EXIT", p))
+
+    // Arm cancellation
+    activePlanKey   := p.planKey
+    planActive      := true
+    activeCancelTs  := p.cancelTs
+
+    if useAlerts
+        alert(f_plan_json("PLAN_SUBMIT", p), alert.freq_once_per_bar_close)
+
+// If the plan is active, keep exits synced (optional but helps if your plan adjusts levels)
+if planActive
+    strategy.exit(exitId, from_entry=entryId, stop=p.stop, limit=p.target, alert_message=f_plan_json("PLAN_EXIT", p))
+
+// Cancel if we hit cancelTs before fill
+shouldCancel = planActive and strategy.position_size == 0 and not na(activeCancelTs) and time_close >= activeCancelTs
+if shouldCancel
+    strategy.cancel(entryId)
+    strategy.cancel(exitId)
+
+    if useAlerts
+        alert(f_plan_json("PLAN_CANCEL", p), alert.freq_once_per_bar_close)
+
+    // Reset plan state
+    activePlanKey  := ""
+    planActive     := false
+    activeCancelTs := na
+
+// Detect fill and exit transitions for alerting + state cleanup
+filledNow = planActive and strategy.position_size != 0
+exitedNow = planActive and strategy.position_size == 0 and strategy.closedtrades > 0
+
+if filledNow and useAlerts
+    alert(f_plan_json("PLAN_FILL", p), alert.freq_once_per_bar_close)
+
+// When the position is flat after having been active, reset
+// (We treat any flat state after a closed trade as "done")
+if exitedNow
+    planActive     := false
+    activeCancelTs := na
+    // Keep activePlanKey so you don't resubmit the same planKey on the next bar.
+    // Clear it manually if your logic wants immediate re-arming.
+
+//------------------------------------------------------------------------------
+// "Exports" for Data Window / debugging
+//------------------------------------------------------------------------------
+plot(p.entry,  "Plan Entry",  display=display.data_window)
+plot(p.stop,   "Plan Stop",   display=display.data_window)
+plot(p.target, "Plan Target", display=display.data_window)
+
+// cancelTs is int; convert to float for plotting
+plot(na(p.cancelTs) ? na : float(p.cancelTs), "Plan CancelTs (ms)", display=display.data_window)
+
+// Optional visual markers
+plotchar(isNewPlan, "New Plan Submitted", "◆", location=location.top)
