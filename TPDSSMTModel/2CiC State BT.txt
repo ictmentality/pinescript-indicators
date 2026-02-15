@@ -1,5 +1,5 @@
 //@version=6
-indicator("2CiC State", shorttitle="2CiC State", overlay=true, max_labels_count=500, max_lines_count=500, dynamic_requests=true)
+strategy("2CiC State BT", shorttitle="2CiC BT", overlay=true, max_labels_count=500, max_lines_count=500, dynamic_requests=true, pyramiding=0, process_orders_on_close=true, calc_on_every_tick=true, initial_capital=50000, default_qty_type=strategy.percent_of_equity, default_qty_value=100)
 import Jaw1312/QTEngine/34 as qt
 
 // ============================================
@@ -89,6 +89,10 @@ tpd_lbl_size = switch tpd_size_str
 
 group_tpd_debug = "State Window"
 show_tpd_alert_debug = input.bool(true, "Show State Window", group=group_tpd_debug)
+
+group_bt_risk = "Backtest Risk"
+bt_account_size = input.float(50000, "Account Size", minval=1, group=group_bt_risk)
+bt_risk_pct = input.float(0.625, "Risk % Per Trade", minval=0.001, step=0.001, group=group_bt_risk)
 
 // ============================================
 // HELPERS
@@ -552,6 +556,73 @@ var array<line> persisted_rr25_lines = array.new<line>()
 var array<label> persisted_rr25_lbls = array.new<label>()
 is_m15_chart = timeframe.in_seconds(timeframe.period) == 15 * 60
 float bear_rr25_level_now = na(setup_inv_level_now) or na(m15_tcisd_level_now) ? na : (m15_tcisd_level_now - ((setup_inv_level_now - m15_tcisd_level_now) * 2.5))
+
+var int bt_last_traded_stage1_seq = 0
+var float bt_active_entry_limit = na
+var float bt_active_qty = na
+var float bt_active_stop = na
+var float bt_active_target = na
+var int bt_order_placed_ts = int(na)
+var int bt_stage3_seen_count = 0
+var int bt_orders_armed_count = 0
+var int bt_fills_count = 0
+var int bt_reject_side_count = 0
+var int bt_reject_levels_count = 0
+var int bt_cancel_expired_count = 0
+var int bt_cancel_invalidated_count = 0
+bool bt_trade_on_this_chart = not purge_is_main_now
+bool bt_within_c3_window = not na(c4_open_ts_now) and time_close < c4_open_ts_now
+bool bt_new_stage3_setup = stage3_bear and stage1_seq_now > bt_last_traded_stage1_seq
+bool bt_active_entry_limit_touched = not na(bt_active_entry_limit) and high >= bt_active_entry_limit
+string bt_active_entry_limit_text = na(bt_active_entry_limit) ? "na" : str.tostring(bt_active_entry_limit, format.mintick)
+string bt_order_placed_text = na(bt_order_placed_ts) ? "na" : str.format_time(bt_order_placed_ts, "HH:mm", syminfo.timezone)
+float bt_entry_limit_now = m15_tcisd_level_now
+float bt_failure_swing_stop_now = setup_inv_level_now
+float bt_risk_usd_now = bt_account_size * (bt_risk_pct * 0.01)
+float bt_stop_dist_now = math.abs(bt_failure_swing_stop_now - bt_entry_limit_now)
+float bt_risk_per_unit_now = bt_stop_dist_now * syminfo.pointvalue
+float bt_qty_now = bt_risk_per_unit_now > 0 ? (bt_risk_usd_now / bt_risk_per_unit_now) : na
+bool bt_valid_levels = not na(bt_entry_limit_now) and not na(bt_failure_swing_stop_now) and not na(bear_rr25_level_now) and not na(bt_qty_now) and bt_qty_now > 0
+bool bt_new_confirmed_setup = bt_new_stage3_setup and bt_trade_on_this_chart and bt_within_c3_window
+if stage3_bear
+    bt_stage3_seen_count += 1
+if bt_new_stage3_setup and not bt_trade_on_this_chart
+    bt_reject_side_count += 1
+if bt_new_confirmed_setup and not bt_valid_levels
+    bt_reject_levels_count += 1
+if strategy.position_size == 0 and bt_new_confirmed_setup and bt_valid_levels
+    bt_active_entry_limit := bt_entry_limit_now
+    bt_active_qty := bt_qty_now
+    bt_active_stop := bt_failure_swing_stop_now
+    bt_active_target := bear_rr25_level_now
+    bt_order_placed_ts := time_close
+    bt_last_traded_stage1_seq := stage1_seq_now
+    bt_orders_armed_count += 1
+if strategy.position_size == 0 and not na(bt_active_entry_limit) and not na(bt_active_qty)
+    if expired_now or invalidated_now or not bt_within_c3_window
+        strategy.cancel("S")
+        if invalidated_now
+            bt_cancel_invalidated_count += 1
+        else if expired_now or not bt_within_c3_window
+            bt_cancel_expired_count += 1
+        bt_active_entry_limit := na
+        bt_active_qty := na
+        bt_active_stop := na
+        bt_active_target := na
+        bt_order_placed_ts := int(na)
+    else
+        strategy.entry("S", strategy.short, qty=bt_active_qty, limit=bt_active_entry_limit, comment="2CiC Stage3 LMT")
+if strategy.position_size < 0 and not na(bt_active_stop) and not na(bt_active_target)
+    strategy.exit("S-X", "S", stop=bt_active_stop, limit=bt_active_target)
+if strategy.position_size < 0 and strategy.position_size[1] == 0
+    bt_fills_count += 1
+if strategy.position_size == 0 and strategy.position_size[1] < 0
+    bt_active_entry_limit := na
+    bt_active_qty := na
+    bt_active_stop := na
+    bt_active_target := na
+    bt_order_placed_ts := int(na)
+
 active_setup_confirmed_latched := stage3_seq_now > stage3_seq_at_last_stage1
 if stage1_bear and not na(stage1_ts_now) and not na(stage1_price_now)
     int stage1_draw_ts = stage1_ts_now
@@ -695,14 +766,11 @@ if (expired_now or invalidated_now) and not stage1_bear and not active_setup_con
         label.delete(bear_rr25_lbl)
         bear_rr25_lbl := na
 
-alertcondition(stage1_bear, "2CiC Stage 1 Bearish TPD", "Stage 1: HTF C3 open with bearish valid TPD")
-alertcondition(stage2_bear, "2CiC Stage 2 Bearish Valid TPD/SSMT", "Stage 2: Bearish purge complete (Valid TPD/SSMT)")
-alertcondition(stage3_bear, "2CiC Stage 3 Bearish Setup Confirmed", "Stage 3: Bearish setup confirmed (m15 tCISD)")
 
 // ============================================
 // DEBUG TABLE
 // ============================================
-var table sm_state_tbl = table.new(position.bottom_right, 2, 8, border_width=1)
+var table sm_state_tbl = table.new(position.bottom_right, 2, 18, border_width=1)
 
 if barstate.islast
     if show_tpd_alert_debug
@@ -724,7 +792,27 @@ if barstate.islast
         table.cell(sm_state_tbl, 1, 6, f_yn(dbg_c2_high_swept) + "/" + f_yn(dbg_purge_seen), text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(sm_state_tbl, 0, 7, "S1/S2/S3/I/E", text_color=color.black, bgcolor=body_bg, text_size=size.small)
         table.cell(sm_state_tbl, 1, 7, f_yn(stage1_bear) + "/" + f_yn(stage2_bear) + "/" + f_yn(stage3_bear) + "/" + f_yn(invalidated_now) + "/" + f_yn(expired_now), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 8, "BT S3 Seen", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 8, str.tostring(bt_stage3_seen_count), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 9, "BT Orders Armed", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 9, str.tostring(bt_orders_armed_count), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 10, "BT Fills", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 10, str.tostring(bt_fills_count), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 11, "BT Rej Side", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 11, str.tostring(bt_reject_side_count), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 12, "BT Rej Levels", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 12, str.tostring(bt_reject_levels_count), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 13, "BT Can Exp", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 13, str.tostring(bt_cancel_expired_count), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 14, "BT Can Inv", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 14, str.tostring(bt_cancel_invalidated_count), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 15, "BT Active Lmt", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 15, bt_active_entry_limit_text, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 16, "BT Hit H>=Lmt", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 16, f_yn(bt_active_entry_limit_touched), text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 0, 17, "Order Placed", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(sm_state_tbl, 1, 17, bt_order_placed_text, text_color=color.black, bgcolor=body_bg, text_size=size.small)
     else
-        table.clear(sm_state_tbl, 0, 0, 1, 7)
+        table.clear(sm_state_tbl, 0, 0, 1, 17)
 
 plot(na)

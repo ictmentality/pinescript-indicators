@@ -9,6 +9,7 @@ TPD/SSMT TODO
 
 
 
+
 Expansion Candle Invalidation:
 Expansion Invalidation level = 50% of C2 on the failure-swing asset.
 - Use 50% of the whole candle range when the C2 body is larger than the upper wick and lower wick combined.
@@ -41,6 +42,7 @@ Potential Rule Adds:
 - Above/Below True Open
 - If tCISD is triggered in first half of C3, then tCISD retest must occur during first half of C3 too (11/17/25 SIL1!)
 - If the tCISD is triggered in the first 1/3 of C3, require tCISD confirmation on other asset
+- Consider LTF 2022 model setup on Purge asset 
 
 
 A+ Setup
