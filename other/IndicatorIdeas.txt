@@ -12,3 +12,4 @@ QT Fractal Model (Visual Representation of my favorite QT Model, W.SSMT (H1) -> 
 
 Phase of Price Indicator (AMDX, focus higher time frames)
 
+SSMT Tracker Once QTEngine handles all Elastic Cycles, Create a table display tracking HTF SSMT's across Main Triads

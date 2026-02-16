@@ -1,0 +1,855 @@
+//@version=6
+indicator("Real HTF Key", overlay=true, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+//=============================================================================
+// KEY LEVEL ENGINE (v1)
+// - Time-anchored drawing (xloc.bar_time) like QT Engine
+// - Deterministic IDs for dedupe
+// - Generic line-level store + lifecycle state
+// - Includes Swing H/L producer as the first module
+//
+// Notes:
+// - This is an ENGINE SCRIPT (single file) meant to be extended with other modules (FVG, Opens, NDOG/NWOG, etc.).
+// - Swing behavior preserved from your working indicator:
+//     * 3-candle pivot (L=1, R=1) created only on Candle 3 close
+//     * STRICT purge: High purged if high > level, Low purged if low < level (no equals)
+//     * Intrabar: dim all newly-purged levels; at bar close keep only the winner
+//     * Only ONE persistent tagged winner; delete previous winner on next purge event
+//=============================================================================
+
+//=============================================================================
+// Global Engine Inputs
+//=============================================================================
+groupEngine = "Engine"
+int engineKeepLines = input.int(200, "Engine: Keep last N line-levels", minval=50, maxval=500, group=groupEngine)
+int engineKeepZones = input.int(200, "Engine: Keep last N zone-levels", minval=50, maxval=500, group=groupEngine)
+
+//=============================================================================
+// Swing Module Inputs (module-local; engine-safe)
+//=============================================================================
+groupSwing = "Swing H/L (Module)"
+bool swingEnabled = input.bool(true, "Enable Swing H/L", group=groupSwing)
+int  swingKeepN   = input.int(50, "Swing: Keep last N swing levels", minval=1, maxval=200, group=groupSwing)
+
+groupSwingHi = "Swing High Line (Module)"
+color swingHiColor = input.color(color.blue, "Color", group=groupSwingHi)
+
+groupSwingLo = "Swing Low Line (Module)"
+color swingLoColor = input.color(color.red, "Color", group=groupSwingLo)
+
+groupSwingTag = "Swing Tag (Module)"
+bool swingShowTagLabel = input.bool(true, "Show Tag Label (x)", group=groupSwingTag)
+
+//=============================================================================
+// FVG Module Inputs (box support v1)
+//=============================================================================
+groupFVG = "FVG (Module)"
+bool fvgEnabled = input.bool(true, "Enable FVG", group=groupFVG)
+int  fvgDays    = input.int(1, "Days", minval=0, maxval=50, group=groupFVG)
+int  fvgHardCap = input.int(480, "Hard Cap (Safety)", minval=50, maxval=500, group=groupFVG)
+bool fvg1800Only = input.bool(false, "18:00 Only", group=groupFVG)
+
+groupBull = "FVG Bullish"
+color bullBg     = input.color(color.new(color.green, 85), "Zone fill", group=groupBull)
+color bullMidCol = input.color(color.new(color.green, 0),  "Midline",   group=groupBull)
+
+groupBear = "FVG Bearish"
+color bearBg     = input.color(color.new(color.red, 85), "Zone fill", group=groupBear)
+color bearMidCol = input.color(color.new(color.red, 0),  "Midline",   group=groupBear)
+
+// Time helpers (session-day boundary reference)
+var int    DAY_MS = 24 * 60 * 60 * 1000
+var string TZ     = "America/New_York"
+
+// Session-day start = 18:00 NY time (matches your QT day boundary)
+f_session_start(_t) =>
+    int y = year(_t, TZ)
+    int m = month(_t, TZ)
+    int d = dayofmonth(_t, TZ)
+    int candidate = timestamp(TZ, y, m, d, 18, 0)
+    _t >= candidate ? candidate : (candidate - DAY_MS)
+
+
+
+// Visual constants (module-local; later these can migrate into engine style tables)
+int SW_HI_OPACITY_PCT = 75
+int SW_LO_OPACITY_PCT = 75
+int SW_HI_WIDTH       = 1
+int SW_LO_WIDTH       = 1
+
+//=============================================================================
+// Helpers (engine-wide)
+//=============================================================================
+colorWithOpacity(color base, int opacityPct) =>
+    // opacityPct: 1..100 where 100 = fully opaque.
+    // Pine uses transparency: 0..100 where 100 = fully invisible.
+    int transp = 100 - opacityPct
+    color.new(base, transp)
+
+tagOpacityFromNormal(int normalOpacityPct) =>
+    int(math.round(normalOpacityPct * 0.5))
+
+rightX() =>
+    // Matches your FVG convention: use timenow in realtime, otherwise bar time.
+    int(barstate.isrealtime ? timenow : time)
+
+// Deterministic IDs (future engine dedupe)
+// id = typeKey|tf|anchorTime|priceA|priceB (priceB omitted for lines by passing na)
+makeId(string typeKey, string tfKey, int anchorTime, float priceA, float priceB) =>
+    string b = na(priceB) ? "" : "|" + str.tostring(priceB, format.mintick)
+    typeKey + "|" + tfKey + "|" + str.tostring(anchorTime) + "|" + str.tostring(priceA, format.mintick) + b
+
+//=============================================================================
+// Engine Type
+//=============================================================================
+type KeyLevelEngine
+    // Line-level store (v1)
+    line[]   ln_handle
+    label[]  ln_tagLabel     // optional per-level label handle (unused v1; reserved)
+    string[] ln_id
+    string[] ln_typeKey
+    string[] ln_tfKey
+    int[]    ln_anchorTime
+    int[]    ln_x1Time
+    float[]  ln_priceA
+    float[]  ln_priceB
+    color[]  ln_baseColor
+    int[]    ln_opacityPct
+    int[]    ln_width
+    int[]    ln_state        // 0=Active, 1=Triggered/Purged
+    int[]    ln_stateTime    // bar time when first triggered/purged
+
+
+    // Zone-level store (v1) - boxes + optional midline
+    box[]    zn_box
+    line[]   zn_mid
+    string[] zn_id
+    string[] zn_typeKey
+    string[] zn_tfKey
+    int[]    zn_anchorTime
+    int[]    zn_leftTime
+    float[]  zn_top
+    float[]  zn_bottom
+    float[]  zn_midPrice
+    color[]  zn_bgColor
+    color[]  zn_borderColor
+    color[]  zn_midColor
+    int[]    zn_midWidth
+    int[]    zn_state        // 0=Active, 1=Triggered (reserved)
+    int[]    zn_stateTime    // bar time when first triggered (reserved)
+
+    // Focus/Tag (single focus at a time)
+    string   focus_id
+    line     focus_line
+    label    focus_label
+
+    // Swing module: "persistent tagged" (survivor from last closed bar) and "winner within bar"
+    string   lastClosed_id
+    string   barLast_id
+
+//=============================================================================
+// Engine Constructor
+//=============================================================================
+engineNew() =>
+    KeyLevelEngine.new(
+        array.new_line(),
+        array.new_label(),
+        array.new_string(),
+        array.new_string(),
+        array.new_string(),
+        array.new_int(),
+        array.new_int(),
+        array.new_float(),
+        array.new_float(),
+        array.new_color(),
+        array.new_int(),
+        array.new_int(),
+        array.new_int(),
+        array.new_int(),
+        array.new_box(),
+        array.new_line(),
+        array.new_string(),
+        array.new_string(),
+        array.new_string(),
+        array.new_int(),
+        array.new_int(),
+        array.new_float(),
+        array.new_float(),
+        array.new_float(),
+        array.new_color(),
+        array.new_color(),
+        array.new_color(),
+        array.new_int(),
+        array.new_int(),
+        array.new_int(),
+        "", na, na,
+        "", ""
+    )
+
+var KeyLevelEngine ENG = engineNew()
+
+//=============================================================================
+// Engine Methods
+//=============================================================================
+method findById(KeyLevelEngine this, string id) =>
+    int idx = na
+    int n = array.size(this.ln_id)
+    int j = 0
+    while j < n
+        if array.get(this.ln_id, j) == id
+            idx := j
+            j := n
+        else
+            j += 1
+    idx
+
+
+method findZoneById(KeyLevelEngine this, string id) =>
+    int idx = na
+    int n = array.size(this.zn_id)
+    int j = 0
+    while j < n
+        if array.get(this.zn_id, j) == id
+            idx := j
+            j := n
+        else
+            j += 1
+    idx
+
+method removeZoneAt(KeyLevelEngine this, int idx) =>
+    box bx = array.get(this.zn_box, idx)
+    line ln = array.get(this.zn_mid, idx)
+
+    box.delete(bx)
+    if not na(ln)
+        line.delete(ln)
+
+    array.remove(this.zn_box, idx)
+    array.remove(this.zn_mid, idx)
+    array.remove(this.zn_id, idx)
+    array.remove(this.zn_typeKey, idx)
+    array.remove(this.zn_tfKey, idx)
+    array.remove(this.zn_anchorTime, idx)
+    array.remove(this.zn_leftTime, idx)
+    array.remove(this.zn_top, idx)
+    array.remove(this.zn_bottom, idx)
+    array.remove(this.zn_midPrice, idx)
+    array.remove(this.zn_bgColor, idx)
+    array.remove(this.zn_borderColor, idx)
+    array.remove(this.zn_midColor, idx)
+    array.remove(this.zn_midWidth, idx)
+    array.remove(this.zn_state, idx)
+    array.remove(this.zn_stateTime, idx)
+
+    0
+
+method trimKeepZones(KeyLevelEngine this, int keepN) =>
+    while array.size(this.zn_box) > keepN
+        this.removeZoneAt(0)
+    0
+
+method addZoneLevel(KeyLevelEngine this, string id, string typeKey, string tfKey, int anchorTime, int leftTime, float top, float bottom, float midPrice, color bgCol, color borderCol, color midCol, int midWidth) =>
+    int idx = this.findZoneById(id)
+    int rx  = rightX()
+
+    box  bx = na
+    line ln = na
+
+    if na(idx)
+        bx := box.new(
+            left   = leftTime,
+            right  = rx,
+            top    = top,
+            bottom = bottom,
+            xloc         = xloc.bar_time,
+            extend       = extend.none,
+            bgcolor      = bgCol,
+            border_color = borderCol
+        )
+        ln := line.new(
+            x1     = leftTime,
+            y1     = midPrice,
+            x2     = rx,
+            y2     = midPrice,
+            xloc   = xloc.bar_time,
+            extend = extend.none,
+            color  = midCol,
+            width  = midWidth
+        )
+
+        array.push(this.zn_box, bx)
+        array.push(this.zn_mid, ln)
+        array.push(this.zn_id, id)
+        array.push(this.zn_typeKey, typeKey)
+        array.push(this.zn_tfKey, tfKey)
+        array.push(this.zn_anchorTime, anchorTime)
+        array.push(this.zn_leftTime, leftTime)
+        array.push(this.zn_top, top)
+        array.push(this.zn_bottom, bottom)
+        array.push(this.zn_midPrice, midPrice)
+        array.push(this.zn_bgColor, bgCol)
+        array.push(this.zn_borderColor, borderCol)
+        array.push(this.zn_midColor, midCol)
+        array.push(this.zn_midWidth, midWidth)
+        array.push(this.zn_state, 0)
+        array.push(this.zn_stateTime, na)
+    else
+        bx := array.get(this.zn_box, idx)
+        ln := array.get(this.zn_mid, idx)
+
+        array.set(this.zn_typeKey, idx, typeKey)
+        array.set(this.zn_tfKey, idx, tfKey)
+        array.set(this.zn_anchorTime, idx, anchorTime)
+        array.set(this.zn_leftTime, idx, leftTime)
+        array.set(this.zn_top, idx, top)
+        array.set(this.zn_bottom, idx, bottom)
+        array.set(this.zn_midPrice, idx, midPrice)
+        array.set(this.zn_bgColor, idx, bgCol)
+        array.set(this.zn_borderColor, idx, borderCol)
+        array.set(this.zn_midColor, idx, midCol)
+        array.set(this.zn_midWidth, idx, midWidth)
+
+        box.set_left(bx, leftTime)
+        box.set_right(bx, rx)
+        box.set_top(bx, top)
+        box.set_bottom(bx, bottom)
+        box.set_bgcolor(bx, bgCol)
+        box.set_border_color(bx, borderCol)
+
+        line.set_x1(ln, leftTime)
+        line.set_x2(ln, rx)
+        line.set_y1(ln, midPrice)
+        line.set_y2(ln, midPrice)
+        line.set_color(ln, midCol)
+        line.set_width(ln, midWidth)
+
+    0
+
+method updateZonesToRight(KeyLevelEngine this) =>
+    int n  = array.size(this.zn_box)
+    int i  = 0
+    int rx = rightX()
+
+    box bx = na
+    line ln = na
+
+    while i < n
+        bx := array.get(this.zn_box, i)
+        ln := array.get(this.zn_mid, i)
+
+        box.set_right(bx, rx)
+        if not na(ln)
+            line.set_x2(ln, rx)
+        i += 1
+    0
+
+method clearFocus(KeyLevelEngine this) =>
+    if not na(this.focus_label)
+        label.delete(this.focus_label)
+    this.focus_label := na
+    this.focus_line  := na
+    this.focus_id    := ""
+
+    0
+method removeLineAt(KeyLevelEngine this, int idx) =>
+    line ln = array.get(this.ln_handle, idx)
+    string id = array.get(this.ln_id, idx)
+
+    // Clear focus if this is the focused level
+    if (not na(this.focus_line)) and (ln == this.focus_line)
+        this.clearFocus()
+
+    // Clear Swing persistent refs if needed
+    if this.lastClosed_id == id
+        this.lastClosed_id := ""
+    if this.barLast_id == id
+        this.barLast_id := ""
+
+    // Delete objects
+    line.delete(ln)
+    label lbl = array.get(this.ln_tagLabel, idx)
+    if not na(lbl)
+        label.delete(lbl)
+
+    // Remove arrays
+    array.remove(this.ln_handle, idx)
+    array.remove(this.ln_tagLabel, idx)
+    array.remove(this.ln_id, idx)
+    array.remove(this.ln_typeKey, idx)
+    array.remove(this.ln_tfKey, idx)
+    array.remove(this.ln_anchorTime, idx)
+    array.remove(this.ln_x1Time, idx)
+    array.remove(this.ln_priceA, idx)
+    array.remove(this.ln_priceB, idx)
+    array.remove(this.ln_baseColor, idx)
+    array.remove(this.ln_opacityPct, idx)
+    array.remove(this.ln_width, idx)
+    array.remove(this.ln_state, idx)
+    array.remove(this.ln_stateTime, idx)
+
+    0
+method trimKeepLines(KeyLevelEngine this, int keepN) =>
+    while array.size(this.ln_handle) > keepN
+        this.removeLineAt(0)
+
+    0
+method setFocus(KeyLevelEngine this, string id, bool showLabel) =>
+    // Moves the single focus label to `id`
+    int idx = this.findById(id)
+    if na(idx)
+        this.clearFocus()
+    else
+        // clear old
+        this.clearFocus()
+
+        line  ln  = array.get(this.ln_handle, idx)
+        float a   = array.get(this.ln_priceA, idx)
+        string tk = array.get(this.ln_typeKey, idx)
+        int   x1  = array.get(this.ln_x1Time, idx)
+
+        this.focus_line := ln
+        this.focus_id   := id
+
+        if showLabel
+            bool isHi = (tk == "SWING_HIGH")
+            float yLab = isHi ? (a + syminfo.mintick * 4.0) : (a - syminfo.mintick * 4.0)
+            this.focus_label := label.new(x1, yLab, "x",
+                                          xloc=xloc.bar_time, yloc=yloc.price,
+                                          color=color.new(color.white, 100),
+                                          style=label.style_label_left,
+                                          textcolor=color.black, size=size.tiny,
+                                          textalign=text.align_left)
+        else
+            this.focus_label := na
+
+    0
+method addLineLevel(KeyLevelEngine this, string id, string typeKey, string tfKey, int anchorTime, int x1Time, float priceA, color base, int opacityPct, int widthPx) =>
+    // Dedupe by id
+    int idx = this.findById(id)
+    if na(idx)
+        line ln = line.new(x1Time, priceA, rightX(), priceA,
+                           xloc=xloc.bar_time, extend=extend.none,
+                           color=colorWithOpacity(base, opacityPct),
+                           width=widthPx, style=line.style_solid)
+        array.push(this.ln_handle, ln)
+        array.push(this.ln_tagLabel, na)
+        array.push(this.ln_id, id)
+        array.push(this.ln_typeKey, typeKey)
+        array.push(this.ln_tfKey, tfKey)
+        array.push(this.ln_anchorTime, anchorTime)
+        array.push(this.ln_x1Time, x1Time)
+        array.push(this.ln_priceA, priceA)
+        array.push(this.ln_priceB, na)
+        array.push(this.ln_baseColor, base)
+        array.push(this.ln_opacityPct, opacityPct)
+        array.push(this.ln_width, widthPx)
+        array.push(this.ln_state, 0)
+        array.push(this.ln_stateTime, na)
+    else
+        // Update existing in-place (future-proof for live edits)
+        line ln = array.get(this.ln_handle, idx)
+        array.set(this.ln_baseColor, idx, base)
+        array.set(this.ln_opacityPct, idx, opacityPct)
+        array.set(this.ln_width, idx, widthPx)
+        array.set(this.ln_priceA, idx, priceA)
+        array.set(this.ln_x1Time, idx, x1Time)
+        line.set_x1(ln, x1Time)
+        line.set_y1(ln, priceA)
+        line.set_y2(ln, priceA)
+
+    0
+method markTriggered(KeyLevelEngine this, int idx, int atTime) =>
+    array.set(this.ln_state, idx, 1)
+    array.set(this.ln_stateTime, idx, atTime)
+
+    0
+method updateRender(KeyLevelEngine this) =>
+    int n = array.size(this.ln_handle)
+    int i = 0
+    while i < n
+        line  ln   = array.get(this.ln_handle, i)
+        float a    = array.get(this.ln_priceA, i)
+        string tK  = array.get(this.ln_typeKey, i)
+        bool typeOn = true
+        if (tK == "SWING_HIGH") or (tK == "SWING_LOW")
+            typeOn := swingEnabled
+
+        color base = array.get(this.ln_baseColor, i)
+        int   op   = array.get(this.ln_opacityPct, i)
+        int   w    = array.get(this.ln_width, i)
+        int   st   = array.get(this.ln_state, i)
+
+        // extend right
+        line.set_x2(ln, rightX())
+        line.set_y1(ln, a)
+        line.set_y2(ln, a)
+
+        // dim if triggered/purged
+        int opBase = (st == 1) ? tagOpacityFromNormal(op) : op
+        int opUse  = typeOn ? opBase : 0
+        line.set_color(ln, colorWithOpacity(base, opUse))
+        line.set_width(ln, w)
+        line.set_style(ln, line.style_solid)
+
+        i += 1
+
+    0
+method onNewBar(KeyLevelEngine this) =>
+    this.barLast_id := ""
+
+    0
+
+//=============================================================================
+//=============================================================================
+//=============================================================================
+// FVG Producer (Module) - Box support only (v1)
+// - Keeps original behavior: create FVG boxes + midlines, prune by session-day window,
+//   enforce hard cap, and pin right edge to current market time.
+//=============================================================================
+fvgPruneOlderThan(int cutoff) =>
+    int idx = array.size(ENG.zn_box) - 1
+    string tK = ""
+    bool isFVG = false
+    int endT = na
+
+    while idx >= 0
+        tK := array.get(ENG.zn_typeKey, idx)
+        isFVG := (tK == "FVG_BULL") or (tK == "FVG_BEAR")
+        if isFVG
+            endT := array.get(ENG.zn_anchorTime, idx)
+            if endT < cutoff
+                ENG.removeZoneAt(idx)
+        idx -= 1
+    0
+
+fvgTrimHardcap() =>
+    int fvgCount = 0
+    int nAll = array.size(ENG.zn_box)
+    int i = 0
+    string tK = ""
+
+    int idxOld = na
+    int j = 0
+    int nNow = 0
+    string tK2 = ""
+
+    while i < nAll
+        tK := array.get(ENG.zn_typeKey, i)
+        if (tK == "FVG_BULL") or (tK == "FVG_BEAR")
+            fvgCount += 1
+        i += 1
+
+    while fvgCount > fvgHardCap
+        idxOld := na
+        j := 0
+        nNow := array.size(ENG.zn_box)
+
+        while j < nNow
+            tK2 := array.get(ENG.zn_typeKey, j)
+            if (tK2 == "FVG_BULL") or (tK2 == "FVG_BEAR")
+                idxOld := j
+                j := nNow
+            else
+                j += 1
+
+        if not na(idxOld)
+            ENG.removeZoneAt(idxOld)
+            fvgCount -= 1
+        else
+            fvgCount := fvgHardCap
+    0
+
+fvgClearAll() =>
+    int idx = array.size(ENG.zn_box) - 1
+    string tK = ""
+    bool isFVG = false
+
+    while idx >= 0
+        tK := array.get(ENG.zn_typeKey, idx)
+        isFVG := (tK == "FVG_BULL") or (tK == "FVG_BEAR")
+        if isFVG
+            ENG.removeZoneAt(idx)
+        idx -= 1
+    0
+
+fvgProcess() =>
+    int sessionStartNow = f_session_start(timenow)
+    int cutoff = fvgDays == 0 ? int(na) : (sessionStartNow - (fvgDays - 1) * DAY_MS)
+    bool isNewBar = ta.change(time) != 0
+
+    color noBorder = color.new(color.black, 100)
+
+    bool bullFVG = false
+    bool bearFVG = false
+    bool c2Is1800 = false
+    bool passTimeFilter = false
+    int leftTime = na
+    int endTime  = na
+    bool inWindow = false
+    string tfKey = timeframe.period
+
+    float top = na
+    float bottom = na
+    float mid = na
+    string id = ""
+
+    if fvgEnabled
+        if fvgDays == 0
+            fvgClearAll()
+        else
+            fvgPruneOlderThan(cutoff)
+
+            if isNewBar
+                bullFVG := low[1] > high[3]
+                bearFVG := high[1] < low[3]
+                c2Is1800 := (hour(time[2], TZ) == 18) and (minute(time[2], TZ) == 0)
+                passTimeFilter := (not fvg1800Only) or c2Is1800
+
+                leftTime := time[3]
+                endTime  := time_close[1]
+                inWindow := endTime >= cutoff
+
+                if inWindow and passTimeFilter and bullFVG
+                    top    := low[1]
+                    bottom := high[3]
+                    mid    := (top + bottom) / 2.0
+
+                    id := makeId("FVG_BULL", tfKey, endTime, top, bottom)
+                    ENG.addZoneLevel(id, "FVG_BULL", tfKey, endTime, leftTime, top, bottom, mid, bullBg, noBorder, bullMidCol, 1)
+                    fvgTrimHardcap()
+
+                if inWindow and passTimeFilter and bearFVG
+                    top    := low[3]
+                    bottom := high[1]
+                    mid    := (top + bottom) / 2.0
+
+                    id := makeId("FVG_BEAR", tfKey, endTime, top, bottom)
+                    ENG.addZoneLevel(id, "FVG_BEAR", tfKey, endTime, leftTime, top, bottom, mid, bearBg, noBorder, bearMidCol, 1)
+                    fvgTrimHardcap()
+
+            // Keep all boxes + midlines pinned to current market time
+            ENG.updateZonesToRight()
+    0
+
+// Swing Producer (Module)
+//=============================================================================
+swingDetectAndEmit() =>
+    // NOTE: keep type declarations at function scope (avoid parser issues inside nested blocks).
+    bool   canCheck    = bar_index >= 2
+    bool   isSwingHigh = false
+    bool   isSwingLow  = false
+    string tfKey       = timeframe.period
+    int    pivT        = na
+    float  lvl         = na
+    string id          = ""
+
+    int    swingCount  = 0
+    int    nAll        = 0
+    int    k           = 0
+    int    idxOld      = na
+    int    j           = 0
+    int    nNow        = 0
+    string tK          = ""
+    string tK2         = ""
+
+    if swingEnabled
+        // 3-candle pivot, created only when Candle 3 closes
+        if canCheck and barstate.isconfirmed
+            isSwingHigh := (high[1] > high[2]) and (high[1] > high[0])
+            isSwingLow  := (low[1]  < low[2])  and (low[1]  < low[0])
+
+            if isSwingHigh
+                pivT := time[1]
+                lvl  := high[1]
+                id   := makeId("SWING_HIGH", tfKey, pivT, lvl, na)
+                ENG.addLineLevel(id, "SWING_HIGH", tfKey, pivT, pivT, lvl, swingHiColor, SW_HI_OPACITY_PCT, SW_HI_WIDTH)
+
+            if isSwingLow
+                pivT := time[1]
+                lvl  := low[1]
+                id   := makeId("SWING_LOW", tfKey, pivT, lvl, na)
+                ENG.addLineLevel(id, "SWING_LOW", tfKey, pivT, pivT, lvl, swingLoColor, SW_LO_OPACITY_PCT, SW_LO_WIDTH)
+
+        // Module cap: keep only last swingKeepN swing levels (delete oldest swing first)
+        swingCount := 0
+        nAll := array.size(ENG.ln_handle)
+        k := 0
+        while k < nAll
+            tK := array.get(ENG.ln_typeKey, k)
+            if (tK == "SWING_HIGH") or (tK == "SWING_LOW")
+                swingCount += 1
+            k += 1
+
+        while swingCount > swingKeepN
+            idxOld := na
+            j := 0
+            nNow := array.size(ENG.ln_handle)
+            while j < nNow
+                tK2 := array.get(ENG.ln_typeKey, j)
+                if (tK2 == "SWING_HIGH") or (tK2 == "SWING_LOW")
+                    idxOld := j
+                    j := nNow
+                else
+                    j += 1
+            if not na(idxOld)
+                ENG.removeLineAt(idxOld)
+                swingCount -= 1
+            else
+                swingCount := swingKeepN
+
+swingDetectPurgesAndTag() =>
+    // Single-pass / scalar-only winner selection (no temp arrays)
+    bool   bestHighFound = false
+    string bestHighId    = ""
+    float  bestHighLvl   = na
+    int    bestHighPivT  = na
+    float  bestHighPen   = na
+
+    bool   bestLowFound  = false
+    string bestLowId     = ""
+    float  bestLowLvl    = na
+    int    bestLowPivT   = na
+    float  bestLowPen    = na
+
+    int    n             = 0
+    int    i             = 0
+    string tK            = ""
+    bool   isSwing       = false
+    int    st            = 0
+    float  lvl           = na
+    bool   isH           = false
+    bool   purNow        = false
+    string id            = ""
+    int    pivT          = na
+    float  pen           = na
+
+    bool   anyFound      = false
+    bool   chooseHigh    = false
+    string winId         = ""
+
+    if swingEnabled
+        n := array.size(ENG.ln_handle)
+        i := 0
+        while i < n
+            tK := array.get(ENG.ln_typeKey, i)
+            isSwing := (tK == "SWING_HIGH") or (tK == "SWING_LOW")
+            if isSwing
+                st := array.get(ENG.ln_state, i)
+                if st == 0
+                    lvl := array.get(ENG.ln_priceA, i)
+                    isH := (tK == "SWING_HIGH")
+                    purNow := isH ? (high > lvl) : (low < lvl)  // STRICT: no equals
+
+                    if purNow
+                        ENG.markTriggered(i, time)
+
+                        id   := array.get(ENG.ln_id, i)
+                        pivT := array.get(ENG.ln_x1Time, i)
+                        pen  := isH ? (high - lvl) : (lvl - low)
+
+                        // Realtime alerts only; one per level.
+                        if barstate.isrealtime
+                            string side = isH ? "Swing High" : "Swing Low"
+                            string msg  = str.format("{0} purged | {1} {2} | level: {3}", side, syminfo.ticker, timeframe.period, str.tostring(lvl, format.mintick))
+                            alert(msg, alert.freq_all)
+
+                        if isH
+                            // Best high = highest level; tie -> newer pivot time
+                            if (not bestHighFound) or (lvl > bestHighLvl) or ((lvl == bestHighLvl) and (pivT > bestHighPivT))
+                                bestHighFound := true
+                                bestHighId    := id
+                                bestHighLvl   := lvl
+                                bestHighPivT  := pivT
+                                bestHighPen   := pen
+                        else
+                            // Best low = lowest level; tie -> newer pivot time
+                            if (not bestLowFound) or (lvl < bestLowLvl) or ((lvl == bestLowLvl) and (pivT > bestLowPivT))
+                                bestLowFound := true
+                                bestLowId    := id
+                                bestLowLvl   := lvl
+                                bestLowPivT  := pivT
+                                bestLowPen   := pen
+            i += 1
+
+        anyFound := bestHighFound or bestLowFound
+        if anyFound
+            // Delete last-closed tagged survivor on FIRST purge event of the bar
+            // (barLast_id resets on barstate.isnew)
+            if (ENG.lastClosed_id != "") and (ENG.barLast_id == "")
+                int delIdx = ENG.findById(ENG.lastClosed_id)
+                if not na(delIdx)
+                    ENG.removeLineAt(delIdx)
+                ENG.lastClosed_id := ""
+
+            // Choose winner for THIS update
+            chooseHigh := false
+            if bestHighFound and bestLowFound
+                if bestHighPen > bestLowPen
+                    chooseHigh := true
+                else if bestLowPen > bestHighPen
+                    chooseHigh := false
+                else
+                    chooseHigh := bestHighPivT >= bestLowPivT
+            else
+                chooseHigh := bestHighFound
+
+            winId := chooseHigh ? bestHighId : bestLowId
+
+            ENG.setFocus(winId, swingShowTagLabel)
+            ENG.barLast_id := winId
+
+swingBarCloseCleanup() =>
+    int    idx     = 0
+    string tK      = ""
+    bool   isSwing = false
+    int    st      = 0
+    int    stT     = 0
+    string id      = ""
+
+    if swingEnabled
+        if barstate.isconfirmed and (ENG.barLast_id != "")
+            // Delete all other swing levels that were first purged on THIS bar time, except the winner.
+            idx := array.size(ENG.ln_handle) - 1
+            while idx >= 0
+                tK := array.get(ENG.ln_typeKey, idx)
+                isSwing := (tK == "SWING_HIGH") or (tK == "SWING_LOW")
+                if isSwing
+                    st  := array.get(ENG.ln_state, idx)
+                    stT := array.get(ENG.ln_stateTime, idx)
+                    id  := array.get(ENG.ln_id, idx)
+
+                    if (st == 1) and (stT == time) and (id != ENG.barLast_id)
+                        ENG.removeLineAt(idx)
+                idx -= 1
+
+            // Winner becomes the persistent tagged survivor until another purge event
+            ENG.lastClosed_id := ENG.barLast_id
+
+//=============================================================================
+// Main Loop
+//=============================================================================
+if barstate.isnew
+    ENG.onNewBar()
+
+// Producers
+fvgProcess()
+swingDetectAndEmit()
+swingDetectPurgesAndTag()
+
+// If Swing module is disabled, clear Swing focus label so it doesn't hang around
+if (not swingEnabled) and (ENG.focus_id != "")
+    int _fIdx = ENG.findById(ENG.focus_id)
+    if not na(_fIdx)
+        string _tK = array.get(ENG.ln_typeKey, _fIdx)
+        if (_tK == "SWING_HIGH") or (_tK == "SWING_LOW")
+            ENG.clearFocus()
+
+// Engine render pass (single pass for all modules)
+ENG.updateRender()
+
+// Bar-close cleanup
+swingBarCloseCleanup()
+
+// Global safety cap (engine-level)
+ENG.trimKeepLines(engineKeepLines)
+ENG.trimKeepZones(engineKeepZones)
