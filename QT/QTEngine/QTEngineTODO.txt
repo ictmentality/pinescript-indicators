@@ -1,0 +1,11 @@
+QTEngine TODO
+1. Elastic Cycle handling (should export the same thing as the Fixed Cycles)
+2. Test Weekly and Monthly Cycle Exports from QTEngine
+3. Add Dyad SSMT module Fixed Cycles
+4. Test SSMT for Dyads for all Fixed Cycles
+5. Add Dyad SSMT module Elastic Cycles
+6. Test SSMT for Dyads for all Elastic Cycles
+7. Add Triad SSMT Module Fixed Cycles
+8. Test SSMT for Triads for all Fixed Cycles
+9. Add Triad SSMT Module Elastic Cycles
+10. Test SSMT for Triads for all Elastic Cycles

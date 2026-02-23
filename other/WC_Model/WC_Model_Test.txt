@@ -1,5 +1,5 @@
 //@version=6
-indicator("Weekly Cycle", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("WC_Model_Test", overlay=true, max_lines_count=500, max_labels_count=500, dynamic_requests=true)
 
 // ============================================================================
 // CONSTANTS
@@ -44,11 +44,8 @@ trueOpenStyleStr = input.string("Dashed", "Q2 Open Style", options=["Solid","Das
 
 groupSSMT = "WEEKLY SSMT (ES/NQ)"
 showWeeklyBearSSMT = input.bool(false, "Show Bearish W.SSMT (Triad)", group=groupSSMT)
-showWeeklyBullSSMT = input.bool(false, "Show Bullish W.SSMT (Triad)", group=groupSSMT)
 showWeeklyBearHSSMT = input.bool(false, "Show Bearish W.HSSMT (Triad)", group=groupSSMT)
 showWeeklyBearBoth = input.bool(false, "Show Both (Prefer W.SSMT)", group=groupSSMT)
-showWeeklyBullHSSMT = input.bool(false, "Show Bullish W.HSSMT (Triad)", group=groupSSMT)
-showWeeklyBullBoth = input.bool(false, "Show Bullish Both (Prefer W.SSMT)", group=groupSSMT)
 
 // TPD [JAW] asset selection (Triad/Dyad)
 tr1B = true, st4 = "OANDA:XAUUSD", st5 = "OANDA:XAGUSD", st6 = "OANDA:XPTUSD"
@@ -133,9 +130,53 @@ dyad_m5_sym2 = input.symbol("", "&", group=groupSSMTDyad, inline="dyad_m5")
 inv_dyad_m5 = input.bool(false, "Inverse", group=groupSSMTDyad, inline="dyad_m5")
 
 ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)
-ssmtBullLineCol = input.color(color.rgb(41, 98, 255), "Bullish SSMT Color", group=groupSSMT)
 ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
 ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
+
+groupModelV1 = "WC MODEL V1 (Bearish SSMT Only)"
+v1Enable = input.bool(false, "Enable V1 Bearish SSMT", group=groupModelV1)
+v1EsSym = input.symbol("CME_MINI:ESH2026", "ESH", inline="v1dyad", group=groupModelV1)
+v1NqSym = input.symbol("CME_MINI:NQH2026", "NQH", inline="v1dyad", group=groupModelV1)
+v1ShowMarkers = input.bool(true, "Show Stage Markers", group=groupModelV1)
+
+groupTPD = "TPD"
+tpd_tf1ok = input.bool(false, "HTF 1\t\t", inline="tpd_1", group=groupTPD)
+tpd_tf1 = input.timeframe("360", "", inline="tpd_1", group=groupTPD)
+tpd_tf2ok = input.bool(false, "HTF 2\t\t", inline="tpd_2", group=groupTPD)
+tpd_tf2 = input.timeframe("240", "", inline="tpd_2", group=groupTPD)
+tpd_tf3ok = input.bool(false, "HTF 3\t\t", inline="tpd_3", group=groupTPD)
+tpd_tf3 = input.timeframe("30", "", inline="tpd_3", group=groupTPD)
+tpd_tf0ok = input.bool(true, "Use Current Timeframe", group=groupTPD)
+
+groupTPDAdv = "Advanced TPD Settings"
+tpd_use_adv = input.bool(true, "Enable Advanced TPD", group=groupTPDAdv)
+tpd_max_bars = input.int(500, "Max TPD Markers", minval=10, group=groupTPDAdv)
+tpd_vis_limit = input.timeframe("", "Show on Timeframes >=", group=groupTPDAdv, tooltip="The TPD will only be visible if the Chart Timeframe is Greater Than or Equal to this setting.")
+tpd_mode = input.string("Icons Only", "Display Mode", options=["Icons Only", "Body Only", "Both"], group=groupTPDAdv)
+bool tpd_show_icons = tpd_mode == "Icons Only" or tpd_mode == "Both"
+bool tpd_show_body = tpd_mode == "Body Only" or tpd_mode == "Both"
+tpd_use_swing = input.bool(true, "Swing?", group=groupTPDAdv)
+tpd_use_smt_filter = input.bool(false, "Require SMT (C2->C3)", group=groupTPDAdv)
+tpd_bull_color = input.color(color.blue, "Bullish Icon", inline="tpd_style", group=groupTPDAdv)
+tpd_bear_color = input.color(color.red, "Bearish Icon", inline="tpd_style", group=groupTPDAdv)
+tpd_bull_shape = input.string("^", "Shape", options=["o", "*", "^", "d", "#"], inline="tpd_icon", group=groupTPDAdv)
+tpd_bear_shape = input.string("v", "Shape", options=["o", "*", "v", "d", "#"], inline="tpd_icon", group=groupTPDAdv)
+tpd_size_str = input.string("Tiny", "Size", options=["Tiny", "Small", "Normal", "Large", "Huge", "Auto"], inline="tpd_icon", group=groupTPDAdv)
+tpd_lbl_size = switch tpd_size_str
+    "Tiny"   => size.tiny
+    "Small"  => size.small
+    "Normal" => size.normal
+    "Large"  => size.large
+    "Huge"   => size.huge
+    "Auto"   => size.auto
+    => size.small
+tpd_bull_body = input.color(color.new(color.blue, 50), "Bull Body", inline="tpd_body", group=groupTPDAdv)
+tpd_bear_body = input.color(color.new(color.red, 50), "Bear Body", inline="tpd_body", group=groupTPDAdv)
+tpd_vis_limit_sec = timeframe.in_seconds(tpd_vis_limit)
+bool tpd_is_visible = na(tpd_vis_limit_sec) ? true : timeframe.in_seconds(timeframe.period) >= tpd_vis_limit_sec
+
+groupTPDDebug = "TPD Debug"
+show_tpd_debug = input.bool(true, "Show Debug Window", group=groupTPDDebug)
 
 // ============================================================================
 // HELPERS
@@ -273,54 +314,457 @@ f_ssmt_weekly_highs_expr() =>
     var int hCurTs = int(na)
     var float hPrev = float(na)
     var int hPrevTs = int(na)
-    var float lCur = float(na)
-    var int lCurTs = int(na)
-    var float lPrev = float(na)
-    var int lPrevTs = int(na)
     var float bhCur = float(na)
     var int bhCurTs = int(na)
     var float bhPrev = float(na)
     var int bhPrevTs = int(na)
-    var float blCur = float(na)
-    var int blCurTs = int(na)
-    var float blPrev = float(na)
-    var int blPrevTs = int(na)
     float bodyHigh = math.max(open, close)
-    float bodyLow = math.min(open, close)
 
     if na(qLast) or qCur != qLast
         hPrev := hCur
         hPrevTs := hCurTs
         hCur := high
         hCurTs := time
-        lPrev := lCur
-        lPrevTs := lCurTs
-        lCur := low
-        lCurTs := time
         bhPrev := bhCur
         bhPrevTs := bhCurTs
         bhCur := bodyHigh
         bhCurTs := time
-        blPrev := blCur
-        blPrevTs := blCurTs
-        blCur := bodyLow
-        blCurTs := time
         qLast := qCur
     else
         if na(hCur) or high > hCur
             hCur := high
             hCurTs := time
-        if na(lCur) or low < lCur
-            lCur := low
-            lCurTs := time
         if na(bhCur) or bodyHigh > bhCur
             bhCur := bodyHigh
             bhCurTs := time
-        if na(blCur) or bodyLow < blCur
-            blCur := bodyLow
-            blCurTs := time
 
-    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, qCur]
+
+f_tpd_live_sym(float _xc0, float _xo0, float _xh0, float _xl0, int _xt0, string _tf) =>
+    var float _c1 = 0.0
+    var float _o1 = 0.0
+    var float _h1 = 0.0
+    var float _l1 = 0.0
+    var int _t1 = 0
+    var float _c2 = 0.0
+    var float _o2 = 0.0
+    var float _h2 = 0.0
+    var float _l2 = 0.0
+    var int _t2 = 0
+    var bool up0 = false
+    var bool up1 = false
+    var bool dw0 = false
+    var bool dw1 = false
+    var int _l0t = time
+    var int _h0t = time
+    var int _h1t = time
+    var int _l1t = time
+    var float _o0 = open
+    var float _h0 = high
+    var float _l0 = low
+    var int _t0 = time
+    var float _c0 = close
+    if timeframe.change(_tf)
+        _t0 := _xt0
+        _o0 := _xo0
+        _h0 := _xh0
+        _l0 := _xl0
+
+    if _xh0 >= _h0
+        _h0 := _xh0
+        _h0t := time
+    if _xl0 <= _l0
+        _l0 := _xl0
+        _l0t := time
+    _c0 := _xc0
+    up0 := _c0 > _o0
+    dw0 := _c0 < _o0
+    if timeframe.change(_tf)
+        _c1 := _c0[1]
+        _o1 := _o0[1]
+        _h1 := _h0[1]
+        _l1 := _l0[1]
+        _t1 := _t0[1]
+        _c2 := _c1[1]
+        _o2 := _o1[1]
+        _h2 := _h1[1]
+        _l2 := _l1[1]
+        _t2 := _t1[1]
+        up1 := up0[1]
+        dw1 := dw0[1]
+        _l1t := _l0t[1]
+        _h1t := _h0t[1]
+
+    [_h2, _l2, _c2, _o2, _t2, _h1, _l1, _c1, _o1, _t1, _h0, _l0, _c0, _o0, _t0, up1, dw1, _l1t, _h1t]
+
+f_tpd_tf_text(string _tf) =>
+    float _tf_num = str.tonumber(_tf)
+    int _tf_int = int(na)
+    string _text = _tf
+    if not na(_tf_num)
+        _tf_int := int(_tf_num)
+    if _tf == "1D"
+        _text := "D"
+    else if _tf == "1W"
+        _text := "W"
+    else if _tf == "1M"
+        _text := "M"
+    else if not na(_tf_int)
+        if _tf_int < 60
+            _text := "m" + _tf
+        else if _tf_int % 60 == 0
+            _text := "H" + str.tostring(_tf_int / 60)
+        else
+            _text := "m" + _tf
+    _text
+
+f_tpd_short_sym(string _s) =>
+    string out = _s
+    if str.length(out) == 0
+        out := ""
+    else if str.contains(out, "replay-feed")
+        out := syminfo.ticker
+    else if str.contains(out, ":")
+        out := array.get(str.split(out, ":"), 1)
+    out
+
+f_tpd_fmt(float _v) =>
+    na(_v) ? "na" : str.tostring(_v, format.mintick)
+
+f_tpd_smt_pair(float _lo_c2_a, float _lo_c3_a, float _hi_c2_a, float _hi_c3_a, float _lo_c2_b, float _lo_c3_b, float _hi_c2_b, float _hi_c3_b) =>
+    bool a_low_sweep = not na(_lo_c2_a) and not na(_lo_c3_a) and _lo_c3_a < _lo_c2_a
+    bool b_low_sweep = not na(_lo_c2_b) and not na(_lo_c3_b) and _lo_c3_b < _lo_c2_b
+    bool a_high_sweep = not na(_hi_c2_a) and not na(_hi_c3_a) and _hi_c3_a > _hi_c2_a
+    bool b_high_sweep = not na(_hi_c2_b) and not na(_hi_c3_b) and _hi_c3_b > _hi_c2_b
+    bool bull_smt = (a_low_sweep and not b_low_sweep) or (b_low_sweep and not a_low_sweep)
+    bool bear_smt = (a_high_sweep and not b_high_sweep) or (b_high_sweep and not a_high_sweep)
+    [bull_smt, bear_smt]
+
+f_tpd_resolve_symbols() =>
+    string sym_id = syminfo.tickerid
+    string sym = str.contains(sym_id, "replay-feed") ? (syminfo.prefix + ":" + syminfo.ticker) : sym_id
+
+    bool match_m1_1 = f_check_match(st1_m1)
+    bool match_m1_2 = f_check_match(st2_m1)
+    bool match_m1_3 = f_check_match(st3_m1)
+    bool match_m2_1 = f_check_match(st1_m2)
+    bool match_m2_2 = f_check_match(st2_m2)
+    bool match_m2_3 = f_check_match(st3_m2)
+    bool match_m3_1 = f_check_match(st1_m3)
+    bool match_m3_2 = f_check_match(st2_m3)
+    bool match_m3_3 = f_check_match(st3_m3)
+    bool match_m4_1 = f_check_match(st1_m4)
+    bool match_m4_2 = f_check_match(st2_m4)
+    bool match_m4_3 = f_check_match(st3_m4)
+    bool match_m5_1 = f_check_match(st1_m5)
+    bool match_m5_2 = f_check_match(st2_m5)
+    bool match_m5_3 = f_check_match(st3_m5)
+
+    bool is_in_manual_m1 = tr1A and enable_m1 and (match_m1_1 or match_m1_2 or match_m1_3)
+    bool is_in_manual_m2 = tr1A and enable_m2 and (match_m2_1 or match_m2_2 or match_m2_3)
+    bool is_in_manual_m3 = tr1A and enable_m3 and (match_m3_1 or match_m3_2 or match_m3_3)
+    bool is_in_manual_m4 = tr1A and enable_m4 and (match_m4_1 or match_m4_2 or match_m4_3)
+    bool is_in_manual_m5 = tr1A and enable_m5 and (match_m5_1 or match_m5_2 or match_m5_3)
+    bool is_in_manual = is_in_manual_m1 or is_in_manual_m2 or is_in_manual_m3 or is_in_manual_m4 or is_in_manual_m5
+
+    string st1 = ""
+    string st2 = ""
+    string st3 = ""
+    if is_in_manual_m1 and enable_m1
+        st1 := st1_m1
+        st2 := st2_m1
+        st3 := st3_m1
+    else if is_in_manual_m2 and enable_m2
+        st1 := st1_m2
+        st2 := st2_m2
+        st3 := st3_m2
+    else if is_in_manual_m3 and enable_m3
+        st1 := st1_m3
+        st2 := st2_m3
+        st3 := st3_m3
+    else if is_in_manual_m4 and enable_m4
+        st1 := st1_m4
+        st2 := st2_m4
+        st3 := st3_m4
+    else if is_in_manual_m5 and enable_m5
+        st1 := st1_m5
+        st2 := st2_m5
+        st3 := st3_m5
+
+    bool is_nq_asset = str.contains(sym, "NQ") or str.contains(sym, "MNQ")
+    bool is_es_asset = str.contains(sym, "ES") or str.contains(sym, "MES")
+    bool is_ym_asset = str.contains(sym, "YM") or str.contains(sym, "MYM")
+    bool is_gc_asset = str.contains(sym, "GC") or str.contains(sym, "MGC")
+    bool is_si_asset = str.contains(sym, "SI") or str.contains(sym, "MSI")
+    bool is_sl_asset = str.contains(sym, "PL") or str.contains(sym, "MSL")
+    bool is_mgc_asset = str.contains(sym, "MGC")
+    bool is_sil_asset = str.contains(sym, "SIL")
+
+    bool is_in_g2 = tr1B and (str.contains(sym, "XAU") or str.contains(sym, "XAG") or str.contains(sym, "XPT"))
+    bool is_in_g3 = tr1C and (str.contains(sym, "BTC") or str.contains(sym, "ETH") or str.contains(sym, "ADA"))
+    bool is_in_g4 = tr1D and (is_nq_asset or is_es_asset or is_ym_asset)
+    bool is_in_g5 = tr1E and (str.contains(sym, "EURUSD") or str.contains(sym, "GBPUSD") or str.contains(sym, "AUDUSD"))
+    bool is_in_g6 = tr1F and (str.contains(sym, "US100") or str.contains(sym, "USTEC") or str.contains(sym, "NAS100") or str.contains(sym, "US500") or str.contains(sym, "SPX500") or str.contains(sym, "SP500") or str.contains(sym, "US30"))
+    bool is_in_g7 = tr1G and (is_gc_asset or is_si_asset or is_sl_asset)
+
+    bool triad_ok = triad_selection_mode == "Off" ? false : triad_selection_mode == "Auto" ? (is_in_g2 or is_in_g3 or is_in_g4 or is_in_g5 or is_in_g6 or is_in_g7) : is_in_manual
+
+    bool match_1 = f_check_match(st1)
+    bool match_2 = f_check_match(st2)
+    bool match_3 = f_check_match(st3)
+
+    string csym = sym
+    string tsym2 = sym
+    string tsym3 = sym
+    string csym_raw = ""
+    string tsym3_raw = ""
+
+    if triad_ok
+        if is_in_manual
+            if match_1
+                tsym2 := st2
+                tsym3 := st3
+            else if match_2
+                tsym2 := st1
+                tsym3 := st3
+            else if match_3
+                tsym2 := st1
+                tsym3 := st2
+        else if is_in_g2
+            tsym2 := str.contains(sym, "XAU") ? st5 : st4
+            tsym3 := str.contains(sym, "XPT") ? st5 : st6
+        else if is_in_g3
+            tsym2 := str.contains(sym, "BTC") ? st8 : (str.contains(sym, "ETH") ? st7 : st7)
+            tsym3 := str.contains(sym, "BTC") ? st9 : (str.contains(sym, "ETH") ? st9 : st8)
+        else if is_in_g4
+            string tkr = str.contains(sym, ":") ? array.get(str.split(sym, ":"), 1) : sym
+            string root3 = str.substring(tkr, 0, 3)
+            string root2 = str.substring(tkr, 0, 2)
+            bool is_micro = root3 == "MES" or root3 == "MNQ" or root3 == "MYM"
+            string root = is_micro ? root3 : root2
+            int root_len = is_micro ? 3 : 2
+            string month_code = str.length(tkr) > root_len ? str.substring(tkr, root_len, root_len + 1) : ""
+            string year_str = str.length(tkr) > root_len + 1 ? str.substring(tkr, root_len + 1, str.length(tkr)) : ""
+            bool has_contract = str.contains("FGHJKMNQUVXZ", month_code) and not na(str.tonumber(year_str))
+            if has_contract
+                string root_a = root == "ES" or root == "MES" ? (is_micro ? "MNQ" : "NQ") : root == "NQ" or root == "MNQ" ? (is_micro ? "MES" : "ES") : (is_micro ? "MES" : "ES")
+                string root_b = root == "ES" or root == "MES" ? (is_micro ? "MYM" : "YM") : root == "NQ" or root == "MNQ" ? (is_micro ? "MYM" : "YM") : (is_micro ? "MNQ" : "NQ")
+                string ex_a = (root_a == "YM" or root_a == "MYM") ? (is_micro ? "CBOT_MINI" : "CBOT") : "CME_MINI"
+                string ex_b = (root_b == "YM" or root_b == "MYM") ? (is_micro ? "CBOT_MINI" : "CBOT") : "CME_MINI"
+                tsym2 := ex_a + ":" + root_a + month_code + year_str
+                tsym3 := ex_b + ":" + root_b + month_code + year_str
+            else
+                if is_nq_asset
+                    tsym2 := st11
+                    tsym3 := st12
+                else if is_es_asset
+                    tsym2 := st10
+                    tsym3 := st12
+                else if is_ym_asset
+                    tsym2 := st10
+                    tsym3 := st11
+        else if is_in_g5
+            tsym2 := str.contains(sym, "EURUSD") ? st14 : (str.contains(sym, "GBPUSD") ? st13 : st13)
+            tsym3 := str.contains(sym, "EURUSD") ? st15 : (str.contains(sym, "GBPUSD") ? st15 : st14)
+        else if is_in_g6
+            tsym2 := str.contains(sym, "US100") ? st17 : (str.contains(sym, "US500") ? st16 : st16)
+            tsym3 := str.contains(sym, "US100") ? st18 : (str.contains(sym, "US500") ? st18 : st17)
+        else if is_in_g7
+            if is_mgc_asset
+                tsym2 := s14
+                tsym3 := st22
+            else if is_sil_asset
+                tsym2 := s13
+                tsym3 := st22
+            else if is_gc_asset
+                tsym2 := st20
+                tsym3 := st21
+            else if is_si_asset
+                tsym2 := st19
+                tsym3 := st21
+            else if is_sl_asset
+                tsym2 := st19
+                tsym3 := st20
+
+    if triad_ok
+        csym := syminfo.type == "futures" ? ticker.modify(tsym2, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : tsym2
+        tsym3 := syminfo.type == "futures" ? ticker.modify(tsym3, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : tsym3
+
+    if not triad_ok and dyad_selection_mode != "Off"
+        if dyad_selection_mode == "Manual"
+            bool is_on_dyad_m1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
+            bool is_on_dyad_m2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
+            bool is_on_dyad_m3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
+            bool is_on_dyad_m4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
+            bool is_on_dyad_m5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
+            if is_on_dyad_m1
+                csym := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
+            else if is_on_dyad_m2
+                csym := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
+            else if is_on_dyad_m3
+                csym := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
+            else if is_on_dyad_m4
+                csym := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
+            else if is_on_dyad_m5
+                csym := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
+        else if dyad_selection_mode == "Auto"
+            if str.contains(sym, s1) or sym == s1
+                csym := s2
+            else if str.contains(sym, s2) or sym == s2
+                csym := s1
+            else if str.contains(sym, s3) or sym == s3
+                csym := s4
+            else if str.contains(sym, s4) or sym == s4
+                csym := s3
+            else if str.contains(sym, s5) or sym == s5
+                csym := s6
+            else if str.contains(sym, s6) or sym == s6
+                csym := s5
+            else if str.contains(sym, s7) or sym == s7
+                csym := s8
+            else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
+                csym := s7
+            else if is_nq_asset
+                csym := s10
+            else if is_es_asset
+                csym := s9
+            else if is_mgc_asset
+                csym := s14
+            else if is_sil_asset
+                csym := s13
+            else if is_gc_asset
+                csym := s12
+            else if is_si_asset
+                csym := s11
+
+        csym := syminfo.type == "futures" ? ticker.modify(csym, session=syminfo.session, backadjustment=badj ? backadjustment.on : backadjustment.off) : csym
+
+    bool dyad_ok = sym != csym
+    if triad_ok
+        csym_raw := tsym2
+        tsym3_raw := tsym3
+    else
+        tsym3_raw := ""
+
+    [sym, csym, tsym3, triad_ok, dyad_ok, csym_raw, tsym3_raw]
+
+tpd_target_font = font.family_default
+var label[] tpd_labels = array.new<label>()
+
+f_tpd_dyad(string _htf, bool _show_tpd, _size, float _xc0, float _xo0, float _xh0, float _xl0, int _xt0) =>
+    var bool bull_tpd_out = false
+    var bool bear_tpd_out = false
+    var label lblbear = na
+    var label lblbull = na
+    bull_tpd_out := false
+    bear_tpd_out := false
+
+    [mh2, ml2, mc2, mo2, mt2, mh1, ml1, mc1, mo1, mt1, mh0, ml0, mc0, mo0, mt0, mup1, mdw1, ml1t, mh1t] = f_tpd_live_sym(close, open, high, low, time, _htf)
+    [oh2, ol2, oc2, oo2, ot2, oh1, ol1, oc1, oo1, ot1, oh0, ol0, oc0, oo0, ot0, oup1, odw1, ol1t, oh1t] = f_tpd_live_sym(_xc0, _xo0, _xh0, _xl0, _xt0, _htf)
+
+    if _show_tpd and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(_htf)
+        arr_crack1 = array.from(mc1 > mo1, oc1 > oo1)
+        crack1 = not array.every(arr_crack1) and array.some(arr_crack1)
+        arr_crack2 = array.from(mc2 > mo0, oc2 > oo0)
+        crack2 = not array.every(arr_crack2) and array.some(arr_crack2)
+        tpd = crack1 and crack2
+
+        lws0 = array.from(ml2, ml1, ml0)
+        lws1 = array.from(ol2, ol1, ol0)
+        con_lws0 = array.min(lws0) == ml1
+        con_lws1 = array.min(lws1) == ol1
+        con_lowx = array.from(con_lws0, con_lws1)
+        con_low = array.some(con_lowx)
+
+        hgh0 = array.from(mh2, mh1, mh0)
+        hgh1 = array.from(oh2, oh1, oh0)
+        con_hgh0 = array.max(hgh0) == mh1
+        con_hgh1 = array.max(hgh1) == oh1
+        con_hghx = array.from(con_hgh0, con_hgh1)
+        con_hgh = array.some(con_hghx)
+
+        bear_tpd = (tpd_use_swing ? con_hgh : true) and tpd
+        bull_tpd = (tpd_use_swing ? con_low : true) and tpd
+        [bull_smt, bear_smt] = f_tpd_smt_pair(ml1, ml0, mh1, mh0, ol1, ol0, oh1, oh0)
+        if tpd_use_smt_filter
+            bull_tpd := bull_tpd and bull_smt
+            bear_tpd := bear_tpd and bear_smt
+
+        if bear_tpd and tpd_show_icons
+            lblbear := label.new(mh1t, mh1, text=f_tpd_tf_text(_htf) + "\n" + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family=tpd_target_font)
+            array.push(tpd_labels, lblbear)
+            if array.size(tpd_labels) > tpd_max_bars
+                label.delete(array.shift(tpd_labels))
+        if bull_tpd and tpd_show_icons
+            lblbull := label.new(ml1t, ml1, text=tpd_bull_shape + "\n" + f_tpd_tf_text(_htf), xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family=tpd_target_font)
+            array.push(tpd_labels, lblbull)
+            if array.size(tpd_labels) > tpd_max_bars
+                label.delete(array.shift(tpd_labels))
+
+        bear_tpd_out := bear_tpd
+        bull_tpd_out := bull_tpd
+
+    [bull_tpd_out, bear_tpd_out]
+
+f_tpd_triad(string _htf, bool _show_tpd, _size, float _xc0, float _xo0, float _xh0, float _xl0, int _xt0, float _yc0, float _yo0, float _yh0, float _yl0, int _yt0) =>
+    var bool bull_tpd_out = false
+    var bool bear_tpd_out = false
+    var label lblbear = na
+    var label lblbull = na
+    bull_tpd_out := false
+    bear_tpd_out := false
+
+    [mh2, ml2, mc2, mo2, mt2, mh1, ml1, mc1, mo1, mt1, mh0, ml0, mc0, mo0, mt0, mup1, mdw1, ml1t, mh1t] = f_tpd_live_sym(close, open, high, low, time, _htf)
+    [oh2, ol2, oc2, oo2, ot2, oh1, ol1, oc1, oo1, ot1, oh0, ol0, oc0, oo0, ot0, oup1, odw1, ol1t, oh1t] = f_tpd_live_sym(_xc0, _xo0, _xh0, _xl0, _xt0, _htf)
+    [ph2, pl2, pc2, po2, pt2, ph1, pl1, pc1, po1, pt1, ph0, pl0, pc0, po0, pt0, pup1, pdw1, pl1t, ph1t] = f_tpd_live_sym(_yc0, _yo0, _yh0, _yl0, _yt0, _htf)
+
+    if _show_tpd and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(_htf)
+        arr_crack1 = array.from(mc1 > mo1, oc1 > oo1, pc1 > po1)
+        crack1 = not array.every(arr_crack1) and array.some(arr_crack1)
+        arr_crack2 = array.from(mc2 > mo0, oc2 > oo0, pc2 > po0)
+        crack2 = not array.every(arr_crack2) and array.some(arr_crack2)
+        tpd = crack1 and crack2
+
+        lws0 = array.from(ml2, ml1, ml0)
+        lws1 = array.from(ol2, ol1, ol0)
+        lws2 = array.from(pl2, pl1, pl0)
+        con_lws0 = array.min(lws0) == ml1
+        con_lws1 = array.min(lws1) == ol1
+        con_lws2 = array.min(lws2) == pl1
+        con_lowx = array.from(con_lws0, con_lws1, con_lws2)
+        con_low = array.some(con_lowx)
+
+        hgh0 = array.from(mh2, mh1, mh0)
+        hgh1 = array.from(oh2, oh1, oh0)
+        hgh2 = array.from(ph2, ph1, ph0)
+        con_hgh0 = array.max(hgh0) == mh1
+        con_hgh1 = array.max(hgh1) == oh1
+        con_hgh2 = array.max(hgh2) == ph1
+        con_hghx = array.from(con_hgh0, con_hgh1, con_hgh2)
+        con_hgh = array.some(con_hghx)
+
+        bear_tpd = (tpd_use_swing ? con_hgh : true) and tpd
+        bull_tpd = (tpd_use_swing ? con_low : true) and tpd
+        [bull_smt, bear_smt] = f_tpd_smt_pair(ml1, ml0, mh1, mh0, ol1, ol0, oh1, oh0)
+        if tpd_use_smt_filter
+            bull_tpd := bull_tpd and bull_smt
+            bear_tpd := bear_tpd and bear_smt
+
+        if bear_tpd and tpd_show_icons
+            lblbear := label.new(mh1t, mh1, text=f_tpd_tf_text(_htf) + "\n" + tpd_bear_shape, xloc=xloc.bar_time, yloc=yloc.abovebar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bear_color, tooltip="Bearish TPD (Structure)", text_font_family=tpd_target_font)
+            array.push(tpd_labels, lblbear)
+            if array.size(tpd_labels) > tpd_max_bars
+                label.delete(array.shift(tpd_labels))
+        if bull_tpd and tpd_show_icons
+            lblbull := label.new(ml1t, ml1, text=tpd_bull_shape + "\n" + f_tpd_tf_text(_htf), xloc=xloc.bar_time, yloc=yloc.belowbar, color=color.new(color.gray, 100), size=_size, textcolor=tpd_bull_color, tooltip="Bullish TPD (Structure)", text_font_family=tpd_target_font)
+            array.push(tpd_labels, lblbull)
+            if array.size(tpd_labels) > tpd_max_bars
+                label.delete(array.shift(tpd_labels))
+
+        bear_tpd_out := bear_tpd
+        bull_tpd_out := bull_tpd
+
+    [bull_tpd_out, bear_tpd_out]
 
 // ============================================================================
 // WEEKLY SCAN ENGINE (QTEngine-style shape: config + state + update result)
@@ -950,22 +1394,6 @@ var label wSsmtLbl = na
 var int wSsmtEventKey = na
 var int wSsmtPurgeTs = na
 
-var line[] wBSsmtHistLines = array.new_line()
-var label[] wBSsmtHistLbls = array.new_label()
-var line wBSsmtLine = na
-var line wBSsmtLine2 = na
-var label wBSsmtLbl = na
-var int wBSsmtEventKey = na
-var int wBSsmtPurgeTs = na
-
-var line[] wHBSsmtHistLines = array.new_line()
-var label[] wHBSsmtHistLbls = array.new_label()
-var line wHBSsmtLine = na
-var line wHBSsmtLine2 = na
-var label wHBSsmtLbl = na
-var int wHBSsmtEventKey = na
-var int wHBSsmtPurgeTs = na
-
 var line[] wHSsmtHistLines = array.new_line()
 var label[] wHSsmtHistLbls = array.new_label()
 var line wHSsmtLine = na
@@ -974,15 +1402,11 @@ var label wHSsmtLbl = na
 var int wHSsmtEventKey = na
 var int wHSsmtPurgeTs = na
 
-if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeeklyBullHSSMT or showWeeklyBearBoth or showWeeklyBullBoth) and weeklyLive and tf_h1
+if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyLive and tf_h1
     bool runWeeklyBearSSMT = showWeeklyBearSSMT or showWeeklyBearBoth
-    bool runWeeklyBullSSMT = showWeeklyBullSSMT or showWeeklyBullBoth
     bool runWeeklyBearHSSMT = showWeeklyBearHSSMT or showWeeklyBearBoth
-    bool runWeeklyBullHSSMT = showWeeklyBullHSSMT or showWeeklyBullBoth
     bool preferRegularVisual = showWeeklyBearBoth
-    bool preferRegularVisualBull = showWeeklyBullBoth
     bool regularVisualCandidate = false
-    bool regularVisualCandidateBull = false
 
     string sym = syminfo.tickerid
 
@@ -1180,7 +1604,7 @@ if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeekl
 
     bool dyad_ok = not triad_ok and str.length(tsym2) > 0 and str.length(tsym3) == 0
 
-    [chHcur, chHcurTs, chHprev, chHprevTs, chBHcur, chBHcurTs, chBHprev, chBHprevTs, chLcur, chLcurTs, chLprev, chLprevTs, chBLcur, chBLcurTs, chBLprev, chBLprevTs, chQts] = f_ssmt_weekly_highs_expr()
+    [chHcur, chHcurTs, chHprev, chHprevTs, chBHcur, chBHcurTs, chBHprev, chBHprevTs, chQts] = f_ssmt_weekly_highs_expr()
     float peer2Hcur = na
     int   peer2HcurTs = na
     float peer2Hprev = na
@@ -1189,17 +1613,9 @@ if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeekl
     int   peer2BHcurTs = na
     float peer2BHprev = na
     int   peer2BHprevTs = na
-    float peer2Lcur = na
-    int   peer2LcurTs = na
-    float peer2Lprev = na
-    int   peer2LprevTs = na
-    float peer2BLcur = na
-    int   peer2BLcurTs = na
-    float peer2BLprev = na
-    int   peer2BLprevTs = na
     int   peer2Qts = na
     if str.length(tsym2) > 0
-        [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Qts] = request.security(tsym2, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
         peer2Hcur := p2Hcur
         peer2HcurTs := p2HcurTs
         peer2Hprev := p2Hprev
@@ -1208,14 +1624,6 @@ if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeekl
         peer2BHcurTs := p2BHcurTs
         peer2BHprev := p2BHprev
         peer2BHprevTs := p2BHprevTs
-        peer2Lcur := p2Lcur
-        peer2LcurTs := p2LcurTs
-        peer2Lprev := p2Lprev
-        peer2LprevTs := p2LprevTs
-        peer2BLcur := p2BLcur
-        peer2BLcurTs := p2BLcurTs
-        peer2BLprev := p2BLprev
-        peer2BLprevTs := p2BLprevTs
         peer2Qts := p2Qts
     float peer3Hcur = na
     int   peer3HcurTs = na
@@ -1225,17 +1633,9 @@ if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeekl
     int   peer3BHcurTs = na
     float peer3BHprev = na
     int   peer3BHprevTs = na
-    float peer3Lcur = na
-    int   peer3LcurTs = na
-    float peer3Lprev = na
-    int   peer3LprevTs = na
-    float peer3BLcur = na
-    int   peer3BLcurTs = na
-    float peer3BLprev = na
-    int   peer3BLprevTs = na
     int   peer3Qts = na
     if str.length(tsym3) > 0
-        [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Qts] = request.security(tsym3, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
         peer3Hcur := p3Hcur
         peer3HcurTs := p3HcurTs
         peer3Hprev := p3Hprev
@@ -1244,14 +1644,6 @@ if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeekl
         peer3BHcurTs := p3BHcurTs
         peer3BHprev := p3BHprev
         peer3BHprevTs := p3BHprevTs
-        peer3Lcur := p3Lcur
-        peer3LcurTs := p3LcurTs
-        peer3Lprev := p3Lprev
-        peer3LprevTs := p3LprevTs
-        peer3BLcur := p3BLcur
-        peer3BLcurTs := p3BLcurTs
-        peer3BLprev := p3BLprev
-        peer3BLprevTs := p3BLprevTs
         peer3Qts := p3Qts
 
     string chartTag = f_ssmt_tag(syminfo.tickerid)
@@ -1374,242 +1766,6 @@ if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeekl
         f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
         wSsmtEventKey := na
         wSsmtPurgeTs := na
-
-    // Bullish Weekly SSMT (normal)
-    if runWeeklyBullSSMT
-        bool hasPeer2B = str.length(tsym2) > 0 and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2LcurTs) and not na(peer2LprevTs) and not na(peer2Qts)
-        bool hasPeer3B = str.length(tsym3) > 0 and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3LcurTs) and not na(peer3LprevTs) and not na(peer3Qts)
-        bool ssmtReadyB = isPairChart and not na(chLcur) and not na(chLprev) and not na(chLcurTs) and not na(chLprevTs) and (hasPeer2B or hasPeer3B)
-        if ssmtReadyB
-            bool chartSweepB = chLcur < chLprev
-            bool split2B = hasPeer2B and (chartSweepB != (peer2Lcur < peer2Lprev))
-            bool split3B = hasPeer3B and (chartSweepB != (peer3Lcur < peer3Lprev))
-            bool splitB = split2B or split3B
-            bool peer2SweepB = hasPeer2B ? (peer2Lcur < peer2Lprev) : false
-            bool peer3SweepB = hasPeer3B ? (peer3Lcur < peer3Lprev) : false
-
-            float curL = chLcur
-            int   curLTs = chLcurTs
-            float prevL = chLprev
-            int   prevLTs = chLprevTs
-            int   curQTsB = chQts
-            bool  curSweepB = chartSweepB
-            string crackedB = ""
-            if splitB
-                if hasPeer2B and hasPeer3B
-                    if peer2SweepB == peer3SweepB
-                        crackedB := chartSweepB != peer2SweepB ? chartTag : ""
-                    else if chartSweepB == peer2SweepB
-                        crackedB := f_ssmt_tag(tsym3)
-                    else if chartSweepB == peer3SweepB
-                        crackedB := f_ssmt_tag(tsym2)
-                    else
-                        crackedB := chartTag
-                else
-                    crackedB := not chartSweepB ? chartTag : ""
-
-            int eventKeyB = prevLTs
-            bool eventChangedB = not na(eventKeyB) and (na(wBSsmtEventKey) or eventKeyB != wBSsmtEventKey)
-            if eventChangedB
-                f_ssmt_hist_push(wBSsmtLine, wBSsmtLbl, wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
-                f_ssmt_hist_push(wBSsmtLine2, na, wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
-                wBSsmtLine := na
-                wBSsmtLine2 := na
-                wBSsmtLbl := na
-                wBSsmtEventKey := eventKeyB
-                wBSsmtPurgeTs := na
-
-            if not splitB
-                if not na(wBSsmtLine)
-                    line.delete(wBSsmtLine)
-                    wBSsmtLine := na
-                if not na(wBSsmtLine2)
-                    line.delete(wBSsmtLine2)
-                    wBSsmtLine2 := na
-                if not na(wBSsmtLbl)
-                    label.delete(wBSsmtLbl)
-                    wBSsmtLbl := na
-                wBSsmtPurgeTs := na
-            else
-                bool hasPointsB = not na(prevL) and not na(prevLTs) and not na(curQTsB)
-                regularVisualCandidateBull := splitB and hasPointsB
-                if hasPointsB and curSweepB
-                    int qEndB = curQTsB + LEN_24H
-                    int subLenB = LEN_24H / 4
-                    if na(wBSsmtPurgeTs) and time >= curQTsB and time < qEndB and low < prevL
-                        wBSsmtPurgeTs := time
-                    int purgeTsB = not na(wBSsmtPurgeTs) ? wBSsmtPurgeTs : (not na(curLTs) ? curLTs : curQTsB)
-                    int subQuarterIdxB = purgeTsB < (curQTsB + subLenB) ? 1 : purgeTsB < (curQTsB + 2 * subLenB) ? 2 : purgeTsB < (curQTsB + 3 * subLenB) ? 3 : 4
-                    int solidCutB = subQuarterIdxB == 2 ? (curQTsB + subLenB) : subQuarterIdxB == 3 ? (curQTsB + 2 * subLenB) : subQuarterIdxB == 4 ? (curQTsB + 3 * subLenB) : int(na)
-                    int dottedStartB = prevLTs
-                    if not na(solidCutB) and solidCutB > prevLTs
-                        wBSsmtLine2 := f_set_or_make_hline_w_style(wBSsmtLine2, prevLTs, solidCutB, prevL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
-                        dottedStartB := solidCutB
-                    else
-                        wBSsmtLine2 := f_kill(wBSsmtLine2)
-                    wBSsmtLine := f_set_or_make_hline_w_style(wBSsmtLine, dottedStartB, qEndB, prevL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Dotted")
-                else if hasPointsB and not curSweepB and not na(curL) and not na(curLTs)
-                    wBSsmtPurgeTs := na
-                    wBSsmtLine2 := f_kill(wBSsmtLine2)
-                    wBSsmtLine := f_set_or_make_line(wBSsmtLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
-
-                bool showLabelB = crackedB != "" and not chartSweepB
-                if hasPointsB and showLabelB
-                    string lblTextB = "W " + crackedB
-                    if na(wBSsmtLbl)
-                        wBSsmtLbl := label.new(prevLTs, prevL, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
-                    else
-                        label.set_xy(wBSsmtLbl, prevLTs, prevL)
-                        label.set_text(wBSsmtLbl, lblTextB)
-                        label.set_textcolor(wBSsmtLbl, color.black)
-                        label.set_color(wBSsmtLbl, color.new(color.black, 100))
-                else if not showLabelB and not na(wBSsmtLbl)
-                    label.delete(wBSsmtLbl)
-                    wBSsmtLbl := na
-        else
-            if not na(wBSsmtLine)
-                line.delete(wBSsmtLine)
-                wBSsmtLine := na
-            if not na(wBSsmtLine2)
-                line.delete(wBSsmtLine2)
-                wBSsmtLine2 := na
-            if not na(wBSsmtLbl)
-                label.delete(wBSsmtLbl)
-                wBSsmtLbl := na
-            wBSsmtPurgeTs := na
-
-        f_ssmt_hist_trim(wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
-    else
-        if not na(wBSsmtLine)
-            line.delete(wBSsmtLine)
-            wBSsmtLine := na
-        if not na(wBSsmtLine2)
-            line.delete(wBSsmtLine2)
-            wBSsmtLine2 := na
-        if not na(wBSsmtLbl)
-            label.delete(wBSsmtLbl)
-            wBSsmtLbl := na
-        f_ssmt_hist_clear(wBSsmtHistLines, wBSsmtHistLbls)
-        wBSsmtEventKey := na
-        wBSsmtPurgeTs := na
-
-    // Bullish Weekly HSSMT (hidden)
-    if runWeeklyBullHSSMT
-        bool suppressHiddenByRegularBull = preferRegularVisualBull and regularVisualCandidateBull
-        bool hasPeer2HB = str.length(tsym2) > 0 and not na(peer2BLcur) and not na(peer2BLprev) and not na(peer2BLcurTs) and not na(peer2BLprevTs) and not na(peer2Qts)
-        bool hasPeer3HB = str.length(tsym3) > 0 and not na(peer3BLcur) and not na(peer3BLprev) and not na(peer3BLcurTs) and not na(peer3BLprevTs) and not na(peer3Qts)
-        bool hssmtReadyB = isPairChart and not na(chBLcur) and not na(chBLprev) and not na(chBLcurTs) and not na(chBLprevTs) and (hasPeer2HB or hasPeer3HB)
-        if hssmtReadyB and not suppressHiddenByRegularBull
-            bool chartSweepHB = chBLcur < chBLprev
-            bool split2HB = hasPeer2HB and (chartSweepHB != (peer2BLcur < peer2BLprev))
-            bool split3HB = hasPeer3HB and (chartSweepHB != (peer3BLcur < peer3BLprev))
-            bool splitHB = split2HB or split3HB
-            bool peer2SweepHB = hasPeer2HB ? (peer2BLcur < peer2BLprev) : false
-            bool peer3SweepHB = hasPeer3HB ? (peer3BLcur < peer3BLprev) : false
-
-            float curLL = chBLcur
-            int   curLLTs = chBLcurTs
-            float prevLL = chBLprev
-            int   prevLLTs = chBLprevTs
-            int   curQTsHB = chQts
-            bool  curSweepHB = chartSweepHB
-            string crackedHB = ""
-            if splitHB
-                if hasPeer2HB and hasPeer3HB
-                    if peer2SweepHB == peer3SweepHB
-                        crackedHB := chartSweepHB != peer2SweepHB ? chartTag : ""
-                    else if chartSweepHB == peer2SweepHB
-                        crackedHB := f_ssmt_tag(tsym3)
-                    else if chartSweepHB == peer3SweepHB
-                        crackedHB := f_ssmt_tag(tsym2)
-                    else
-                        crackedHB := chartTag
-                else
-                    crackedHB := not chartSweepHB ? chartTag : ""
-
-            int eventKeyHB = prevLLTs
-            bool eventChangedHB = not na(eventKeyHB) and (na(wHBSsmtEventKey) or eventKeyHB != wHBSsmtEventKey)
-            if eventChangedHB
-                f_ssmt_hist_push(wHBSsmtLine, wHBSsmtLbl, wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
-                f_ssmt_hist_push(wHBSsmtLine2, na, wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
-                wHBSsmtLine := na
-                wHBSsmtLine2 := na
-                wHBSsmtLbl := na
-                wHBSsmtEventKey := eventKeyHB
-                wHBSsmtPurgeTs := na
-
-            if not splitHB
-                if not na(wHBSsmtLine)
-                    line.delete(wHBSsmtLine)
-                    wHBSsmtLine := na
-                if not na(wHBSsmtLine2)
-                    line.delete(wHBSsmtLine2)
-                    wHBSsmtLine2 := na
-                if not na(wHBSsmtLbl)
-                    label.delete(wHBSsmtLbl)
-                    wHBSsmtLbl := na
-                wHBSsmtPurgeTs := na
-            else
-                bool hasPointsHB = not na(prevLL) and not na(prevLLTs) and not na(curQTsHB)
-                if hasPointsHB and curSweepHB
-                    int qEndHB = curQTsHB + LEN_24H
-                    int subLenHB = LEN_24H / 4
-                    if na(wHBSsmtPurgeTs) and time >= curQTsHB and time < qEndHB and math.min(open, close) < prevLL
-                        wHBSsmtPurgeTs := time
-                    int purgeTsHB = not na(wHBSsmtPurgeTs) ? wHBSsmtPurgeTs : (not na(curLLTs) ? curLLTs : curQTsHB)
-                    int subQuarterIdxHB = purgeTsHB < (curQTsHB + subLenHB) ? 1 : purgeTsHB < (curQTsHB + 2 * subLenHB) ? 2 : purgeTsHB < (curQTsHB + 3 * subLenHB) ? 3 : 4
-                    int solidCutHB = subQuarterIdxHB == 2 ? (curQTsHB + subLenHB) : subQuarterIdxHB == 3 ? (curQTsHB + 2 * subLenHB) : subQuarterIdxHB == 4 ? (curQTsHB + 3 * subLenHB) : int(na)
-                    int dottedStartHB = prevLLTs
-                    if not na(solidCutHB) and solidCutHB > prevLLTs
-                        wHBSsmtLine2 := f_set_or_make_hline_w_style(wHBSsmtLine2, prevLLTs, solidCutHB, prevLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
-                        dottedStartHB := solidCutHB
-                    else
-                        wHBSsmtLine2 := f_kill(wHBSsmtLine2)
-                    wHBSsmtLine := f_set_or_make_hline_w_style(wHBSsmtLine, dottedStartHB, qEndHB, prevLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Dotted")
-                else if hasPointsHB and not curSweepHB and not na(curLL) and not na(curLLTs)
-                    wHBSsmtPurgeTs := na
-                    wHBSsmtLine2 := f_kill(wHBSsmtLine2)
-                    wHBSsmtLine := f_set_or_make_line(wHBSsmtLine, prevLLTs, prevLL, curLLTs, curLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
-
-                bool showLabelHB = crackedHB != "" and not chartSweepHB
-                if hasPointsHB and showLabelHB
-                    string lblTextHB = "(H) W " + crackedHB
-                    if na(wHBSsmtLbl)
-                        wHBSsmtLbl := label.new(prevLLTs, prevLL, lblTextHB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
-                    else
-                        label.set_xy(wHBSsmtLbl, prevLLTs, prevLL)
-                        label.set_text(wHBSsmtLbl, lblTextHB)
-                        label.set_textcolor(wHBSsmtLbl, color.black)
-                        label.set_color(wHBSsmtLbl, color.new(color.black, 100))
-                else if not showLabelHB and not na(wHBSsmtLbl)
-                    label.delete(wHBSsmtLbl)
-                    wHBSsmtLbl := na
-        else
-            if not na(wHBSsmtLine)
-                line.delete(wHBSsmtLine)
-                wHBSsmtLine := na
-            if not na(wHBSsmtLine2)
-                line.delete(wHBSsmtLine2)
-                wHBSsmtLine2 := na
-            if not na(wHBSsmtLbl)
-                label.delete(wHBSsmtLbl)
-                wHBSsmtLbl := na
-            wHBSsmtPurgeTs := na
-
-        f_ssmt_hist_trim(wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
-    else
-        if not na(wHBSsmtLine)
-            line.delete(wHBSsmtLine)
-            wHBSsmtLine := na
-        if not na(wHBSsmtLine2)
-            line.delete(wHBSsmtLine2)
-            wHBSsmtLine2 := na
-        if not na(wHBSsmtLbl)
-            label.delete(wHBSsmtLbl)
-            wHBSsmtLbl := na
-        f_ssmt_hist_clear(wHBSsmtHistLines, wHBSsmtHistLbls)
-        wHBSsmtEventKey := na
-        wHBSsmtPurgeTs := na
 
     // Bearish Weekly HSSMT (hidden)
     if runWeeklyBearHSSMT
@@ -1741,30 +1897,6 @@ else
     f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
     wSsmtEventKey := na
     wSsmtPurgeTs := na
-    if not na(wBSsmtLine)
-        line.delete(wBSsmtLine)
-        wBSsmtLine := na
-    if not na(wBSsmtLine2)
-        line.delete(wBSsmtLine2)
-        wBSsmtLine2 := na
-    if not na(wBSsmtLbl)
-        label.delete(wBSsmtLbl)
-        wBSsmtLbl := na
-    f_ssmt_hist_clear(wBSsmtHistLines, wBSsmtHistLbls)
-    wBSsmtEventKey := na
-    wBSsmtPurgeTs := na
-    if not na(wHBSsmtLine)
-        line.delete(wHBSsmtLine)
-        wHBSsmtLine := na
-    if not na(wHBSsmtLine2)
-        line.delete(wHBSsmtLine2)
-        wHBSsmtLine2 := na
-    if not na(wHBSsmtLbl)
-        label.delete(wHBSsmtLbl)
-        wHBSsmtLbl := na
-    f_ssmt_hist_clear(wHBSsmtHistLines, wHBSsmtHistLbls)
-    wHBSsmtEventKey := na
-    wHBSsmtPurgeTs := na
     if not na(wHSsmtLine)
         line.delete(wHSsmtLine)
         wHSsmtLine := na
@@ -1777,6 +1909,183 @@ else
     f_ssmt_hist_clear(wHSsmtHistLines, wHSsmtHistLbls)
     wHSsmtEventKey := na
     wHSsmtPurgeTs := na
+
+string v1EsReq = syminfo.type == "futures" ? ticker.modify(v1EsSym, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : v1EsSym
+string v1NqReq = syminfo.type == "futures" ? ticker.modify(v1NqSym, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : v1NqSym
+
+[esWHigh, esWPrevHigh, esWKey] = request.security(v1EsReq, "W", [high, high[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[nqWHigh, nqWPrevHigh, nqWKey] = request.security(v1NqReq, "W", [high, high[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[esDHigh, esDPrevHigh, esDKey] = request.security(v1EsReq, "D", [high, high[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[nqDHigh, nqDPrevHigh, nqDKey] = request.security(v1NqReq, "D", [high, high[1], time], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+bool esWSweep = not na(esWHigh) and not na(esWPrevHigh) and esWHigh > esWPrevHigh
+bool nqWSweep = not na(nqWHigh) and not na(nqWPrevHigh) and nqWHigh > nqWPrevHigh
+bool v1WeeklyBearSSMT = v1Enable and (esWSweep != nqWSweep)
+bool v1WeeklyBearPrev = barstate.isfirst ? false : v1WeeklyBearSSMT[1]
+bool v1WeeklyBearSSMTEvent = v1WeeklyBearSSMT and not v1WeeklyBearPrev
+
+bool esDSweep = not na(esDHigh) and not na(esDPrevHigh) and esDHigh > esDPrevHigh
+bool nqDSweep = not na(nqDHigh) and not na(nqDPrevHigh) and nqDHigh > nqDPrevHigh
+bool v1DailyBearSSMT = v1Enable and (esDSweep != nqDSweep)
+bool v1DailyBearPrev = barstate.isfirst ? false : v1DailyBearSSMT[1]
+bool v1DailyBearSSMTEvent = v1DailyBearSSMT and not v1DailyBearPrev
+
+var int v1Stage1WeekKey = na
+if v1Enable
+    if timeframe.change("W")
+        v1Stage1WeekKey := na
+    if v1WeeklyBearSSMTEvent
+        v1Stage1WeekKey := esWKey
+else
+    v1Stage1WeekKey := na
+
+bool v1Stage1Armed = v1Enable and not na(v1Stage1WeekKey)
+bool v1DailyInStage1Week = v1Stage1Armed and not na(esDKey) and esDKey >= v1Stage1WeekKey
+bool v1Stage3BearSSMTEvent = v1DailyInStage1Week and v1DailyBearSSMTEvent
+
+plot(v1Enable ? (v1WeeklyBearSSMT ? 1.0 : 0.0) : na, "V1 Stage1 Weekly Bear SSMT", display=display.data_window)
+plot(v1Enable ? (v1DailyBearSSMT ? 1.0 : 0.0) : na, "V1 Stage3 Daily Bear SSMT", display=display.data_window)
+plot(v1Enable ? (v1Stage1Armed ? 1.0 : 0.0) : na, "V1 Stage1 Armed", display=display.data_window)
+plot(v1Enable ? (v1Stage3BearSSMTEvent ? 1.0 : 0.0) : na, "V1 Stage3 Event", display=display.data_window)
+
+plotshape(v1ShowMarkers and v1WeeklyBearSSMTEvent, title="V1 S1 Weekly Bear", style=shape.triangledown, location=location.abovebar, color=color.new(ssmtBearLineCol, 0), size=size.tiny, text="W1")
+plotshape(v1ShowMarkers and v1Stage3BearSSMTEvent, title="V1 S3 Daily Bear", style=shape.triangledown, location=location.abovebar, color=color.new(ssmtBearLineCol, 0), size=size.tiny, text="D3")
+
+[tpd_sym, tpd_csym, tpd_tsym3, tpd_triad_ok, tpd_dyad_ok, tpd_csym_raw, tpd_tsym3_raw] = f_tpd_resolve_symbols()
+string tpd_tf = timeframe.period
+[tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0, tpd_xatr] = request.security(tpd_csym, tpd_tf, [close, open, high, low, time, ta.atr(20)], lookahead=barmerge.lookahead_on, ignore_invalid_symbol=true)
+[tpd_yc0, tpd_yo0, tpd_yh0, tpd_yl0, tpd_yt0, tpd_yatr] = request.security(tpd_tsym3, tpd_tf, [close, open, high, low, time, ta.atr(20)], lookahead=barmerge.lookahead_on, ignore_invalid_symbol=true)
+
+bool tpd_tf1_run = tpd_tf1ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tpd_tf1)
+bool tpd_tf2_run = tpd_tf2ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tpd_tf2)
+bool tpd_tf3_run = tpd_tf3ok and timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds(tpd_tf3)
+bool tpd_tf0_run = tpd_tf0ok
+bool tpd_active = tpd_use_adv and tpd_is_visible
+
+[tf1_tpd_bull_t, tf1_tpd_bear_t] = f_tpd_triad(tpd_tf1, tpd_active and tpd_tf1_run and tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0, tpd_yc0, tpd_yo0, tpd_yh0, tpd_yl0, tpd_yt0)
+[tf1_tpd_bull_d, tf1_tpd_bear_d] = f_tpd_dyad(tpd_tf1, tpd_active and tpd_tf1_run and not tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0)
+[tf2_tpd_bull_t, tf2_tpd_bear_t] = f_tpd_triad(tpd_tf2, tpd_active and tpd_tf2_run and tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0, tpd_yc0, tpd_yo0, tpd_yh0, tpd_yl0, tpd_yt0)
+[tf2_tpd_bull_d, tf2_tpd_bear_d] = f_tpd_dyad(tpd_tf2, tpd_active and tpd_tf2_run and not tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0)
+[tf3_tpd_bull_t, tf3_tpd_bear_t] = f_tpd_triad(tpd_tf3, tpd_active and tpd_tf3_run and tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0, tpd_yc0, tpd_yo0, tpd_yh0, tpd_yl0, tpd_yt0)
+[tf3_tpd_bull_d, tf3_tpd_bear_d] = f_tpd_dyad(tpd_tf3, tpd_active and tpd_tf3_run and not tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0)
+[tf0_tpd_bull_t, tf0_tpd_bear_t] = f_tpd_triad(timeframe.period, tpd_active and tpd_tf0_run and tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0, tpd_yc0, tpd_yo0, tpd_yh0, tpd_yl0, tpd_yt0)
+[tf0_tpd_bull_d, tf0_tpd_bear_d] = f_tpd_dyad(timeframe.period, tpd_active and tpd_tf0_run and not tpd_triad_ok, tpd_lbl_size, tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0)
+
+bool tpd_bull_any = tf1_tpd_bull_t or tf1_tpd_bull_d or tf2_tpd_bull_t or tf2_tpd_bull_d or tf3_tpd_bull_t or tf3_tpd_bull_d or tf0_tpd_bull_t or tf0_tpd_bull_d
+bool tpd_bear_any = tf1_tpd_bear_t or tf1_tpd_bear_d or tf2_tpd_bear_t or tf2_tpd_bear_d or tf3_tpd_bear_t or tf3_tpd_bear_d or tf0_tpd_bear_t or tf0_tpd_bear_d
+color tpd_body_color = tpd_show_body and tpd_active ? (tpd_bull_any ? tpd_bull_body : tpd_bear_any ? tpd_bear_body : na) : na
+barcolor(tpd_body_color)
+
+var table tpd_debug_tbl = table.new(position.top_right, 2, 15, border_width=1)
+[dbg_mh2, dbg_ml2, dbg_mc2, dbg_mo2, dbg_mt2, dbg_mh1, dbg_ml1, dbg_mc1, dbg_mo1, dbg_mt1, dbg_mh0, dbg_ml0, dbg_mc0, dbg_mo0, dbg_mt0, dbg_mup1, dbg_mdw1, dbg_ml1t, dbg_mh1t] = f_tpd_live_sym(close, open, high, low, time, timeframe.period)
+[dbg_oh2, dbg_ol2, dbg_oc2, dbg_oo2, dbg_ot2, dbg_oh1, dbg_ol1, dbg_oc1, dbg_oo1, dbg_ot1, dbg_oh0, dbg_ol0, dbg_oc0, dbg_oo0, dbg_ot0, dbg_oup1, dbg_odw1, dbg_ol1t, dbg_oh1t] = f_tpd_live_sym(tpd_xc0, tpd_xo0, tpd_xh0, tpd_xl0, tpd_xt0, timeframe.period)
+[dbg_ph2, dbg_pl2, dbg_pc2, dbg_po2, dbg_pt2, dbg_ph1, dbg_pl1, dbg_pc1, dbg_po1, dbg_pt1, dbg_ph0, dbg_pl0, dbg_pc0, dbg_po0, dbg_pt0, dbg_pup1, dbg_pdw1, dbg_pl1t, dbg_ph1t] = f_tpd_live_sym(tpd_yc0, tpd_yo0, tpd_yh0, tpd_yl0, tpd_yt0, timeframe.period)
+
+if barstate.islast
+    if show_tpd_debug
+        string sym_dbg = syminfo.ticker
+        string csym_dbg = f_tpd_short_sym(tpd_csym_raw)
+        string tsym3_dbg = f_tpd_short_sym(tpd_tsym3_raw)
+        bool use_triad_dbg = tpd_triad_ok
+        bool use_dyad_dbg = not tpd_triad_ok and tpd_dyad_ok
+        bool d_c1_main = dbg_mc1 > dbg_mo1
+        bool d_c1_pair = dbg_oc1 > dbg_oo1
+        bool d_c1_third = dbg_pc1 > dbg_po1
+        bool d_c3_main = dbg_mc2 > dbg_mo0
+        bool d_c3_pair = dbg_oc2 > dbg_oo0
+        bool d_c3_third = dbg_pc2 > dbg_po0
+
+        bool d_crack1_d = not array.every(array.from(d_c1_main, d_c1_pair)) and array.some(array.from(d_c1_main, d_c1_pair))
+        bool d_crack2_d = not array.every(array.from(d_c3_main, d_c3_pair)) and array.some(array.from(d_c3_main, d_c3_pair))
+        bool d_crack1_t = not array.every(array.from(d_c1_main, d_c1_pair, d_c1_third)) and array.some(array.from(d_c1_main, d_c1_pair, d_c1_third))
+        bool d_crack2_t = not array.every(array.from(d_c3_main, d_c3_pair, d_c3_third)) and array.some(array.from(d_c3_main, d_c3_pair, d_c3_third))
+
+        bool d_con_low_d = array.some(array.from(array.min(array.from(dbg_ml2, dbg_ml1, dbg_ml0)) == dbg_ml1, array.min(array.from(dbg_ol2, dbg_ol1, dbg_ol0)) == dbg_ol1))
+        bool d_con_high_d = array.some(array.from(array.max(array.from(dbg_mh2, dbg_mh1, dbg_mh0)) == dbg_mh1, array.max(array.from(dbg_oh2, dbg_oh1, dbg_oh0)) == dbg_oh1))
+        bool d_con_low_t = array.some(array.from(array.min(array.from(dbg_ml2, dbg_ml1, dbg_ml0)) == dbg_ml1, array.min(array.from(dbg_ol2, dbg_ol1, dbg_ol0)) == dbg_ol1, array.min(array.from(dbg_pl2, dbg_pl1, dbg_pl0)) == dbg_pl1))
+        bool d_con_high_t = array.some(array.from(array.max(array.from(dbg_mh2, dbg_mh1, dbg_mh0)) == dbg_mh1, array.max(array.from(dbg_oh2, dbg_oh1, dbg_oh0)) == dbg_oh1, array.max(array.from(dbg_ph2, dbg_ph1, dbg_ph0)) == dbg_ph1))
+
+        bool dbg_crack1 = use_triad_dbg ? d_crack1_t : d_crack1_d
+        bool dbg_crack2 = use_triad_dbg ? d_crack2_t : d_crack2_d
+        bool dbg_con_low = use_triad_dbg ? d_con_low_t : d_con_low_d
+        bool dbg_con_high = use_triad_dbg ? d_con_high_t : d_con_high_d
+        bool dbg_bear = (tpd_use_swing ? dbg_con_high : true) and dbg_crack1 and dbg_crack2
+        bool dbg_bull = (tpd_use_swing ? dbg_con_low : true) and dbg_crack1 and dbg_crack2
+
+        string triad_r1 = use_triad_dbg ? sym_dbg : ""
+        string triad_r2 = use_triad_dbg ? csym_dbg : ""
+        string triad_r3 = use_triad_dbg ? tsym3_dbg : ""
+        string dyad_r1 = use_dyad_dbg ? sym_dbg : ""
+        string dyad_r2 = use_dyad_dbg ? csym_dbg : ""
+        string dyad_r3 = ""
+
+        string c1_a = sym_dbg + " C1 " + f_tpd_fmt(dbg_mo2) + "/" + f_tpd_fmt(dbg_mc2)
+        string c1_b = csym_dbg + " C1 " + f_tpd_fmt(dbg_oo2) + "/" + f_tpd_fmt(dbg_oc2)
+        string c1_c = tsym3_dbg + " C1 " + f_tpd_fmt(dbg_po2) + "/" + f_tpd_fmt(dbg_pc2)
+        string c2_a = sym_dbg + " C2 " + f_tpd_fmt(dbg_mo1) + "/" + f_tpd_fmt(dbg_mc1)
+        string c2_b = csym_dbg + " C2 " + f_tpd_fmt(dbg_oo1) + "/" + f_tpd_fmt(dbg_oc1)
+        string c2_c = tsym3_dbg + " C2 " + f_tpd_fmt(dbg_po1) + "/" + f_tpd_fmt(dbg_pc1)
+        string c3_a = sym_dbg + " C3 " + f_tpd_fmt(dbg_mo0) + "/" + f_tpd_fmt(dbg_mc0)
+        string c3_b = csym_dbg + " C3 " + f_tpd_fmt(dbg_oo0) + "/" + f_tpd_fmt(dbg_oc0)
+        string c3_c = tsym3_dbg + " C3 " + f_tpd_fmt(dbg_po0) + "/" + f_tpd_fmt(dbg_pc0)
+
+        string triad_c1_a = use_triad_dbg ? c1_a : ""
+        string triad_c1_b = use_triad_dbg ? c1_b : ""
+        string triad_c1_c = use_triad_dbg ? c1_c : ""
+        string triad_c2_a = use_triad_dbg ? c2_a : ""
+        string triad_c2_b = use_triad_dbg ? c2_b : ""
+        string triad_c2_c = use_triad_dbg ? c2_c : ""
+        string triad_c3_a = use_triad_dbg ? c3_a : ""
+        string triad_c3_b = use_triad_dbg ? c3_b : ""
+        string triad_c3_c = use_triad_dbg ? c3_c : ""
+
+        string dyad_c1_a = use_dyad_dbg ? c1_a : ""
+        string dyad_c1_b = use_dyad_dbg ? c1_b : ""
+        string dyad_c1_c = ""
+        string dyad_c2_a = use_dyad_dbg ? c2_a : ""
+        string dyad_c2_b = use_dyad_dbg ? c2_b : ""
+        string dyad_c2_c = ""
+        string dyad_c3_a = use_dyad_dbg ? c3_a : ""
+        string dyad_c3_b = use_dyad_dbg ? c3_b : ""
+        string dyad_c3_c = ""
+
+        string dbg_flags = (use_triad_dbg or use_dyad_dbg) ? ("cr1 " + str.tostring(dbg_crack1) + " cr2 " + str.tostring(dbg_crack2) + " hi " + str.tostring(dbg_con_high) + " lo " + str.tostring(dbg_con_low) + " b " + str.tostring(dbg_bear) + " u " + str.tostring(dbg_bull)) : ""
+        string dbg_bull_opacity = "Bull Opacity " + str.tostring(100 - color.t(tpd_bull_color))
+        string dbg_bear_opacity = "Bear Opacity " + str.tostring(100 - color.t(tpd_bear_color))
+        color header_bg = color.new(color.gray, 85)
+        color body_bg = color.white
+        table.cell(tpd_debug_tbl, 0, 0, "Triad", text_color=color.black, bgcolor=header_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 0, "Dyad", text_color=color.black, bgcolor=header_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 1, triad_r1, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 2, triad_r2, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 3, triad_r3, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 4, triad_c1_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 5, triad_c1_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 6, triad_c1_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 7, triad_c2_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 8, triad_c2_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 9, triad_c2_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 10, triad_c3_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 11, triad_c3_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 12, triad_c3_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 13, use_triad_dbg ? dbg_flags : "", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 0, 14, dbg_bull_opacity, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 1, dyad_r1, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 2, dyad_r2, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 3, dyad_r3, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 4, dyad_c1_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 5, dyad_c1_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 6, dyad_c1_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 7, dyad_c2_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 8, dyad_c2_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 9, dyad_c2_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 10, dyad_c3_a, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 11, dyad_c3_b, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 12, dyad_c3_c, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 13, use_dyad_dbg ? dbg_flags : "", text_color=color.black, bgcolor=body_bg, text_size=size.small)
+        table.cell(tpd_debug_tbl, 1, 14, dbg_bear_opacity, text_color=color.black, bgcolor=body_bg, text_size=size.small)
+    else
+        table.clear(tpd_debug_tbl, 0, 0, 1, 14)
 
 if not weeklyLive
     if weekV.ln.size() > 0

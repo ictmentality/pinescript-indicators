@@ -1,0 +1,270 @@
+//@version=6
+indicator("QT Display (Scaffold)", overlay=true, max_lines_count=500, max_labels_count=200)
+import Jaw1312/QTEngine/34 as qtf
+import Jaw1312/QTEngineElastic/8 as qte
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+groupCycles = "CYCLES"
+useNano   = input.bool(true, "Nano", group=groupCycles)
+useMicro  = input.bool(true, "Micro", group=groupCycles)
+useM90    = input.bool(true, "90m", group=groupCycles)
+useDaily  = input.bool(true, "Daily", group=groupCycles)
+useWeekly = input.bool(true, "Weekly", group=groupCycles)
+
+groupVisual = "VISUAL"
+showProjected = input.bool(true, "Show Projected Boundaries", group=groupVisual)
+lineWidth = input.int(1, "Line Width", minval=1, maxval=4, group=groupVisual)
+
+// SSMT hooks only in this scaffold (no peer request.security plumbing yet).
+groupSSMT = "SSMT"
+ssmtScaffoldEnabled = input.bool(false, "Enable SSMT Scaffold Flags", group=groupSSMT)
+
+// ============================================================================
+// COLORS
+// ============================================================================
+var color COL_Q1 = color.rgb(99, 99, 99)
+var color COL_Q2 = color.rgb(242, 54, 69)
+var color COL_Q3 = color.rgb(76, 175, 80)
+var color COL_Q4 = color.rgb(41, 98, 255)
+var color COL_Q5 = color.rgb(12, 50, 153)
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+f_kill(line ln) =>
+    line out = na
+    if not na(ln)
+        line.delete(ln)
+    out
+
+f_set_or_make_vline(line ln, int ts, color c, int w) =>
+    line out = ln
+    if na(ts)
+        out := f_kill(out)
+    else
+        if na(out)
+            out := line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=w, color=c)
+        else
+            line.set_xy1(out, ts, low)
+            line.set_xy2(out, ts, high)
+            line.set_extend(out, extend.both)
+            line.set_style(out, line.style_solid)
+            line.set_width(out, w)
+            line.set_color(out, c)
+    out
+
+f_ts_for_draw(bool enabled, int ts) =>
+    enabled and not na(ts) and (showProjected or time_close > ts) ? ts : int(na)
+
+f_draw_cycle(
+    bool enabled,
+    int q1Ts,
+    int q2Ts,
+    int q3Ts,
+    int q4Ts,
+    int q5Ts,
+    int endTs,
+    line l1,
+    line l2,
+    line l3,
+    line l4,
+    line l5,
+    line lE
+) =>
+    int dQ1 = f_ts_for_draw(enabled, q1Ts)
+    int dQ2 = f_ts_for_draw(enabled, q2Ts)
+    int dQ3 = f_ts_for_draw(enabled, q3Ts)
+    int dQ4 = f_ts_for_draw(enabled, q4Ts)
+    int dQ5 = f_ts_for_draw(enabled, q5Ts)
+    int dE  = f_ts_for_draw(enabled, endTs)
+
+    line o1 = f_set_or_make_vline(l1, dQ1, COL_Q1, lineWidth)
+    line o2 = f_set_or_make_vline(l2, dQ2, COL_Q2, lineWidth)
+    line o3 = f_set_or_make_vline(l3, dQ3, COL_Q3, lineWidth)
+    line o4 = f_set_or_make_vline(l4, dQ4, COL_Q4, lineWidth)
+    line o5 = f_set_or_make_vline(l5, dQ5, COL_Q5, lineWidth)
+    line oE = f_set_or_make_vline(lE, dE, COL_Q1, lineWidth)
+
+    line[] out = array.new_line()
+    array.push(out, o1)
+    array.push(out, o2)
+    array.push(out, o3)
+    array.push(out, o4)
+    array.push(out, o5)
+    array.push(out, oE)
+    out
+
+// ============================================================================
+// ENGINE A: FIXED (Nano/Micro/90m/Daily)
+// ============================================================================
+var qtf.QTConfig qtfCfg = qtf.qt_config_default()
+var qtf.CycleState qtfSt = qtf.qt_state_new()
+
+[qtfSt1, dRes] = qtf.qt_daily_update(qtfSt, qtfCfg, time, time_close)
+[qtfSt2, m90Res] = qtf.qt_m90_update(qtfSt1, qtfCfg, time, time_close)
+[qtfSt3, microRes] = qtf.qt_micro_update(qtfSt2, qtfCfg, time, time_close)
+[qtfSt4, nanoRes] = qtf.qt_nano_update(qtfSt3, qtfCfg, time, time_close)
+qtfSt := qtfSt4
+
+// ============================================================================
+// ENGINE B: ELASTIC (Weekly)
+// ============================================================================
+var qte.QTConfig qteCfg = qte.qt_config_default()
+var qte.CycleState qteSt = qte.qt_state_new()
+
+[qteSt1, wkRes] = qte.qt_weekly_update(qteSt, qteCfg, time, time_close)
+qteSt := qteSt1
+
+// ============================================================================
+// DIVIDER LINES (CURRENT CYCLE PER TF)
+// ============================================================================
+var line nanoQ1 = na
+var line nanoQ2 = na
+var line nanoQ3 = na
+var line nanoQ4 = na
+var line nanoQ5 = na
+var line nanoEnd = na
+
+var line microQ1 = na
+var line microQ2 = na
+var line microQ3 = na
+var line microQ4 = na
+var line microQ5 = na
+var line microEnd = na
+
+var line m90Q1 = na
+var line m90Q2 = na
+var line m90Q3 = na
+var line m90Q4 = na
+var line m90Q5 = na
+var line m90End = na
+
+var line dailyQ1 = na
+var line dailyQ2 = na
+var line dailyQ3 = na
+var line dailyQ4 = na
+var line dailyQ5 = na
+var line dailyEnd = na
+
+var line weekQ1 = na
+var line weekQ2 = na
+var line weekQ3 = na
+var line weekQ4 = na
+var line weekQ5 = na
+var line weekEnd = na
+
+line[] nanoLines = f_draw_cycle(
+    useNano and timeframe.isintraday,
+    nanoRes.q1Ts,
+    nanoRes.q2Ts,
+    nanoRes.q3Ts,
+    nanoRes.q4Ts,
+    int(na),
+    nanoRes.endTs,
+    nanoQ1, nanoQ2, nanoQ3, nanoQ4, nanoQ5, nanoEnd
+)
+nanoQ1 := array.get(nanoLines, 0)
+nanoQ2 := array.get(nanoLines, 1)
+nanoQ3 := array.get(nanoLines, 2)
+nanoQ4 := array.get(nanoLines, 3)
+nanoQ5 := array.get(nanoLines, 4)
+nanoEnd := array.get(nanoLines, 5)
+
+line[] microLines = f_draw_cycle(
+    useMicro and timeframe.isintraday,
+    microRes.q1Ts,
+    microRes.q2Ts,
+    microRes.q3Ts,
+    microRes.q4Ts,
+    int(na),
+    microRes.endTs,
+    microQ1, microQ2, microQ3, microQ4, microQ5, microEnd
+)
+microQ1 := array.get(microLines, 0)
+microQ2 := array.get(microLines, 1)
+microQ3 := array.get(microLines, 2)
+microQ4 := array.get(microLines, 3)
+microQ5 := array.get(microLines, 4)
+microEnd := array.get(microLines, 5)
+
+line[] m90Lines = f_draw_cycle(
+    useM90 and timeframe.isintraday,
+    m90Res.q1Ts,
+    m90Res.q2Ts,
+    m90Res.q3Ts,
+    m90Res.q4Ts,
+    int(na),
+    m90Res.endTs,
+    m90Q1, m90Q2, m90Q3, m90Q4, m90Q5, m90End
+)
+m90Q1 := array.get(m90Lines, 0)
+m90Q2 := array.get(m90Lines, 1)
+m90Q3 := array.get(m90Lines, 2)
+m90Q4 := array.get(m90Lines, 3)
+m90Q5 := array.get(m90Lines, 4)
+m90End := array.get(m90Lines, 5)
+
+line[] dailyLines = f_draw_cycle(
+    useDaily and timeframe.isintraday,
+    dRes.q1Ts,
+    dRes.q2Ts,
+    dRes.q3Ts,
+    dRes.q4Ts,
+    int(na),
+    dRes.endTs,
+    dailyQ1, dailyQ2, dailyQ3, dailyQ4, dailyQ5, dailyEnd
+)
+dailyQ1 := array.get(dailyLines, 0)
+dailyQ2 := array.get(dailyLines, 1)
+dailyQ3 := array.get(dailyLines, 2)
+dailyQ4 := array.get(dailyLines, 3)
+dailyQ5 := array.get(dailyLines, 4)
+dailyEnd := array.get(dailyLines, 5)
+
+line[] weekLines = f_draw_cycle(
+    useWeekly and timeframe.isintraday,
+    wkRes.q1Ts,
+    wkRes.q2Ts,
+    wkRes.q3Ts,
+    wkRes.q4Ts,
+    wkRes.q5Ts,
+    wkRes.endTs,
+    weekQ1, weekQ2, weekQ3, weekQ4, weekQ5, weekEnd
+)
+weekQ1 := array.get(weekLines, 0)
+weekQ2 := array.get(weekLines, 1)
+weekQ3 := array.get(weekLines, 2)
+weekQ4 := array.get(weekLines, 3)
+weekQ5 := array.get(weekLines, 4)
+weekEnd := array.get(weekLines, 5)
+
+// ============================================================================
+// SSMT SCAFFOLD FLAGS (NO PEER/REQUEST LOGIC YET)
+// ============================================================================
+bool ssmtNanoReady = ssmtScaffoldEnabled and useNano and nanoRes.inWindow
+bool ssmtMicroReady = ssmtScaffoldEnabled and useMicro and microRes.inWindow
+bool ssmtM90Ready = ssmtScaffoldEnabled and useM90 and m90Res.inWindow
+bool ssmtDailyReady = ssmtScaffoldEnabled and useDaily and dRes.inWindow
+bool ssmtWeeklyReady = ssmtScaffoldEnabled and useWeekly and wkRes.inWindow
+
+plot(ssmtScaffoldEnabled ? (ssmtNanoReady ? 1.0 : 0.0) : na, "SSMT Nano Ready", display=display.data_window)
+plot(ssmtScaffoldEnabled ? (ssmtMicroReady ? 1.0 : 0.0) : na, "SSMT Micro Ready", display=display.data_window)
+plot(ssmtScaffoldEnabled ? (ssmtM90Ready ? 1.0 : 0.0) : na, "SSMT 90m Ready", display=display.data_window)
+plot(ssmtScaffoldEnabled ? (ssmtDailyReady ? 1.0 : 0.0) : na, "SSMT Daily Ready", display=display.data_window)
+plot(ssmtScaffoldEnabled ? (ssmtWeeklyReady ? 1.0 : 0.0) : na, "SSMT Weekly Ready", display=display.data_window)
+
+// ============================================================================
+// DEBUG EXPORTS
+// ============================================================================
+plot(useNano ? nanoRes.q1Ts : na, "Nano q1Ts", display=display.data_window)
+plot(useMicro ? microRes.q1Ts : na, "Micro q1Ts", display=display.data_window)
+plot(useM90 ? m90Res.q1Ts : na, "90m q1Ts", display=display.data_window)
+plot(useDaily ? dRes.q1Ts : na, "Daily q1Ts", display=display.data_window)
+plot(useWeekly ? wkRes.q1Ts : na, "Weekly q1Ts", display=display.data_window)
+
+// TODO:
+// 1) Port triad/dyad symbol selection from WeeklyCylceElastic.
+// 2) Add cycle-specific SSMT extraction and drawing modules (Nano -> Weekly).
+// 3) Keep peer request.security calls centralized and shared across SSMT modes.

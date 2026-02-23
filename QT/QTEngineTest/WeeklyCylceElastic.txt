@@ -1,5 +1,6 @@
 //@version=6
-indicator("Weekly Cycle", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("Weekly Cycle Elastic", overlay=true, max_lines_count=500, max_labels_count=500)
+import Jaw1312/QTEngineElastic/8 as qt
 
 // ============================================================================
 // CONSTANTS
@@ -37,15 +38,18 @@ useWeekly   = input.bool(true, "Weekly", group=groupCycles)
 groupAll        = "CYCLE SETTINGS"
 showOpens       = input.bool(true,  "Show Opens", group=groupAll)
 keepCycles      = input.int(1,      "# of Cycles", minval=1, maxval=200, group=groupAll)
-q1OpenCol       = input.color(color.rgb(255, 152, 0), "Q1 Open Color", group=groupAll)
-trueOpenCol     = input.color(color.rgb(0,   0,   0), "Q2 Open Color", group=groupAll)
+q1OpenCol       = input.color(color.new(color.rgb(184, 184, 184), 20), "Q1 Open Color", group=groupAll)
+trueOpenCol     = input.color(color.new(color.red, 45), "Q2 Open Color", group=groupAll)
 q1OpenStyleStr  = input.string("Dashed", "Q1 Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
 trueOpenStyleStr = input.string("Dashed", "Q2 Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
 
 groupSSMT = "WEEKLY SSMT (ES/NQ)"
 showWeeklyBearSSMT = input.bool(false, "Show Bearish W.SSMT (Triad)", group=groupSSMT)
+showWeeklyBullSSMT = input.bool(false, "Show Bullish W.SSMT (Triad)", group=groupSSMT)
 showWeeklyBearHSSMT = input.bool(false, "Show Bearish W.HSSMT (Triad)", group=groupSSMT)
 showWeeklyBearBoth = input.bool(false, "Show Both (Prefer W.SSMT)", group=groupSSMT)
+showWeeklyBullHSSMT = input.bool(false, "Show Bullish W.HSSMT (Triad)", group=groupSSMT)
+showWeeklyBullBoth = input.bool(false, "Show Bullish Both (Prefer W.SSMT)", group=groupSSMT)
 
 // TPD [JAW] asset selection (Triad/Dyad)
 tr1B = true, st4 = "OANDA:XAUUSD", st5 = "OANDA:XAGUSD", st6 = "OANDA:XPTUSD"
@@ -130,8 +134,13 @@ dyad_m5_sym2 = input.symbol("", "&", group=groupSSMTDyad, inline="dyad_m5")
 inv_dyad_m5 = input.bool(false, "Inverse", group=groupSSMTDyad, inline="dyad_m5")
 
 ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)
+ssmtBullLineCol = input.color(color.rgb(41, 98, 255), "Bullish SSMT Color", group=groupSSMT)
 ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
 ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
+
+groupDebug = "DEBUG"
+showWeeklyQOpenTable = input.bool(true, "Show Weekly Q Open Table", group=groupDebug)
+showWeeklySSMTDebug = input.bool(false, "Show Weekly SSMT Debug (Data Window)", group=groupDebug)
 
 // ============================================================================
 // HELPERS
@@ -211,6 +220,12 @@ f_weekly_aligned_open_current(int q1Ts, int q2Ts, int q3Ts, int q4Ts, int q5Ts, 
 
 f_ssmt_sym_ticker(string sym) =>
     string s = str.upper(sym)
+    if str.contains(s, "{")
+        string[] partsBrace = str.split(s, "{")
+        s := array.get(partsBrace, 0)
+    if str.contains(s, "|")
+        string[] partsPipe = str.split(s, "|")
+        s := array.get(partsPipe, 0)
     string[] parts = str.split(s, ":")
     array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
 
@@ -246,54 +261,222 @@ f_ssmt_tag(string sym) =>
         tag := "YM"
     tag
 
-f_ssmt_weekly_highs_expr() =>
-    int wkStart = time("W")
-    int wkEnd = wkStart + 7 * LEN_24H
-    int q2 = f_next_ds_after(wkStart)
+f_ssmt_label_sym(string sym) =>
+    string allUp = str.upper(sym)
+    string out = ""
+    if str.contains(allUp, "MNQ")
+        out := "MNQ"
+    else if str.contains(allUp, "MES")
+        out := "MES"
+    else if str.contains(allUp, "MYM")
+        out := "MYM"
+    else if str.contains(allUp, "MGC")
+        out := "MGC"
+    else if str.contains(allUp, "SIL")
+        out := "SIL"
+    else if str.contains(allUp, "MHG")
+        out := "MHG"
+    else if str.contains(allUp, "NQ")
+        out := "NQ"
+    else if str.contains(allUp, "ES")
+        out := "ES"
+    else if str.contains(allUp, "YM")
+        out := "YM"
+    else if str.contains(allUp, "GC")
+        out := "GC"
+    else if str.contains(allUp, "SI")
+        out := "SI"
+    else if str.contains(allUp, "PL")
+        out := "PL"
+    else if str.contains(allUp, "HG")
+        out := "HG"
+    else if str.contains(allUp, "CL")
+        out := "CL"
+
+    string s = f_ssmt_sym_ticker(sym)
+    s := str.replace_all(s, "}", "")
+    s := str.replace_all(s, "{", "")
+    s := str.replace_all(s, "\"", "")
+    s := str.replace_all(s, "'", "")
+    s := str.replace_all(s, "=", "")
+    s := str.trim(s)
+    string up = str.upper(s)
+    if out == ""
+        out := up
+        if str.length(up) >= 3
+            string r3 = str.substring(up, 0, 3)
+            if r3 == "MES" or r3 == "MNQ" or r3 == "MYM" or r3 == "MGC" or r3 == "SIL" or r3 == "MHG"
+                out := r3
+        if out == up and str.length(up) >= 2
+            string r2 = str.substring(up, 0, 2)
+            if r2 == "ES" or r2 == "NQ" or r2 == "YM" or r2 == "GC" or r2 == "SI" or r2 == "PL" or r2 == "HG" or r2 == "CL"
+                out := r2
+    out
+
+f_ssmt_match_chart_contract_size(string inputSym, string chartSym) =>
+    string out = inputSym
+    string chartT = f_ssmt_sym_ticker(chartSym)
+
+    bool chartMicro = str.contains(chartT, "MES") or str.contains(chartT, "MNQ") or str.contains(chartT, "MYM")
+    bool chartMini = (str.contains(chartT, "ES") and not str.contains(chartT, "MES")) or (str.contains(chartT, "NQ") and not str.contains(chartT, "MNQ")) or (str.contains(chartT, "YM") and not str.contains(chartT, "MYM"))
+
+    if chartMicro or chartMini
+        string up = str.upper(inputSym)
+        string[] parts = str.split(up, ":")
+        string ex = array.size(parts) > 1 ? array.get(parts, 0) : ""
+        string tk = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : up
+
+        bool tkMicro = str.length(tk) >= 3 and (str.substring(tk, 0, 3) == "MES" or str.substring(tk, 0, 3) == "MNQ" or str.substring(tk, 0, 3) == "MYM")
+        bool tkMini = str.length(tk) >= 2 and (str.substring(tk, 0, 2) == "ES" or str.substring(tk, 0, 2) == "NQ" or str.substring(tk, 0, 2) == "YM")
+
+        if chartMicro and tkMini
+            string root2 = str.substring(tk, 0, 2)
+            string suffix2 = str.substring(tk, 2, str.length(tk))
+            if root2 == "ES"
+                tk := "MES" + suffix2
+            else if root2 == "NQ"
+                tk := "MNQ" + suffix2
+            else if root2 == "YM"
+                tk := "MYM" + suffix2
+        else if chartMini and tkMicro
+            string root3 = str.substring(tk, 0, 3)
+            string suffix3 = str.substring(tk, 3, str.length(tk))
+            if root3 == "MES"
+                tk := "ES" + suffix3
+            else if root3 == "MNQ"
+                tk := "NQ" + suffix3
+            else if root3 == "MYM"
+                tk := "YM" + suffix3
+
+        out := str.length(ex) > 0 ? ex + ":" + tk : tk
+    out
+
+f_weekly_q_bounds(int wkStart, int wkEnd) =>
+    int q1 = wkStart
+    int q2 = f_next_ds_after(q1)
     int q3 = q2 + LEN_24H
     int q4 = q3 + LEN_24H
     int q5 = q4 + LEN_24H
+    [q1, q2, q3, q4, q5, wkEnd]
 
-    int qCur = wkStart
-    if time >= q5 and time < wkEnd
-        qCur := q5
-    else if time >= q4 and time < wkEnd
-        qCur := q4
-    else if time >= q3 and time < wkEnd
-        qCur := q3
-    else if time >= q2 and time < wkEnd
-        qCur := q2
+f_ssmt_weekly_highs_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
 
-    var int qLast = int(na)
-    var float hCur = float(na)
-    var int hCurTs = int(na)
-    var float hPrev = float(na)
-    var int hPrevTs = int(na)
-    var float bhCur = float(na)
-    var int bhCurTs = int(na)
-    var float bhPrev = float(na)
-    var int bhPrevTs = int(na)
-    float bodyHigh = math.max(open, close)
+    [peerStNext, peerWk] = qt.qt_weekly_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    [_, _, _, _, _, pwprev1, _] = qt.qt_weekly_qr_debug(peerSt)
 
-    if na(qLast) or qCur != qLast
-        hPrev := hCur
-        hPrevTs := hCurTs
-        hCur := high
-        hCurTs := time
-        bhPrev := bhCur
-        bhPrevTs := bhCurTs
-        bhCur := bodyHigh
-        bhCurTs := time
-        qLast := qCur
-    else
-        if na(hCur) or high > hCur
-            hCur := high
-            hCurTs := time
-        if na(bhCur) or bodyHigh > bhCur
-            bhCur := bodyHigh
-            bhCurTs := time
+    float hCur = na
+    int   hCurTs = na
+    float hPrev = na
+    int   hPrevTs = na
+    float bhCur = na
+    int   bhCurTs = na
+    float bhPrev = na
+    int   bhPrevTs = na
+    float lCur = na
+    int   lCurTs = na
+    float lPrev = na
+    int   lPrevTs = na
+    float blCur = na
+    int   blCurTs = na
+    float blPrev = na
+    int   blPrevTs = na
+    int   qCur = na
 
-    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, qCur]
+    if peerWk.inWindow and peerWk.curQuarterIndex == 1
+        hCur := peerWk.q1.h
+        hCurTs := peerWk.q1.hTs
+        bhCur := peerWk.q1.bh
+        bhCurTs := peerWk.q1.bhTs
+        lCur := peerWk.q1.l
+        lCurTs := peerWk.q1.lTs
+        blCur := peerWk.q1.bl
+        blCurTs := peerWk.q1.blTs
+        hPrev := pwprev1.h
+        hPrevTs := pwprev1.hTs
+        bhPrev := pwprev1.bh
+        bhPrevTs := pwprev1.bhTs
+        lPrev := pwprev1.l
+        lPrevTs := pwprev1.lTs
+        blPrev := pwprev1.bl
+        blPrevTs := pwprev1.blTs
+        qCur := peerWk.q1.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 2
+        hCur := peerWk.q2.h
+        hCurTs := peerWk.q2.hTs
+        bhCur := peerWk.q2.bh
+        bhCurTs := peerWk.q2.bhTs
+        lCur := peerWk.q2.l
+        lCurTs := peerWk.q2.lTs
+        blCur := peerWk.q2.bl
+        blCurTs := peerWk.q2.blTs
+        hPrev := peerWk.q1.h
+        hPrevTs := peerWk.q1.hTs
+        bhPrev := peerWk.q1.bh
+        bhPrevTs := peerWk.q1.bhTs
+        lPrev := peerWk.q1.l
+        lPrevTs := peerWk.q1.lTs
+        blPrev := peerWk.q1.bl
+        blPrevTs := peerWk.q1.blTs
+        qCur := peerWk.q2.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 3
+        hCur := peerWk.q3.h
+        hCurTs := peerWk.q3.hTs
+        bhCur := peerWk.q3.bh
+        bhCurTs := peerWk.q3.bhTs
+        lCur := peerWk.q3.l
+        lCurTs := peerWk.q3.lTs
+        blCur := peerWk.q3.bl
+        blCurTs := peerWk.q3.blTs
+        hPrev := peerWk.q2.h
+        hPrevTs := peerWk.q2.hTs
+        bhPrev := peerWk.q2.bh
+        bhPrevTs := peerWk.q2.bhTs
+        lPrev := peerWk.q2.l
+        lPrevTs := peerWk.q2.lTs
+        blPrev := peerWk.q2.bl
+        blPrevTs := peerWk.q2.blTs
+        qCur := peerWk.q3.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 4
+        hCur := peerWk.q4.h
+        hCurTs := peerWk.q4.hTs
+        bhCur := peerWk.q4.bh
+        bhCurTs := peerWk.q4.bhTs
+        lCur := peerWk.q4.l
+        lCurTs := peerWk.q4.lTs
+        blCur := peerWk.q4.bl
+        blCurTs := peerWk.q4.blTs
+        hPrev := peerWk.q3.h
+        hPrevTs := peerWk.q3.hTs
+        bhPrev := peerWk.q3.bh
+        bhPrevTs := peerWk.q3.bhTs
+        lPrev := peerWk.q3.l
+        lPrevTs := peerWk.q3.lTs
+        blPrev := peerWk.q3.bl
+        blPrevTs := peerWk.q3.blTs
+        qCur := peerWk.q4.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 5
+        hCur := peerWk.q5.h
+        hCurTs := peerWk.q5.hTs
+        bhCur := peerWk.q5.bh
+        bhCurTs := peerWk.q5.bhTs
+        lCur := peerWk.q5.l
+        lCurTs := peerWk.q5.lTs
+        blCur := peerWk.q5.bl
+        blCurTs := peerWk.q5.blTs
+        hPrev := peerWk.q4.h
+        hPrevTs := peerWk.q4.hTs
+        bhPrev := peerWk.q4.bh
+        bhPrevTs := peerWk.q4.bhTs
+        lPrev := peerWk.q4.l
+        lPrevTs := peerWk.q4.lTs
+        blPrev := peerWk.q4.bl
+        blPrevTs := peerWk.q4.blTs
+        qCur := peerWk.q5.boundaryTs
+
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
 
 // ============================================================================
 // WEEKLY SCAN ENGINE (QTEngine-style shape: config + state + update result)
@@ -725,6 +908,26 @@ f_kill(line ln) =>
         line.delete(ln)
     out
 
+f_week_inputs_from_engine(int[] startsIn, int curEnd, float curQ1Open, float curQ2Open) =>
+    int[] starts = array.copy(startsIn)
+    int[] ends = array.new_int()
+    float[] wo = array.new_float()
+    float[] two = array.new_float()
+
+    int n = array.size(starts)
+    if n > 0
+        int i = 0
+        while i < n
+            int endTs = i < (n - 1) ? array.get(starts, i + 1) : curEnd
+            array.push(ends, endTs)
+            array.push(wo, float(na))
+            array.push(two, float(na))
+            i += 1
+        array.set(wo, n - 1, curQ1Open)
+        array.set(two, n - 1, curQ2Open)
+
+    [starts, ends, wo, two]
+
 // ============================================================================
 // WEEKLY CYCLE RUNNER
 // ============================================================================
@@ -734,6 +937,14 @@ run_week_cycle(
     float[] wkWo,
     float[] wkTwo,
     int     wEndProj,
+    int     curQ2Ts,
+    int     curQ3Ts,
+    int     curQ4Ts,
+    int     curQ5Ts,
+    bool    curQ2Realized,
+    bool    curQ3Realized,
+    bool    curQ4Realized,
+    bool    curQ5Realized,
     int     keepWeeks,
     vset    v,
     hset    hWO,
@@ -785,23 +996,20 @@ run_week_cycle(
             int wS = wkStarts.get(i)
             int wEStored = wkEnds.get(i)
             int wE = na(wEStored) ? wEndProj : wEStored
+            bool isCurWeek = i == (n - 1)
 
             if wS >= cut and time_close > wS
                 vset_add(v, wS, COL_Q1)
 
-            int q2 = f_next_ds_after(wS)
-            int q3 = q2 + LEN_24H
-            int q4 = q3 + LEN_24H
-            int q5 = q4 + LEN_24H
-
-            if not na(q2) and q2 >= cut and q2 < wE and time_close > q2
-                vset_add(v, q2, COL_Q2)
-            if not na(q3) and q3 >= cut and q3 < wE and time_close > q3
-                vset_add(v, q3, COL_Q3)
-            if not na(q4) and q4 >= cut and q4 < wE and time_close > q4
-                vset_add(v, q4, COL_Q4)
-            if not na(q5) and q5 >= cut and q5 < wE and time_close > q5
-                vset_add(v, q5, COL_Q5)
+            if isCurWeek
+                if curQ2Realized and not na(curQ2Ts) and curQ2Ts >= cut and curQ2Ts < wE
+                    vset_add(v, curQ2Ts, COL_Q2)
+                if curQ3Realized and not na(curQ3Ts) and curQ3Ts >= cut and curQ3Ts < wE
+                    vset_add(v, curQ3Ts, COL_Q3)
+                if curQ4Realized and not na(curQ4Ts) and curQ4Ts >= cut and curQ4Ts < wE
+                    vset_add(v, curQ4Ts, COL_Q4)
+                if curQ5Realized and not na(curQ5Ts) and curQ5Ts >= cut and curQ5Ts < wE
+                    vset_add(v, curQ5Ts, COL_Q5)
 
             if not na(wEStored) and wEStored >= cut and time_close > wEStored
                 vset_add(v, wEStored, COL_Q1)
@@ -812,8 +1020,8 @@ run_week_cycle(
                     hset_add(hWO, wS, wE, wo, q1OpenCol, q1OpenStyleStr)
 
                 float twoO = wkTwo.get(i)
-                if not na(twoO) and time_close > q2
-                    hset_add(hTWO, q2, wE, twoO, trueOpenCol, trueOpenStyleStr)
+                if isCurWeek and not na(twoO) and not na(curQ2Ts) and time_close > curQ2Ts
+                    hset_add(hTWO, curQ2Ts, wE, twoO, trueOpenCol, trueOpenStyleStr)
 
             i += 1
 
@@ -821,29 +1029,23 @@ run_week_cycle(
             hset_sync(hWO, q1OpenCol, q1OpenStyleStr)
             hset_sync(hTWO, trueOpenCol, trueOpenStyleStr)
 
-        int curWs = wkStarts.get(n - 1)
-        int curQ2 = f_next_ds_after(curWs)
-        int curQ3 = curQ2 + LEN_24H
-        int curQ4 = curQ3 + LEN_24H
-        int curQ5 = curQ4 + LEN_24H
-
-        if not na(curQ2) and time_close <= curQ2
-            p2 := f_set_or_make_vline(p2, curQ2, COL_Q2)
+        if not na(curQ2Ts) and not curQ2Realized and time_close <= curQ2Ts
+            p2 := f_set_or_make_vline(p2, curQ2Ts, COL_Q2)
         else
             p2 := f_kill(p2)
 
-        if not na(curQ3) and time_close <= curQ3
-            p3 := f_set_or_make_vline(p3, curQ3, COL_Q3)
+        if not na(curQ3Ts) and not curQ3Realized and time_close <= curQ3Ts
+            p3 := f_set_or_make_vline(p3, curQ3Ts, COL_Q3)
         else
             p3 := f_kill(p3)
 
-        if not na(curQ4) and time_close <= curQ4
-            p4 := f_set_or_make_vline(p4, curQ4, COL_Q4)
+        if not na(curQ4Ts) and not curQ4Realized and time_close <= curQ4Ts
+            p4 := f_set_or_make_vline(p4, curQ4Ts, COL_Q4)
         else
             p4 := f_kill(p4)
 
-        if not na(curQ5) and time_close <= curQ5
-            p5 := f_set_or_make_vline(p5, curQ5, COL_Q5)
+        if not na(curQ5Ts) and not curQ5Realized and time_close <= curQ5Ts
+            p5 := f_set_or_make_vline(p5, curQ5Ts, COL_Q5)
         else
             p5 := f_kill(p5)
 
@@ -880,39 +1082,71 @@ var line weekProjQ4  = na
 var line weekProjQ5  = na
 var line weekProjEnd = na
 
-var WeeklyConfig wkCfg = f_weekly_cfg_default()
-var WeeklyState  wkSt  = f_weekly_state_new()
-var WeeklyResult wkRes = f_weekly_result_empty()
+var qt.QTConfig   qtCfg = qt.qt_config_default()
+var qt.CycleState qtSt  = qt.qt_state_new()
 
-int   wkKey    = request.security(syminfo.tickerid, "W", time,      lookahead=barmerge.lookahead_on)
-int   wkEndPrj = request.security(syminfo.tickerid, "W", time_close, lookahead=barmerge.lookahead_on)
-float wkOpen   = request.security(syminfo.tickerid, "W", open,      lookahead=barmerge.lookahead_on)
+[qtStNext, wkCycle] = qt.qt_weekly_update(qtSt, qtCfg, time, time_close)
+qtSt := qtStNext
+[wq1, wq2, wq3, wq4, wq5, wprev1, wprev2] = qt.qt_weekly_qr_debug(qtSt)
 
-wkCfg := WeeklyConfig.new(wkCfg.tz, wkCfg.dayStartHour, wkCfg.dayStartMin, 400)
-[wkStNext, wkResNext] = f_weekly_scan_update(wkSt, wkCfg, time, time_close, wkKey, wkEndPrj, wkOpen, useWeekly)
-wkSt := wkStNext
-wkRes := wkResNext
+int   wkEndPrj = wkCycle.endTs
 
 // Data Window exports (QTEngine-style: boundaries, realized flags, quarter opens)
-plot(useWeekly ? wkRes.q1Ts : na, "Weekly q1Ts", display=display.data_window)
-plot(useWeekly ? wkRes.q2Ts : na, "Weekly q2Ts", display=display.data_window)
-plot(useWeekly ? wkRes.q3Ts : na, "Weekly q3Ts", display=display.data_window)
-plot(useWeekly ? wkRes.q4Ts : na, "Weekly q4Ts", display=display.data_window)
-plot(useWeekly ? wkRes.q5Ts : na, "Weekly q5Ts", display=display.data_window)
-plot(useWeekly ? (wkRes.q2Realized ? 1.0 : 0.0) : na, "Weekly q2Realized", display=display.data_window)
-plot(useWeekly ? (wkRes.q3Realized ? 1.0 : 0.0) : na, "Weekly q3Realized", display=display.data_window)
-plot(useWeekly ? (wkRes.q4Realized ? 1.0 : 0.0) : na, "Weekly q4Realized", display=display.data_window)
-plot(useWeekly ? (wkRes.q5Realized ? 1.0 : 0.0) : na, "Weekly q5Realized", display=display.data_window)
-plot(useWeekly ? wkRes.q1Open : na, "Weekly q1.o", display=display.data_window)
-plot(useWeekly ? wkRes.q2Open : na, "Weekly q2.o", display=display.data_window)
-plot(useWeekly ? wkRes.q3Open : na, "Weekly q3.o", display=display.data_window)
-plot(useWeekly ? wkRes.q4Open : na, "Weekly q4.o", display=display.data_window)
-plot(useWeekly ? wkRes.q5Open : na, "Weekly q5.o", display=display.data_window)
-plot(useWeekly ? wkRes.q1OpenTs : na, "Weekly q1.oTs", display=display.data_window)
-plot(useWeekly ? wkRes.q2OpenTs : na, "Weekly q2.oTs", display=display.data_window)
-plot(useWeekly ? wkRes.q3OpenTs : na, "Weekly q3.oTs", display=display.data_window)
-plot(useWeekly ? wkRes.q4OpenTs : na, "Weekly q4.oTs", display=display.data_window)
-plot(useWeekly ? wkRes.q5OpenTs : na, "Weekly q5.oTs", display=display.data_window)
+plot(useWeekly ? wkCycle.startTs : na, "Weekly startTs", display=display.data_window)
+plot(useWeekly ? wkCycle.endTs : na, "Weekly endTs", display=display.data_window)
+plot(useWeekly ? wkCycle.q2.boundaryTs : na, "Weekly q2Ts", display=display.data_window)
+plot(useWeekly ? wkCycle.q3.boundaryTs : na, "Weekly q3Ts", display=display.data_window)
+plot(useWeekly ? wkCycle.q4.boundaryTs : na, "Weekly q4Ts", display=display.data_window)
+plot(useWeekly ? wkCycle.q5.boundaryTs : na, "Weekly q5Ts (QT)", display=display.data_window)
+plot(useWeekly ? (wkCycle.q2Realized ? 1.0 : 0.0) : na, "Weekly q2Realized", display=display.data_window)
+plot(useWeekly ? (wkCycle.q3Realized ? 1.0 : 0.0) : na, "Weekly q3Realized", display=display.data_window)
+plot(useWeekly ? (wkCycle.q4Realized ? 1.0 : 0.0) : na, "Weekly q4Realized", display=display.data_window)
+plot(useWeekly ? (wkCycle.q5Realized ? 1.0 : 0.0) : na, "Weekly q5Realized (QT)", display=display.data_window)
+plot(useWeekly ? wkCycle.q1.o : na, "Weekly q1.o", display=display.data_window)
+plot(useWeekly ? wkCycle.q2.o : na, "Weekly q2.o", display=display.data_window)
+plot(useWeekly ? wkCycle.q3.o : na, "Weekly q3.o", display=display.data_window)
+plot(useWeekly ? wkCycle.q4.o : na, "Weekly q4.o", display=display.data_window)
+plot(useWeekly ? wkCycle.q5.o : na, "Weekly q5.o (QT)", display=display.data_window)
+plot(useWeekly ? wkCycle.q1.oTs : na, "Weekly q1.oTs", display=display.data_window)
+plot(useWeekly ? wkCycle.q2.oTs : na, "Weekly q2.oTs", display=display.data_window)
+plot(useWeekly ? wkCycle.q3.oTs : na, "Weekly q3.oTs", display=display.data_window)
+plot(useWeekly ? wkCycle.q4.oTs : na, "Weekly q4.oTs", display=display.data_window)
+plot(useWeekly ? wkCycle.q5.oTs : na, "Weekly q5.oTs (QT)", display=display.data_window)
+
+string dbgChartAsset = str.upper(syminfo.ticker)
+string dbgChartShort = f_ssmt_label_sym(syminfo.ticker)
+
+var table wkOpenTbl = table.new(position.top_right, 4, 6, border_width=1)
+if barstate.islast
+    if showWeeklyQOpenTable
+        color headBg = color.new(color.gray, 85)
+        color bodyBg = color.white
+        table.cell(wkOpenTbl, 0, 0, "Quarter", text_color=color.black, bgcolor=headBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 0, "Open", text_color=color.black, bgcolor=headBg, text_size=size.small)
+        table.cell(wkOpenTbl, 2, 0, "High", text_color=color.black, bgcolor=headBg, text_size=size.small)
+        table.cell(wkOpenTbl, 3, 0, "Asset", text_color=color.black, bgcolor=headBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 1, "W.Q1", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 1, na(wq1.o) ? "na" : str.tostring(wq1.o, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 2, 1, na(wq1.h) ? "na" : str.tostring(wq1.h, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 3, 1, dbgChartAsset, text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 2, "W.Q2", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 2, na(wq2.o) ? "na" : str.tostring(wq2.o, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 2, 2, na(wq2.h) ? "na" : str.tostring(wq2.h, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 3, 2, dbgChartShort, text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 3, "W.Q3", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 3, na(wq3.o) ? "na" : str.tostring(wq3.o, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 2, 3, na(wq3.h) ? "na" : str.tostring(wq3.h, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 3, 3, "", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 4, "W.Q4", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 4, na(wq4.o) ? "na" : str.tostring(wq4.o, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 2, 4, na(wq4.h) ? "na" : str.tostring(wq4.h, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 3, 4, "", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 5, "W.Q5", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 5, na(wq5.o) ? "na" : str.tostring(wq5.o, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 2, 5, na(wq5.h) ? "na" : str.tostring(wq5.h, format.mintick), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 3, 5, "", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+    else
+        table.clear(wkOpenTbl, 0, 0, 3, 5)
 
 // Bearish Weekly SSMT / HSSMT (Triad)
 var line[] wSsmtHistLines = array.new_line()
@@ -922,6 +1156,25 @@ var line wSsmtLine2 = na
 var label wSsmtLbl = na
 var int wSsmtEventKey = na
 var int wSsmtPurgeTs = na
+var int wSsmtLastQTs = na
+var bool wSsmtSplitLastBar = false
+var bool wSsmtCarryAllowed = false
+
+var line[] wBSsmtHistLines = array.new_line()
+var label[] wBSsmtHistLbls = array.new_label()
+var line wBSsmtLine = na
+var line wBSsmtLine2 = na
+var label wBSsmtLbl = na
+var int wBSsmtEventKey = na
+var int wBSsmtPurgeTs = na
+
+var line[] wHBSsmtHistLines = array.new_line()
+var label[] wHBSsmtHistLbls = array.new_label()
+var line wHBSsmtLine = na
+var line wHBSsmtLine2 = na
+var label wHBSsmtLbl = na
+var int wHBSsmtEventKey = na
+var int wHBSsmtPurgeTs = na
 
 var line[] wHSsmtHistLines = array.new_line()
 var label[] wHSsmtHistLbls = array.new_label()
@@ -931,11 +1184,34 @@ var label wHSsmtLbl = na
 var int wHSsmtEventKey = na
 var int wHSsmtPurgeTs = na
 
-if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyLive and tf_h1
+// Weekly SSMT debug probes (Data Window only)
+var float dbgWRegBearSplit = na
+var float dbgWHidBearSplit = na
+var float dbgWRegBearChartSweep = na
+var float dbgWHidBearChartSweep = na
+var float dbgWRegBearPeer2Sweep = na
+var float dbgWHidBearPeer2Sweep = na
+var float dbgWRegBearPeer3Sweep = na
+var float dbgWHidBearPeer3Sweep = na
+
+dbgWRegBearSplit := na
+dbgWHidBearSplit := na
+dbgWRegBearChartSweep := na
+dbgWHidBearChartSweep := na
+dbgWRegBearPeer2Sweep := na
+dbgWHidBearPeer2Sweep := na
+dbgWRegBearPeer3Sweep := na
+dbgWHidBearPeer3Sweep := na
+
+if (showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeeklyBullHSSMT or showWeeklyBearBoth or showWeeklyBullBoth) and weeklyLive and tf_h1
     bool runWeeklyBearSSMT = showWeeklyBearSSMT or showWeeklyBearBoth
+    bool runWeeklyBullSSMT = showWeeklyBullSSMT or showWeeklyBullBoth
     bool runWeeklyBearHSSMT = showWeeklyBearHSSMT or showWeeklyBearBoth
+    bool runWeeklyBullHSSMT = showWeeklyBullHSSMT or showWeeklyBullBoth
     bool preferRegularVisual = showWeeklyBearBoth
+    bool preferRegularVisualBull = showWeeklyBullBoth
     bool regularVisualCandidate = false
+    bool regularVisualCandidateBull = false
 
     string sym = syminfo.tickerid
 
@@ -1070,8 +1346,10 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
 
     if triad_ok
         if str.length(tsym2) > 0
+            tsym2 := f_ssmt_match_chart_contract_size(tsym2, sym)
             tsym2 := syminfo.type == "futures" ? ticker.modify(tsym2, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : tsym2
         if str.length(tsym3) > 0
+            tsym3 := f_ssmt_match_chart_contract_size(tsym3, sym)
             tsym3 := syminfo.type == "futures" ? ticker.modify(tsym3, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : tsym3
     else if dyad_selection_mode != "Off"
         if dyad_selection_mode == "Manual"
@@ -1120,6 +1398,7 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
             else if is_si_asset
                 csym := s11
         if str.length(csym) > 0
+            csym := f_ssmt_match_chart_contract_size(csym, sym)
             csym := syminfo.type == "futures" ? ticker.modify(csym, session=syminfo.session, backadjustment=badj ? backadjustment.on : backadjustment.off) : csym
             tsym2 := csym
             tsym3 := ""
@@ -1133,7 +1412,114 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
 
     bool dyad_ok = not triad_ok and str.length(tsym2) > 0 and str.length(tsym3) == 0
 
-    [chHcur, chHcurTs, chHprev, chHprevTs, chBHcur, chBHcurTs, chBHprev, chBHprevTs, chQts] = f_ssmt_weekly_highs_expr()
+    float chHcur = na
+    int   chHcurTs = na
+    float chHprev = na
+    int   chHprevTs = na
+    float chBHcur = na
+    int   chBHcurTs = na
+    float chBHprev = na
+    int   chBHprevTs = na
+    float chLcur = na
+    int   chLcurTs = na
+    float chLprev = na
+    int   chLprevTs = na
+    float chBLcur = na
+    int   chBLcurTs = na
+    float chBLprev = na
+    int   chBLprevTs = na
+    int   chQts = na
+
+    if wkCycle.inWindow and wkCycle.curQuarterIndex == 1
+        chHcur := wkCycle.q1.h
+        chHcurTs := wkCycle.q1.hTs
+        chBHcur := wkCycle.q1.bh
+        chBHcurTs := wkCycle.q1.bhTs
+        chLcur := wkCycle.q1.l
+        chLcurTs := wkCycle.q1.lTs
+        chBLcur := wkCycle.q1.bl
+        chBLcurTs := wkCycle.q1.blTs
+        chHprev := wprev1.h
+        chHprevTs := wprev1.hTs
+        chBHprev := wprev1.bh
+        chBHprevTs := wprev1.bhTs
+        chLprev := wprev1.l
+        chLprevTs := wprev1.lTs
+        chBLprev := wprev1.bl
+        chBLprevTs := wprev1.blTs
+        chQts := wkCycle.q1.boundaryTs
+    else if wkCycle.inWindow and wkCycle.curQuarterIndex == 2
+        chHcur := wkCycle.q2.h
+        chHcurTs := wkCycle.q2.hTs
+        chBHcur := wkCycle.q2.bh
+        chBHcurTs := wkCycle.q2.bhTs
+        chLcur := wkCycle.q2.l
+        chLcurTs := wkCycle.q2.lTs
+        chBLcur := wkCycle.q2.bl
+        chBLcurTs := wkCycle.q2.blTs
+        chHprev := wkCycle.q1.h
+        chHprevTs := wkCycle.q1.hTs
+        chBHprev := wkCycle.q1.bh
+        chBHprevTs := wkCycle.q1.bhTs
+        chLprev := wkCycle.q1.l
+        chLprevTs := wkCycle.q1.lTs
+        chBLprev := wkCycle.q1.bl
+        chBLprevTs := wkCycle.q1.blTs
+        chQts := wkCycle.q2.boundaryTs
+    else if wkCycle.inWindow and wkCycle.curQuarterIndex == 3
+        chHcur := wkCycle.q3.h
+        chHcurTs := wkCycle.q3.hTs
+        chBHcur := wkCycle.q3.bh
+        chBHcurTs := wkCycle.q3.bhTs
+        chLcur := wkCycle.q3.l
+        chLcurTs := wkCycle.q3.lTs
+        chBLcur := wkCycle.q3.bl
+        chBLcurTs := wkCycle.q3.blTs
+        chHprev := wkCycle.q2.h
+        chHprevTs := wkCycle.q2.hTs
+        chBHprev := wkCycle.q2.bh
+        chBHprevTs := wkCycle.q2.bhTs
+        chLprev := wkCycle.q2.l
+        chLprevTs := wkCycle.q2.lTs
+        chBLprev := wkCycle.q2.bl
+        chBLprevTs := wkCycle.q2.blTs
+        chQts := wkCycle.q3.boundaryTs
+    else if wkCycle.inWindow and wkCycle.curQuarterIndex == 4
+        chHcur := wkCycle.q4.h
+        chHcurTs := wkCycle.q4.hTs
+        chBHcur := wkCycle.q4.bh
+        chBHcurTs := wkCycle.q4.bhTs
+        chLcur := wkCycle.q4.l
+        chLcurTs := wkCycle.q4.lTs
+        chBLcur := wkCycle.q4.bl
+        chBLcurTs := wkCycle.q4.blTs
+        chHprev := wkCycle.q3.h
+        chHprevTs := wkCycle.q3.hTs
+        chBHprev := wkCycle.q3.bh
+        chBHprevTs := wkCycle.q3.bhTs
+        chLprev := wkCycle.q3.l
+        chLprevTs := wkCycle.q3.lTs
+        chBLprev := wkCycle.q3.bl
+        chBLprevTs := wkCycle.q3.blTs
+        chQts := wkCycle.q4.boundaryTs
+    else if wkCycle.inWindow and wkCycle.curQuarterIndex == 5
+        chHcur := wkCycle.q5.h
+        chHcurTs := wkCycle.q5.hTs
+        chBHcur := wkCycle.q5.bh
+        chBHcurTs := wkCycle.q5.bhTs
+        chLcur := wkCycle.q5.l
+        chLcurTs := wkCycle.q5.lTs
+        chBLcur := wkCycle.q5.bl
+        chBLcurTs := wkCycle.q5.blTs
+        chHprev := wkCycle.q4.h
+        chHprevTs := wkCycle.q4.hTs
+        chBHprev := wkCycle.q4.bh
+        chBHprevTs := wkCycle.q4.bhTs
+        chLprev := wkCycle.q4.l
+        chLprevTs := wkCycle.q4.lTs
+        chBLprev := wkCycle.q4.bl
+        chBLprevTs := wkCycle.q4.blTs
+        chQts := wkCycle.q5.boundaryTs
     float peer2Hcur = na
     int   peer2HcurTs = na
     float peer2Hprev = na
@@ -1142,9 +1528,17 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
     int   peer2BHcurTs = na
     float peer2BHprev = na
     int   peer2BHprevTs = na
+    float peer2Lcur = na
+    int   peer2LcurTs = na
+    float peer2Lprev = na
+    int   peer2LprevTs = na
+    float peer2BLcur = na
+    int   peer2BLcurTs = na
+    float peer2BLprev = na
+    int   peer2BLprevTs = na
     int   peer2Qts = na
     if str.length(tsym2) > 0
-        [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Qts] = request.security(tsym2, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
         peer2Hcur := p2Hcur
         peer2HcurTs := p2HcurTs
         peer2Hprev := p2Hprev
@@ -1153,6 +1547,14 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
         peer2BHcurTs := p2BHcurTs
         peer2BHprev := p2BHprev
         peer2BHprevTs := p2BHprevTs
+        peer2Lcur := p2Lcur
+        peer2LcurTs := p2LcurTs
+        peer2Lprev := p2Lprev
+        peer2LprevTs := p2LprevTs
+        peer2BLcur := p2BLcur
+        peer2BLcurTs := p2BLcurTs
+        peer2BLprev := p2BLprev
+        peer2BLprevTs := p2BLprevTs
         peer2Qts := p2Qts
     float peer3Hcur = na
     int   peer3HcurTs = na
@@ -1162,9 +1564,17 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
     int   peer3BHcurTs = na
     float peer3BHprev = na
     int   peer3BHprevTs = na
+    float peer3Lcur = na
+    int   peer3LcurTs = na
+    float peer3Lprev = na
+    int   peer3LprevTs = na
+    float peer3BLcur = na
+    int   peer3BLcurTs = na
+    float peer3BLprev = na
+    int   peer3BLprevTs = na
     int   peer3Qts = na
     if str.length(tsym3) > 0
-        [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Qts] = request.security(tsym3, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+        [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
         peer3Hcur := p3Hcur
         peer3HcurTs := p3HcurTs
         peer3Hprev := p3Hprev
@@ -1173,9 +1583,17 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
         peer3BHcurTs := p3BHcurTs
         peer3BHprev := p3BHprev
         peer3BHprevTs := p3BHprevTs
+        peer3Lcur := p3Lcur
+        peer3LcurTs := p3LcurTs
+        peer3Lprev := p3Lprev
+        peer3LprevTs := p3LprevTs
+        peer3BLcur := p3BLcur
+        peer3BLcurTs := p3BLcurTs
+        peer3BLprev := p3BLprev
+        peer3BLprevTs := p3BLprevTs
         peer3Qts := p3Qts
 
-    string chartTag = f_ssmt_tag(syminfo.tickerid)
+    string chartAsset = f_ssmt_label_sym(syminfo.tickerid)
     bool isPairChart = (triad_ok or dyad_ok) and (str.length(tsym2) > 0 or str.length(tsym3) > 0)
 
     // Bearish Weekly SSMT (normal)
@@ -1183,6 +1601,12 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
         bool hasPeer2 = str.length(tsym2) > 0 and not na(peer2Hcur) and not na(peer2Hprev) and not na(peer2HcurTs) and not na(peer2HprevTs) and not na(peer2Qts)
         bool hasPeer3 = str.length(tsym3) > 0 and not na(peer3Hcur) and not na(peer3Hprev) and not na(peer3HcurTs) and not na(peer3HprevTs) and not na(peer3Qts)
         bool ssmtReady = isPairChart and not na(chHcur) and not na(chHprev) and not na(chHcurTs) and not na(chHprevTs) and (hasPeer2 or hasPeer3)
+        if not na(chQts)
+            bool qChanged = na(wSsmtLastQTs) or chQts != wSsmtLastQTs
+            if qChanged
+                wSsmtCarryAllowed := wSsmtSplitLastBar
+                wSsmtSplitLastBar := false
+                wSsmtLastQTs := chQts
         if ssmtReady
             bool chartSweep = chHcur > chHprev
             bool split2 = hasPeer2 and (chartSweep != (peer2Hcur > peer2Hprev))
@@ -1190,6 +1614,11 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
             bool split = split2 or split3
             bool peer2Sweep = hasPeer2 ? (peer2Hcur > peer2Hprev) : false
             bool peer3Sweep = hasPeer3 ? (peer3Hcur > peer3Hprev) : false
+            wSsmtSplitLastBar := split
+            dbgWRegBearSplit := split ? 1.0 : 0.0
+            dbgWRegBearChartSweep := chartSweep ? 1.0 : 0.0
+            dbgWRegBearPeer2Sweep := peer2Sweep ? 1.0 : 0.0
+            dbgWRegBearPeer3Sweep := peer3Sweep ? 1.0 : 0.0
 
             float curH = chHcur
             int   curHTs = chHcurTs
@@ -1201,15 +1630,15 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
             if split
                 if hasPeer2 and hasPeer3
                     if peer2Sweep == peer3Sweep
-                        cracked := chartSweep != peer2Sweep ? chartTag : ""
+                        cracked := chartSweep != peer2Sweep ? chartAsset : ""
                     else if chartSweep == peer2Sweep
-                        cracked := f_ssmt_tag(tsym3)
+                        cracked := f_ssmt_label_sym(tsym3)
                     else if chartSweep == peer3Sweep
-                        cracked := f_ssmt_tag(tsym2)
+                        cracked := f_ssmt_label_sym(tsym2)
                     else
-                        cracked := chartTag
+                        cracked := chartAsset
                 else
-                    cracked := not chartSweep ? chartTag : ""
+                    cracked := not chartSweep ? chartAsset : ""
 
             int eventKey = prevHTs
             bool eventChanged = not na(eventKey) and (na(wSsmtEventKey) or eventKey != wSsmtEventKey)
@@ -1270,6 +1699,7 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
                     label.delete(wSsmtLbl)
                     wSsmtLbl := na
         else
+            wSsmtSplitLastBar := false
             if not na(wSsmtLine)
                 line.delete(wSsmtLine)
                 wSsmtLine := na
@@ -1295,6 +1725,245 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
         f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
         wSsmtEventKey := na
         wSsmtPurgeTs := na
+        wSsmtLastQTs := na
+        wSsmtSplitLastBar := false
+        wSsmtCarryAllowed := false
+
+    // Bullish Weekly SSMT (normal)
+    if runWeeklyBullSSMT
+        bool hasPeer2B = str.length(tsym2) > 0 and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2LcurTs) and not na(peer2LprevTs) and not na(peer2Qts)
+        bool hasPeer3B = str.length(tsym3) > 0 and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3LcurTs) and not na(peer3LprevTs) and not na(peer3Qts)
+        bool ssmtReadyB = isPairChart and not na(chLcur) and not na(chLprev) and not na(chLcurTs) and not na(chLprevTs) and (hasPeer2B or hasPeer3B)
+        if ssmtReadyB
+            bool chartSweepB = chLcur < chLprev
+            bool split2B = hasPeer2B and (chartSweepB != (peer2Lcur < peer2Lprev))
+            bool split3B = hasPeer3B and (chartSweepB != (peer3Lcur < peer3Lprev))
+            bool splitB = split2B or split3B
+            bool peer2SweepB = hasPeer2B ? (peer2Lcur < peer2Lprev) : false
+            bool peer3SweepB = hasPeer3B ? (peer3Lcur < peer3Lprev) : false
+
+            float curL = chLcur
+            int   curLTs = chLcurTs
+            float prevL = chLprev
+            int   prevLTs = chLprevTs
+            int   curQTsB = chQts
+            bool  curSweepB = chartSweepB
+            string crackedB = ""
+            if splitB
+                if hasPeer2B and hasPeer3B
+                    if peer2SweepB == peer3SweepB
+                        crackedB := chartSweepB != peer2SweepB ? chartAsset : ""
+                    else if chartSweepB == peer2SweepB
+                        crackedB := f_ssmt_label_sym(tsym3)
+                    else if chartSweepB == peer3SweepB
+                        crackedB := f_ssmt_label_sym(tsym2)
+                    else
+                        crackedB := chartAsset
+                else
+                    crackedB := not chartSweepB ? chartAsset : ""
+
+            int eventKeyB = prevLTs
+            bool eventChangedB = not na(eventKeyB) and (na(wBSsmtEventKey) or eventKeyB != wBSsmtEventKey)
+            if eventChangedB
+                f_ssmt_hist_push(wBSsmtLine, wBSsmtLbl, wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
+                f_ssmt_hist_push(wBSsmtLine2, na, wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
+                wBSsmtLine := na
+                wBSsmtLine2 := na
+                wBSsmtLbl := na
+                wBSsmtEventKey := eventKeyB
+                wBSsmtPurgeTs := na
+
+            if not splitB
+                if not na(wBSsmtLine)
+                    line.delete(wBSsmtLine)
+                    wBSsmtLine := na
+                if not na(wBSsmtLine2)
+                    line.delete(wBSsmtLine2)
+                    wBSsmtLine2 := na
+                if not na(wBSsmtLbl)
+                    label.delete(wBSsmtLbl)
+                    wBSsmtLbl := na
+                wBSsmtPurgeTs := na
+            else
+                bool hasPointsB = not na(prevL) and not na(prevLTs) and not na(curQTsB)
+                regularVisualCandidateBull := splitB and hasPointsB
+                if hasPointsB and curSweepB
+                    int qEndB = curQTsB + LEN_24H
+                    int subLenB = LEN_24H / 4
+                    if na(wBSsmtPurgeTs) and time >= curQTsB and time < qEndB and low < prevL
+                        wBSsmtPurgeTs := time
+                    int purgeTsB = not na(wBSsmtPurgeTs) ? wBSsmtPurgeTs : (not na(curLTs) ? curLTs : curQTsB)
+                    int subQuarterIdxB = purgeTsB < (curQTsB + subLenB) ? 1 : purgeTsB < (curQTsB + 2 * subLenB) ? 2 : purgeTsB < (curQTsB + 3 * subLenB) ? 3 : 4
+                    int solidCutB = subQuarterIdxB == 2 ? (curQTsB + subLenB) : subQuarterIdxB == 3 ? (curQTsB + 2 * subLenB) : subQuarterIdxB == 4 ? (curQTsB + 3 * subLenB) : int(na)
+                    int dottedStartB = prevLTs
+                    if not na(solidCutB) and solidCutB > prevLTs
+                        wBSsmtLine2 := f_set_or_make_hline_w_style(wBSsmtLine2, prevLTs, solidCutB, prevL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
+                        dottedStartB := solidCutB
+                    else
+                        wBSsmtLine2 := f_kill(wBSsmtLine2)
+                    wBSsmtLine := f_set_or_make_hline_w_style(wBSsmtLine, dottedStartB, qEndB, prevL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Dotted")
+                else if hasPointsB and not curSweepB and not na(curL) and not na(curLTs)
+                    wBSsmtPurgeTs := na
+                    wBSsmtLine2 := f_kill(wBSsmtLine2)
+                    wBSsmtLine := f_set_or_make_line(wBSsmtLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+
+                bool showLabelB = crackedB != "" and not chartSweepB
+                if hasPointsB and showLabelB
+                    string lblTextB = "W " + crackedB
+                    if na(wBSsmtLbl)
+                        wBSsmtLbl := label.new(prevLTs, prevL, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                    else
+                        label.set_xy(wBSsmtLbl, prevLTs, prevL)
+                        label.set_text(wBSsmtLbl, lblTextB)
+                        label.set_textcolor(wBSsmtLbl, color.black)
+                        label.set_color(wBSsmtLbl, color.new(color.black, 100))
+                else if not showLabelB and not na(wBSsmtLbl)
+                    label.delete(wBSsmtLbl)
+                    wBSsmtLbl := na
+        else
+            if not na(wBSsmtLine)
+                line.delete(wBSsmtLine)
+                wBSsmtLine := na
+            if not na(wBSsmtLine2)
+                line.delete(wBSsmtLine2)
+                wBSsmtLine2 := na
+            if not na(wBSsmtLbl)
+                label.delete(wBSsmtLbl)
+                wBSsmtLbl := na
+            wBSsmtPurgeTs := na
+
+        f_ssmt_hist_trim(wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
+    else
+        if not na(wBSsmtLine)
+            line.delete(wBSsmtLine)
+            wBSsmtLine := na
+        if not na(wBSsmtLine2)
+            line.delete(wBSsmtLine2)
+            wBSsmtLine2 := na
+        if not na(wBSsmtLbl)
+            label.delete(wBSsmtLbl)
+            wBSsmtLbl := na
+        f_ssmt_hist_clear(wBSsmtHistLines, wBSsmtHistLbls)
+        wBSsmtEventKey := na
+        wBSsmtPurgeTs := na
+
+    // Bullish Weekly HSSMT (hidden)
+    if runWeeklyBullHSSMT
+        bool suppressHiddenByRegularBull = preferRegularVisualBull and regularVisualCandidateBull
+        bool hasPeer2HB = str.length(tsym2) > 0 and not na(peer2BLcur) and not na(peer2BLprev) and not na(peer2BLcurTs) and not na(peer2BLprevTs) and not na(peer2Qts)
+        bool hasPeer3HB = str.length(tsym3) > 0 and not na(peer3BLcur) and not na(peer3BLprev) and not na(peer3BLcurTs) and not na(peer3BLprevTs) and not na(peer3Qts)
+        bool hssmtReadyB = isPairChart and not na(chBLcur) and not na(chBLprev) and not na(chBLcurTs) and not na(chBLprevTs) and (hasPeer2HB or hasPeer3HB)
+        if hssmtReadyB and not suppressHiddenByRegularBull
+            bool chartSweepHB = chBLcur < chBLprev
+            bool split2HB = hasPeer2HB and (chartSweepHB != (peer2BLcur < peer2BLprev))
+            bool split3HB = hasPeer3HB and (chartSweepHB != (peer3BLcur < peer3BLprev))
+            bool splitHB = split2HB or split3HB
+            bool peer2SweepHB = hasPeer2HB ? (peer2BLcur < peer2BLprev) : false
+            bool peer3SweepHB = hasPeer3HB ? (peer3BLcur < peer3BLprev) : false
+
+            float curLL = chBLcur
+            int   curLLTs = chBLcurTs
+            float prevLL = chBLprev
+            int   prevLLTs = chBLprevTs
+            int   curQTsHB = chQts
+            bool  curSweepHB = chartSweepHB
+            string crackedHB = ""
+            if splitHB
+                if hasPeer2HB and hasPeer3HB
+                    if peer2SweepHB == peer3SweepHB
+                        crackedHB := chartSweepHB != peer2SweepHB ? chartAsset : ""
+                    else if chartSweepHB == peer2SweepHB
+                        crackedHB := f_ssmt_label_sym(tsym3)
+                    else if chartSweepHB == peer3SweepHB
+                        crackedHB := f_ssmt_label_sym(tsym2)
+                    else
+                        crackedHB := chartAsset
+                else
+                    crackedHB := not chartSweepHB ? chartAsset : ""
+
+            int eventKeyHB = prevLLTs
+            bool eventChangedHB = not na(eventKeyHB) and (na(wHBSsmtEventKey) or eventKeyHB != wHBSsmtEventKey)
+            if eventChangedHB
+                f_ssmt_hist_push(wHBSsmtLine, wHBSsmtLbl, wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
+                f_ssmt_hist_push(wHBSsmtLine2, na, wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
+                wHBSsmtLine := na
+                wHBSsmtLine2 := na
+                wHBSsmtLbl := na
+                wHBSsmtEventKey := eventKeyHB
+                wHBSsmtPurgeTs := na
+
+            if not splitHB
+                if not na(wHBSsmtLine)
+                    line.delete(wHBSsmtLine)
+                    wHBSsmtLine := na
+                if not na(wHBSsmtLine2)
+                    line.delete(wHBSsmtLine2)
+                    wHBSsmtLine2 := na
+                if not na(wHBSsmtLbl)
+                    label.delete(wHBSsmtLbl)
+                    wHBSsmtLbl := na
+                wHBSsmtPurgeTs := na
+            else
+                bool hasPointsHB = not na(prevLL) and not na(prevLLTs) and not na(curQTsHB)
+                if hasPointsHB and curSweepHB
+                    int qEndHB = curQTsHB + LEN_24H
+                    int subLenHB = LEN_24H / 4
+                    if na(wHBSsmtPurgeTs) and time >= curQTsHB and time < qEndHB and math.min(open, close) < prevLL
+                        wHBSsmtPurgeTs := time
+                    int purgeTsHB = not na(wHBSsmtPurgeTs) ? wHBSsmtPurgeTs : (not na(curLLTs) ? curLLTs : curQTsHB)
+                    int subQuarterIdxHB = purgeTsHB < (curQTsHB + subLenHB) ? 1 : purgeTsHB < (curQTsHB + 2 * subLenHB) ? 2 : purgeTsHB < (curQTsHB + 3 * subLenHB) ? 3 : 4
+                    int solidCutHB = subQuarterIdxHB == 2 ? (curQTsHB + subLenHB) : subQuarterIdxHB == 3 ? (curQTsHB + 2 * subLenHB) : subQuarterIdxHB == 4 ? (curQTsHB + 3 * subLenHB) : int(na)
+                    int dottedStartHB = prevLLTs
+                    if not na(solidCutHB) and solidCutHB > prevLLTs
+                        wHBSsmtLine2 := f_set_or_make_hline_w_style(wHBSsmtLine2, prevLLTs, solidCutHB, prevLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
+                        dottedStartHB := solidCutHB
+                    else
+                        wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+                    wHBSsmtLine := f_set_or_make_hline_w_style(wHBSsmtLine, dottedStartHB, qEndHB, prevLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Dotted")
+                else if hasPointsHB and not curSweepHB and not na(curLL) and not na(curLLTs)
+                    wHBSsmtPurgeTs := na
+                    wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+                    wHBSsmtLine := f_set_or_make_line(wHBSsmtLine, prevLLTs, prevLL, curLLTs, curLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+
+                bool showLabelHB = crackedHB != "" and not chartSweepHB
+                if hasPointsHB and showLabelHB
+                    string lblTextHB = "(H) W " + crackedHB
+                    if na(wHBSsmtLbl)
+                        wHBSsmtLbl := label.new(prevLLTs, prevLL, lblTextHB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                    else
+                        label.set_xy(wHBSsmtLbl, prevLLTs, prevLL)
+                        label.set_text(wHBSsmtLbl, lblTextHB)
+                        label.set_textcolor(wHBSsmtLbl, color.black)
+                        label.set_color(wHBSsmtLbl, color.new(color.black, 100))
+                else if not showLabelHB and not na(wHBSsmtLbl)
+                    label.delete(wHBSsmtLbl)
+                    wHBSsmtLbl := na
+        else
+            if not na(wHBSsmtLine)
+                line.delete(wHBSsmtLine)
+                wHBSsmtLine := na
+            if not na(wHBSsmtLine2)
+                line.delete(wHBSsmtLine2)
+                wHBSsmtLine2 := na
+            if not na(wHBSsmtLbl)
+                label.delete(wHBSsmtLbl)
+                wHBSsmtLbl := na
+            wHBSsmtPurgeTs := na
+
+        f_ssmt_hist_trim(wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
+    else
+        if not na(wHBSsmtLine)
+            line.delete(wHBSsmtLine)
+            wHBSsmtLine := na
+        if not na(wHBSsmtLine2)
+            line.delete(wHBSsmtLine2)
+            wHBSsmtLine2 := na
+        if not na(wHBSsmtLbl)
+            label.delete(wHBSsmtLbl)
+            wHBSsmtLbl := na
+        f_ssmt_hist_clear(wHBSsmtHistLines, wHBSsmtHistLbls)
+        wHBSsmtEventKey := na
+        wHBSsmtPurgeTs := na
 
     // Bearish Weekly HSSMT (hidden)
     if runWeeklyBearHSSMT
@@ -1309,6 +1978,10 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
             bool splitH = split2H or split3H
             bool peer2SweepH = hasPeer2H ? (peer2BHcur > peer2BHprev) : false
             bool peer3SweepH = hasPeer3H ? (peer3BHcur > peer3BHprev) : false
+            dbgWHidBearSplit := splitH ? 1.0 : 0.0
+            dbgWHidBearChartSweep := chartSweepH ? 1.0 : 0.0
+            dbgWHidBearPeer2Sweep := peer2SweepH ? 1.0 : 0.0
+            dbgWHidBearPeer3Sweep := peer3SweepH ? 1.0 : 0.0
 
             float curHH = chBHcur
             int   curHHTs = chBHcurTs
@@ -1320,15 +1993,15 @@ if (showWeeklyBearSSMT or showWeeklyBearHSSMT or showWeeklyBearBoth) and weeklyL
             if splitH
                 if hasPeer2H and hasPeer3H
                     if peer2SweepH == peer3SweepH
-                        crackedH := chartSweepH != peer2SweepH ? chartTag : ""
+                        crackedH := chartSweepH != peer2SweepH ? chartAsset : ""
                     else if chartSweepH == peer2SweepH
-                        crackedH := f_ssmt_tag(tsym3)
+                        crackedH := f_ssmt_label_sym(tsym3)
                     else if chartSweepH == peer3SweepH
-                        crackedH := f_ssmt_tag(tsym2)
+                        crackedH := f_ssmt_label_sym(tsym2)
                     else
-                        crackedH := chartTag
+                        crackedH := chartAsset
                 else
-                    crackedH := not chartSweepH ? chartTag : ""
+                    crackedH := not chartSweepH ? chartAsset : ""
 
             int eventKeyH = prevHHTs
             bool eventChangedH = not na(eventKeyH) and (na(wHSsmtEventKey) or eventKeyH != wHSsmtEventKey)
@@ -1426,6 +2099,33 @@ else
     f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
     wSsmtEventKey := na
     wSsmtPurgeTs := na
+    wSsmtLastQTs := na
+    wSsmtSplitLastBar := false
+    wSsmtCarryAllowed := false
+    if not na(wBSsmtLine)
+        line.delete(wBSsmtLine)
+        wBSsmtLine := na
+    if not na(wBSsmtLine2)
+        line.delete(wBSsmtLine2)
+        wBSsmtLine2 := na
+    if not na(wBSsmtLbl)
+        label.delete(wBSsmtLbl)
+        wBSsmtLbl := na
+    f_ssmt_hist_clear(wBSsmtHistLines, wBSsmtHistLbls)
+    wBSsmtEventKey := na
+    wBSsmtPurgeTs := na
+    if not na(wHBSsmtLine)
+        line.delete(wHBSsmtLine)
+        wHBSsmtLine := na
+    if not na(wHBSsmtLine2)
+        line.delete(wHBSsmtLine2)
+        wHBSsmtLine2 := na
+    if not na(wHBSsmtLbl)
+        label.delete(wHBSsmtLbl)
+        wHBSsmtLbl := na
+    f_ssmt_hist_clear(wHBSsmtHistLines, wHBSsmtHistLbls)
+    wHBSsmtEventKey := na
+    wHBSsmtPurgeTs := na
     if not na(wHSsmtLine)
         line.delete(wHSsmtLine)
         wHSsmtLine := na
@@ -1438,6 +2138,22 @@ else
     f_ssmt_hist_clear(wHSsmtHistLines, wHSsmtHistLbls)
     wHSsmtEventKey := na
     wHSsmtPurgeTs := na
+
+plot(showWeeklySSMTDebug ? dbgWRegBearSplit : na, "DBG W RegBear Split", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBearSplit : na, "DBG W HidBear Split", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWRegBearChartSweep : na, "DBG W RegBear ChartSweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBearChartSweep : na, "DBG W HidBear ChartSweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWRegBearPeer2Sweep : na, "DBG W RegBear Peer2Sweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBearPeer2Sweep : na, "DBG W HidBear Peer2Sweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWRegBearPeer3Sweep : na, "DBG W RegBear Peer3Sweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBearPeer3Sweep : na, "DBG W HidBear Peer3Sweep", display=display.data_window)
+
+if barstate.islast and showWeeklyQOpenTable
+    color bodyBg = color.white
+    table.cell(wkOpenTbl, 3, 1, dbgChartAsset, text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+    table.cell(wkOpenTbl, 3, 2, dbgChartShort, text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+    table.cell(wkOpenTbl, 3, 3, "", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+    table.cell(wkOpenTbl, 3, 4, "", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
 
 if not weeklyLive
     if weekV.ln.size() > 0
@@ -1453,12 +2169,21 @@ if not weeklyLive
     weekProjQ5  := f_kill(weekProjQ5)
     weekProjEnd := f_kill(weekProjEnd)
 else
+    [wkStartsRun, wkEndsRun, wkWoRun, wkTwoRun] = f_week_inputs_from_engine(qtSt.weekly.starts, wkCycle.endTs, wkCycle.q1.o, wkCycle.q2.o)
     line[] wprojs = run_week_cycle(
-        wkSt.starts,
-        wkSt.ends,
-        wkSt.wo,
-        wkSt.two,
+        wkStartsRun,
+        wkEndsRun,
+        wkWoRun,
+        wkTwoRun,
         wkEndPrj,
+        wkCycle.q2.boundaryTs,
+        wkCycle.q3.boundaryTs,
+        wkCycle.q4.boundaryTs,
+        wkCycle.q5.boundaryTs,
+        wkCycle.q2Realized,
+        wkCycle.q3Realized,
+        wkCycle.q4Realized,
+        wkCycle.q5Realized,
         keepCycles,
         weekV,
         weekHWO,
