@@ -1,6 +1,6 @@
 //@version=6
 indicator("QT Display", overlay=true, max_lines_count=500, max_labels_count=500)
-import Jaw1312/QTEngineElastic/8 as qt
+import Jaw1312/QTEngineElastic/10 as qt
 
 // ============================================================================
 // CONSTANTS
@@ -48,16 +48,14 @@ showOpens       = input.bool(true,  "Show Opens", group=groupAll)
 keepCycles      = input.int(1,      "# of Cycles", minval=1, maxval=5, group=groupAll)
 q1OpenCol       = input.color(color.new(color.rgb(184, 184, 184), 20), "Q1 Open Color", group=groupAll)
 trueOpenCol     = input.color(color.new(color.red, 45), "Q2 Open Color", group=groupAll)
-q1OpenStyleStr  = input.string("Dashed", "Q1 Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
-trueOpenStyleStr = input.string("Dashed", "Q2 Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
+q3OpenCol       = input.color(color.new(color.rgb(76, 175, 80), 70), "Q3 Open Color", group=groupAll)
+q4OpenCol       = input.color(color.new(color.rgb(41, 98, 255), 70), "Q4 Open Color", group=groupAll)
+q5OpenCol       = input.color(color.new(color.rgb(12, 50, 153), 70), "Q5 Open Color", group=groupAll)
+openStyleStr    = input.string("Dashed", "Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
 
-groupSSMT = "WEEKLY SSMT (ES/NQ)"
-showWeeklyBearSSMT = input.bool(false, "Show Bearish W.SSMT (Triad)", group=groupSSMT)
-showWeeklyBullSSMT = input.bool(false, "Show Bullish W.SSMT (Triad)", group=groupSSMT)
-showWeeklyBearHSSMT = input.bool(false, "Show Bearish W.HSSMT (Triad)", group=groupSSMT)
-showWeeklyBearBoth = input.bool(false, "Show Both (Prefer W.SSMT)", group=groupSSMT)
-showWeeklyBullHSSMT = input.bool(false, "Show Bullish W.HSSMT (Triad)", group=groupSSMT)
-showWeeklyBullBoth = input.bool(false, "Show Bullish Both (Prefer W.SSMT)", group=groupSSMT)
+groupSSMT = "SSMT DISPLAY MODES"
+showWeeklyBearBoth = input.bool(false, "Show Bearish SSMT", group=groupSSMT)
+showWeeklyBullBoth = input.bool(false, "Show Bullish SSMT", group=groupSSMT)
 
 groupSSMTCycles = "SSMT CYCLES (SCAFFOLD)"
 enableNanoSSMT = input.bool(false, "Enable Nano SSMT", group=groupSSMTCycles)
@@ -70,10 +68,10 @@ enableMonthlySSMT = input.bool(false, "Enable Monthly SSMT", group=groupSSMTCycl
 // TPD [JAW] asset selection (Triad/Dyad)
 tr1B = true, st4 = "OANDA:XAUUSD", st5 = "OANDA:XAGUSD", st6 = "OANDA:XPTUSD"
 tr1C = true, st7 = "BINANCE:BTCUSDT.P", st8 = "BINANCE:ETHUSDT.P", st9 = "BINANCE:ADAUSDT.P"
-tr1D = true, st10 = "CME_MINI:MNQ1!", st11 = "CME_MINI:MES1!", st12 = "CBOT_MINI:MYM1!"
+tr1D = true, st10 = "CME_MINI:NQ1!", st11 = "CME_MINI:ES1!", st12 = "CBOT_MINI:YM1!"
 tr1E = true, st13 = "FOREXCOM:EURUSD", st14 = "FOREXCOM:GBPUSD", st15 = "FOREXCOM:AUDUSD"
 tr1F = true, st16 = "CAPITALCOM:NAS100", st17 = "CAPITALCOM:US500", st18 = "CAPITALCOM:US30"
-tr1G = true, st19 = "COMEX:GC1!", st20 = "COMEX:SI1!", st21 = "NYMEX:PL1!", st22 = "COMEX:MHG1!"
+tr1G = true, st19 = "COMEX:GC1!", st20 = "COMEX:SI1!", st21 = "NYMEX:PL1!", st22 = "COMEX:MHG1!", st23 = "COMEX:HG1!"
 
 s1 = "CAPITALCOM:US100", s2 = "CAPITALCOM:US500"
 s3 = "OANDA:XAUUSD", s4 = "OANDA:XAGUSD"
@@ -260,6 +258,15 @@ f_check_match(string input_sym) =>
         string curId = str.upper(syminfo.tickerid)
         (curTicker == tSym) or str.contains(curId, tSym) or str.contains(inputUp, curTicker)
 
+f_is_same_symbol_exact(string input_sym) =>
+    bool valid = str.length(input_sym) > 0 and str.contains(input_sym, ":")
+    if not valid
+        false
+    else
+        string inTicker = str.upper(str.trim(str.replace_all(f_ssmt_sym_ticker(input_sym), "=", "")))
+        string curTicker = str.upper(str.trim(str.replace_all(f_ssmt_sym_ticker(syminfo.tickerid), "=", "")))
+        inTicker == curTicker
+
 f_ssmt_tag(string sym) =>
     string s = f_ssmt_sym_ticker(sym)
     string tag = s
@@ -365,6 +372,23 @@ f_ssmt_match_chart_contract_size(string inputSym, string chartSym) =>
                 tk := "YM" + suffix3
 
         out := str.length(ex) > 0 ? ex + ":" + tk : tk
+    out
+
+f_ssmt_apply_futures_modifiers(string sym, bool useBackadjust) =>
+    string out = sym
+    if syminfo.type == "futures"
+        bool isContinuous = str.contains(f_ssmt_sym_ticker(sym), "!")
+        if isContinuous
+            if useBackadjust
+                out := ticker.modify(sym, session=syminfo.session, backadjustment=backadjustment.on)
+            else
+                out := ticker.modify(sym, session=syminfo.session, backadjustment=backadjustment.off)
+        else
+            out := ticker.modify(sym, session=syminfo.session)
+        string outTrim = str.trim(out)
+        string outTicker = str.trim(str.replace_all(f_ssmt_sym_ticker(outTrim), "=", ""))
+        if str.length(outTrim) == 0 or outTrim == "=" or str.length(outTicker) == 0
+            out := sym
     out
 
 f_weekly_q_bounds(int wkStart, int wkEnd) =>
@@ -1559,25 +1583,25 @@ run_fixed_cycle(
             if showOpens
                 float wo = woIn.get(i)
                 if not na(wo) and time_close > s
-                    hset_add(hWO, s, e, wo, f_vcol(COL_Q1), q1OpenStyleStr)
+                    hset_add(hWO, s, e, wo, q1OpenCol, openStyleStr)
 
                 float twoO = twoIn.get(i)
                 if isCur and not na(twoO) and not na(curQ2Ts) and time_close > curQ2Ts
-                    hset_add(hTWO, curQ2Ts, e, twoO, f_vcol(COL_Q2), trueOpenStyleStr)
+                    hset_add(hTWO, curQ2Ts, e, twoO, trueOpenCol, openStyleStr)
 
                 if isCur and curQ3Realized and not na(curQ3Open) and not na(curQ3Ts) and not na(curQ4Ts) and curQ4Ts > curQ3Ts and time_close > curQ3Ts
-                    hset_add(hQ3, curQ3Ts, curQ4Ts, curQ3Open, f_vcol(COL_Q3), trueOpenStyleStr)
+                    hset_add(hQ3, curQ3Ts, curQ4Ts, curQ3Open, q3OpenCol, openStyleStr)
 
                 if isCur and curQ4Realized and not na(curQ4Open) and not na(curQ4Ts) and e > curQ4Ts and time_close > curQ4Ts
-                    hset_add(hQ4, curQ4Ts, e, curQ4Open, f_vcol(COL_Q4), trueOpenStyleStr)
+                    hset_add(hQ4, curQ4Ts, e, curQ4Open, q4OpenCol, openStyleStr)
 
             i += 1
 
         if showOpens
-            hset_sync(hWO, f_vcol(COL_Q1), q1OpenStyleStr)
-            hset_sync(hTWO, f_vcol(COL_Q2), trueOpenStyleStr)
-            hset_sync(hQ3, f_vcol(COL_Q3), trueOpenStyleStr)
-            hset_sync(hQ4, f_vcol(COL_Q4), trueOpenStyleStr)
+            hset_sync(hWO, q1OpenCol, openStyleStr)
+            hset_sync(hTWO, trueOpenCol, openStyleStr)
+            hset_sync(hQ3, q3OpenCol, openStyleStr)
+            hset_sync(hQ4, q4OpenCol, openStyleStr)
 
         if not na(curQ2Ts) and not curQ2Realized and time_close <= curQ2Ts
             p2 := f_set_or_make_vline(p2, curQ2Ts, COL_Q2)
@@ -1701,30 +1725,30 @@ run_week_cycle(
             if showOpens
                 float wo = wkWo.get(i)
                 if not na(wo) and time_close > wS
-                    hset_add(hWO, wS, wE, wo, f_vcol(COL_Q1), q1OpenStyleStr)
+                    hset_add(hWO, wS, wE, wo, q1OpenCol, openStyleStr)
 
                 float twoO = wkTwo.get(i)
                 if isCurWeek and not na(twoO) and not na(curQ2Ts) and time_close > curQ2Ts
-                    hset_add(hTWO, curQ2Ts, wE, twoO, f_vcol(COL_Q2), trueOpenStyleStr)
+                    hset_add(hTWO, curQ2Ts, wE, twoO, trueOpenCol, openStyleStr)
 
                 if isCurWeek and curQ3Realized and not na(curQ3Open) and not na(curQ3Ts) and not na(curQ4Ts) and curQ4Ts > curQ3Ts and time_close > curQ3Ts
-                    hset_add(hQ3, curQ3Ts, curQ4Ts, curQ3Open, f_vcol(COL_Q3), trueOpenStyleStr)
+                    hset_add(hQ3, curQ3Ts, curQ4Ts, curQ3Open, q3OpenCol, openStyleStr)
 
                 int q4End = not na(curQ5Ts) and not na(curQ4Ts) and curQ5Ts > curQ4Ts ? curQ5Ts : wE
                 if isCurWeek and curQ4Realized and not na(curQ4Open) and not na(curQ4Ts) and q4End > curQ4Ts and time_close > curQ4Ts
-                    hset_add(hQ4, curQ4Ts, q4End, curQ4Open, f_vcol(COL_Q4), trueOpenStyleStr)
+                    hset_add(hQ4, curQ4Ts, q4End, curQ4Open, q4OpenCol, openStyleStr)
 
                 if isCurWeek and curQ5Realized and not na(curQ5Open) and not na(curQ5Ts) and wE > curQ5Ts and time_close > curQ5Ts
-                    hset_add(hQ5, curQ5Ts, wE, curQ5Open, f_vcol(COL_Q5), trueOpenStyleStr)
+                    hset_add(hQ5, curQ5Ts, wE, curQ5Open, q5OpenCol, openStyleStr)
 
             i += 1
 
         if showOpens
-            hset_sync(hWO, f_vcol(COL_Q1), q1OpenStyleStr)
-            hset_sync(hTWO, f_vcol(COL_Q2), trueOpenStyleStr)
-            hset_sync(hQ3, f_vcol(COL_Q3), trueOpenStyleStr)
-            hset_sync(hQ4, f_vcol(COL_Q4), trueOpenStyleStr)
-            hset_sync(hQ5, f_vcol(COL_Q5), trueOpenStyleStr)
+            hset_sync(hWO, q1OpenCol, openStyleStr)
+            hset_sync(hTWO, trueOpenCol, openStyleStr)
+            hset_sync(hQ3, q3OpenCol, openStyleStr)
+            hset_sync(hQ4, q4OpenCol, openStyleStr)
+            hset_sync(hQ5, q5OpenCol, openStyleStr)
 
         if not na(curQ2Ts) and not curQ2Realized and time_close <= curQ2Ts
             p2 := f_set_or_make_vline(p2, curQ2Ts, COL_Q2)
@@ -1783,7 +1807,7 @@ bool dailyLive  = useDaily and dailyAlignedTf
 bool weeklyLive = useWeekly and weeklyAlignedTf
 bool monthlyLive = useMonthly and monthlyAlignedTf
 
-bool weeklySsmtAnyMode = showWeeklyBearSSMT or showWeeklyBullSSMT or showWeeklyBearHSSMT or showWeeklyBullHSSMT or showWeeklyBearBoth or showWeeklyBullBoth
+bool weeklySsmtAnyMode = showWeeklyBearBoth or showWeeklyBullBoth
 bool nanoSsmtLive   = f_ssmt_cycle_gate(enableNanoSSMT, nanoLive, true)
 bool microSsmtLive  = f_ssmt_cycle_gate(enableMicroSSMT, microLive, true)
 bool m90SsmtLive    = f_ssmt_cycle_gate(enableM90SSMT, m90Live, true)
@@ -2031,11 +2055,230 @@ dbgSsmtAsset3 := ""
 dbgSsmtAsset2Short := ""
 dbgSsmtAsset3Short := ""
 
+string sym = syminfo.tickerid
+
+bool match_m1_1 = f_check_match(st1_m1), match_m1_2 = f_check_match(st2_m1), match_m1_3 = f_check_match(st3_m1)
+bool match_m2_1 = f_check_match(st1_m2), match_m2_2 = f_check_match(st2_m2), match_m2_3 = f_check_match(st3_m2)
+bool match_m3_1 = f_check_match(st1_m3), match_m3_2 = f_check_match(st2_m3), match_m3_3 = f_check_match(st3_m3)
+bool match_m4_1 = f_check_match(st1_m4), match_m4_2 = f_check_match(st2_m4), match_m4_3 = f_check_match(st3_m4)
+bool match_m5_1 = f_check_match(st1_m5), match_m5_2 = f_check_match(st2_m5), match_m5_3 = f_check_match(st3_m5)
+
+bool is_in_manual_m1 = tr1A and enable_m1 and (match_m1_1 or match_m1_2 or match_m1_3)
+bool is_in_manual_m2 = tr1A and enable_m2 and (match_m2_1 or match_m2_2 or match_m2_3)
+bool is_in_manual_m3 = tr1A and enable_m3 and (match_m3_1 or match_m3_2 or match_m3_3)
+bool is_in_manual_m4 = tr1A and enable_m4 and (match_m4_1 or match_m4_2 or match_m4_3)
+bool is_in_manual_m5 = tr1A and enable_m5 and (match_m5_1 or match_m5_2 or match_m5_3)
+bool is_in_manual = is_in_manual_m1 or is_in_manual_m2 or is_in_manual_m3 or is_in_manual_m4 or is_in_manual_m5
+
+string st1 = ""
+string st2 = ""
+string st3 = ""
+if is_in_manual_m1 and enable_m1
+    st1 := st1_m1
+    st2 := st2_m1
+    st3 := st3_m1
+else if is_in_manual_m2 and enable_m2
+    st1 := st1_m2
+    st2 := st2_m2
+    st3 := st3_m2
+else if is_in_manual_m3 and enable_m3
+    st1 := st1_m3
+    st2 := st2_m3
+    st3 := st3_m3
+else if is_in_manual_m4 and enable_m4
+    st1 := st1_m4
+    st2 := st2_m4
+    st3 := st3_m4
+else if is_in_manual_m5 and enable_m5
+    st1 := st1_m5
+    st2 := st2_m5
+    st3 := st3_m5
+
+string symTicker = str.upper(f_ssmt_sym_ticker(sym))
+string chartTicker = str.upper(syminfo.ticker)
+string chartRoot = str.upper(syminfo.root)
+bool is_nq_asset = str.contains(symTicker, "NQ") or str.contains(symTicker, "MNQ") or str.contains(chartTicker, "NQ") or str.contains(chartTicker, "MNQ") or chartRoot == "NQ" or chartRoot == "MNQ"
+bool is_es_asset = str.contains(symTicker, "ES") or str.contains(symTicker, "MES") or str.contains(chartTicker, "ES") or str.contains(chartTicker, "MES") or chartRoot == "ES" or chartRoot == "MES"
+bool is_ym_asset = str.contains(symTicker, "YM") or str.contains(symTicker, "MYM") or str.contains(chartTicker, "YM") or str.contains(chartTicker, "MYM") or chartRoot == "YM" or chartRoot == "MYM"
+bool is_gc_asset = str.contains(symTicker, "GC") or str.contains(symTicker, "MGC") or str.contains(chartTicker, "GC") or str.contains(chartTicker, "MGC") or chartRoot == "GC" or chartRoot == "MGC"
+bool is_si_asset = str.contains(symTicker, "SI") or str.contains(symTicker, "MSI") or str.contains(chartTicker, "SI") or str.contains(chartTicker, "SIL") or chartRoot == "SI" or chartRoot == "SIL"
+bool is_sl_asset = str.contains(symTicker, "PL") or str.contains(symTicker, "MSL") or str.contains(chartTicker, "PL") or chartRoot == "PL"
+bool is_mgc_asset = str.contains(symTicker, "MGC")
+bool is_sil_asset = str.contains(symTicker, "SIL")
+
+bool is_in_g2 = tr1B and (str.contains(sym, "XAU") or str.contains(sym, "XAG") or str.contains(sym, "XPT"))
+bool is_in_g3 = tr1C and (str.contains(sym, "BTC") or str.contains(sym, "ETH") or str.contains(sym, "ADA"))
+bool is_in_g4 = tr1D and (is_nq_asset or is_es_asset or is_ym_asset)
+bool is_in_g5 = tr1E and (str.contains(sym, "EURUSD") or str.contains(sym, "GBPUSD") or str.contains(sym, "AUDUSD"))
+bool is_in_g6 = tr1F and (str.contains(sym, "US100") or str.contains(sym, "USTEC") or str.contains(sym, "NAS100") or str.contains(sym, "US500") or str.contains(sym, "SPX500") or str.contains(sym, "SP500") or str.contains(sym, "US30"))
+bool is_in_g7 = tr1G and (is_gc_asset or is_si_asset or is_sl_asset)
+
+bool triad_ok = triad_selection_mode == "Off" ? false : triad_selection_mode == "Auto" ? (is_in_g2 or is_in_g3 or is_in_g4 or is_in_g5 or is_in_g6 or is_in_g7) : is_in_manual
+
+bool match_1 = f_check_match(st1)
+bool match_2 = f_check_match(st2)
+bool match_3 = f_check_match(st3)
+
+string tsym2 = ""
+string tsym3 = ""
+string csym = ""
+if triad_ok
+    if is_in_manual
+        if match_1
+            tsym2 := st2
+            tsym3 := st3
+        else if match_2
+            tsym2 := st1
+            tsym3 := st3
+        else if match_3
+            tsym2 := st1
+            tsym3 := st2
+    else if is_in_g2
+        tsym2 := str.contains(sym, "XAU") ? st5 : st4
+        tsym3 := str.contains(sym, "XPT") ? st5 : st6
+    else if is_in_g3
+        tsym2 := str.contains(sym, "BTC") ? st8 : (str.contains(sym, "ETH") ? st7 : st7)
+        tsym3 := str.contains(sym, "BTC") ? st9 : (str.contains(sym, "ETH") ? st9 : st8)
+    else if is_in_g4
+        string tkr = str.upper(syminfo.ticker)
+        string root3 = str.substring(tkr, 0, 3)
+        string root2 = str.substring(tkr, 0, 2)
+        bool is_micro = root3 == "MES" or root3 == "MNQ" or root3 == "MYM"
+        string root = is_micro ? root3 : root2
+        int root_len = is_micro ? 3 : 2
+        string month_code = str.length(tkr) > root_len ? str.substring(tkr, root_len, root_len + 1) : ""
+        string year_raw = str.length(tkr) > root_len + 1 ? str.substring(tkr, root_len + 1, str.length(tkr)) : ""
+        string year_str = str.length(year_raw) >= 4 ? str.substring(year_raw, 0, 4) : year_raw
+        bool has_contract = str.contains("FGHJKMNQUVXZ", month_code) and not na(str.tonumber(year_str))
+        if has_contract
+            string root_a = root == "ES" or root == "MES" ? (is_micro ? "MNQ" : "NQ") : root == "NQ" or root == "MNQ" ? (is_micro ? "MES" : "ES") : (is_micro ? "MES" : "ES")
+            string root_b = root == "ES" or root == "MES" ? (is_micro ? "MYM" : "YM") : root == "NQ" or root == "MNQ" ? (is_micro ? "MYM" : "YM") : (is_micro ? "MNQ" : "NQ")
+            string ex_a = (root_a == "YM" or root_a == "MYM") ? "CBOT_MINI" : "CME_MINI"
+            string ex_b = (root_b == "YM" or root_b == "MYM") ? "CBOT_MINI" : "CME_MINI"
+            tsym2 := ex_a + ":" + root_a + month_code + year_str
+            tsym3 := ex_b + ":" + root_b + month_code + year_str
+        else
+            if is_nq_asset
+                tsym2 := st11
+                tsym3 := st12
+            else if is_es_asset
+                tsym2 := st10
+                tsym3 := st12
+            else if is_ym_asset
+                tsym2 := st10
+                tsym3 := st11
+    else if is_in_g5
+        tsym2 := str.contains(sym, "EURUSD") ? st14 : (str.contains(sym, "GBPUSD") ? st13 : st13)
+        tsym3 := str.contains(sym, "EURUSD") ? st15 : (str.contains(sym, "GBPUSD") ? st15 : st14)
+    else if is_in_g6
+        tsym2 := str.contains(sym, "US100") ? st17 : (str.contains(sym, "US500") ? st16 : st16)
+        tsym3 := str.contains(sym, "US100") ? st18 : (str.contains(sym, "US500") ? st18 : st17)
+    else if is_in_g7
+        if is_mgc_asset
+            tsym2 := s14
+            tsym3 := st22
+        else if is_sil_asset
+            tsym2 := s13
+            tsym3 := st22
+        else if is_gc_asset
+            tsym2 := st20
+            tsym3 := st23
+        else if is_si_asset
+            tsym2 := st19
+            tsym3 := st23
+        else if is_sl_asset
+            tsym2 := st19
+            tsym3 := st20
+
+if triad_ok
+    if str.length(tsym2) > 0
+        tsym2 := f_ssmt_match_chart_contract_size(tsym2, sym)
+        tsym2 := f_ssmt_apply_futures_modifiers(tsym2, badj)
+    if str.length(tsym3) > 0
+        tsym3 := f_ssmt_match_chart_contract_size(tsym3, sym)
+        tsym3 := f_ssmt_apply_futures_modifiers(tsym3, badj)
+else if dyad_selection_mode != "Off"
+    bool runDyadAuto = dyad_selection_mode == "Auto"
+    if dyad_selection_mode == "Manual"
+        bool is_on_dyad_m1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
+        bool is_on_dyad_m2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
+        bool is_on_dyad_m3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
+        bool is_on_dyad_m4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
+        bool is_on_dyad_m5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
+        if is_on_dyad_m1
+            csym := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
+        else if is_on_dyad_m2
+            csym := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
+        else if is_on_dyad_m3
+            csym := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
+        else if is_on_dyad_m4
+            csym := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
+        else if is_on_dyad_m5
+            csym := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
+        runDyadAuto := str.length(csym) == 0
+    if runDyadAuto
+        if str.contains(sym, s1) or sym == s1
+            csym := s2
+        else if str.contains(sym, s2) or sym == s2
+            csym := s1
+        else if str.contains(sym, s3) or sym == s3
+            csym := s4
+        else if str.contains(sym, s4) or sym == s4
+            csym := s3
+        else if str.contains(sym, s5) or sym == s5
+            csym := s6
+        else if str.contains(sym, s6) or sym == s6
+            csym := s5
+        else if str.contains(sym, s7) or sym == s7
+            csym := s8
+        else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
+            csym := s7
+        else if is_nq_asset
+            csym := s10
+        else if is_es_asset
+            csym := s9
+        else if is_mgc_asset
+            csym := s14
+        else if is_sil_asset
+            csym := s13
+        else if is_gc_asset
+            csym := s12
+        else if is_si_asset
+            csym := s11
+    if str.length(csym) > 0
+        csym := f_ssmt_match_chart_contract_size(csym, sym)
+        csym := f_ssmt_apply_futures_modifiers(csym, badj)
+        tsym2 := csym
+        tsym3 := ""
+
+if str.length(tsym2) > 0 and f_is_same_symbol_exact(tsym2)
+    tsym2 := ""
+if str.length(tsym3) > 0 and f_is_same_symbol_exact(tsym3)
+    tsym3 := ""
+if str.length(tsym2) > 0 and str.length(tsym3) > 0 and str.upper(tsym2) == str.upper(tsym3)
+    tsym3 := ""
+if triad_selection_mode == "Auto" and is_in_g4 and str.length(tsym2) == 0 and str.length(tsym3) == 0
+    if is_nq_asset
+        tsym2 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st11, sym), badj)
+        tsym3 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st12, sym), badj)
+    else if is_es_asset
+        tsym2 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st10, sym), badj)
+        tsym3 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st12, sym), badj)
+    else if is_ym_asset
+        tsym2 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st10, sym), badj)
+        tsym3 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st11, sym), badj)
+dbgSsmtAsset2 := str.length(tsym2) > 0 ? f_ssmt_sym_ticker(tsym2) : ""
+dbgSsmtAsset3 := str.length(tsym3) > 0 ? f_ssmt_sym_ticker(tsym3) : ""
+dbgSsmtAsset2Short := str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : ""
+dbgSsmtAsset3Short := str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : ""
+
+bool dyad_ok = not triad_ok and str.length(tsym2) > 0 and str.length(tsym3) == 0
+
 if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsmtLive or nanoSsmtLive
-    bool runWeeklyBearSSMT = showWeeklyBearSSMT or showWeeklyBearBoth
-    bool runWeeklyBullSSMT = showWeeklyBullSSMT or showWeeklyBullBoth
-    bool runWeeklyBearHSSMT = showWeeklyBearHSSMT or showWeeklyBearBoth
-    bool runWeeklyBullHSSMT = showWeeklyBullHSSMT or showWeeklyBullBoth
+    bool runWeeklyBearSSMT = showWeeklyBearBoth
+    bool runWeeklyBullSSMT = showWeeklyBullBoth
+    bool runWeeklyBearHSSMT = showWeeklyBearBoth
+    bool runWeeklyBullHSSMT = showWeeklyBullBoth
     bool hssmtEvalConfirmed = barstate.isconfirmed
     bool preferRegularVisual = showWeeklyBearBoth
     bool preferRegularVisualBull = showWeeklyBullBoth
@@ -2044,211 +2287,6 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
     int ssmtQuarterLen = nanoSsmtLive ? (90 * MS_MIN / 16) : m90SsmtLive ? (90 * MS_MIN) : microSsmtLive ? (90 * MS_MIN / 4) : dailySsmtLive ? LEN_24H / 4 : monthlySsmtLive ? (7 * LEN_24H) : LEN_24H
     string ssmtLabelPrefix = nanoSsmtLive ? "Nano " : m90SsmtLive ? "m90 " : microSsmtLive ? "Micro " : dailySsmtLive ? "D " : monthlySsmtLive ? "M " : "W "
     string ssmtHiddenLabelPrefix = nanoSsmtLive ? "(H) Nano " : m90SsmtLive ? "(H) m90 " : microSsmtLive ? "(H) Micro " : dailySsmtLive ? "(H) D " : monthlySsmtLive ? "(H) M " : "(H) W "
-
-    string sym = syminfo.tickerid
-
-    bool match_m1_1 = f_check_match(st1_m1), match_m1_2 = f_check_match(st2_m1), match_m1_3 = f_check_match(st3_m1)
-    bool match_m2_1 = f_check_match(st1_m2), match_m2_2 = f_check_match(st2_m2), match_m2_3 = f_check_match(st3_m2)
-    bool match_m3_1 = f_check_match(st1_m3), match_m3_2 = f_check_match(st2_m3), match_m3_3 = f_check_match(st3_m3)
-    bool match_m4_1 = f_check_match(st1_m4), match_m4_2 = f_check_match(st2_m4), match_m4_3 = f_check_match(st3_m4)
-    bool match_m5_1 = f_check_match(st1_m5), match_m5_2 = f_check_match(st2_m5), match_m5_3 = f_check_match(st3_m5)
-
-    bool is_in_manual_m1 = tr1A and enable_m1 and (match_m1_1 or match_m1_2 or match_m1_3)
-    bool is_in_manual_m2 = tr1A and enable_m2 and (match_m2_1 or match_m2_2 or match_m2_3)
-    bool is_in_manual_m3 = tr1A and enable_m3 and (match_m3_1 or match_m3_2 or match_m3_3)
-    bool is_in_manual_m4 = tr1A and enable_m4 and (match_m4_1 or match_m4_2 or match_m4_3)
-    bool is_in_manual_m5 = tr1A and enable_m5 and (match_m5_1 or match_m5_2 or match_m5_3)
-    bool is_in_manual = is_in_manual_m1 or is_in_manual_m2 or is_in_manual_m3 or is_in_manual_m4 or is_in_manual_m5
-
-    string st1 = ""
-    string st2 = ""
-    string st3 = ""
-    if is_in_manual_m1 and enable_m1
-        st1 := st1_m1
-        st2 := st2_m1
-        st3 := st3_m1
-    else if is_in_manual_m2 and enable_m2
-        st1 := st1_m2
-        st2 := st2_m2
-        st3 := st3_m2
-    else if is_in_manual_m3 and enable_m3
-        st1 := st1_m3
-        st2 := st2_m3
-        st3 := st3_m3
-    else if is_in_manual_m4 and enable_m4
-        st1 := st1_m4
-        st2 := st2_m4
-        st3 := st3_m4
-    else if is_in_manual_m5 and enable_m5
-        st1 := st1_m5
-        st2 := st2_m5
-        st3 := st3_m5
-
-    string symTicker = str.upper(f_ssmt_sym_ticker(sym))
-    bool is_nq_asset = str.contains(symTicker, "NQ") or str.contains(symTicker, "MNQ")
-    bool is_es_asset = str.contains(symTicker, "ES") or str.contains(symTicker, "MES")
-    bool is_ym_asset = str.contains(symTicker, "YM") or str.contains(symTicker, "MYM")
-    bool is_gc_asset = str.contains(symTicker, "GC") or str.contains(symTicker, "MGC")
-    bool is_si_asset = str.contains(symTicker, "SI") or str.contains(symTicker, "MSI")
-    bool is_sl_asset = str.contains(symTicker, "PL") or str.contains(symTicker, "MSL")
-    bool is_mgc_asset = str.contains(symTicker, "MGC")
-    bool is_sil_asset = str.contains(symTicker, "SIL")
-
-    bool is_in_g2 = tr1B and (str.contains(sym, "XAU") or str.contains(sym, "XAG") or str.contains(sym, "XPT"))
-    bool is_in_g3 = tr1C and (str.contains(sym, "BTC") or str.contains(sym, "ETH") or str.contains(sym, "ADA"))
-    bool is_in_g4 = tr1D and (is_nq_asset or is_es_asset or is_ym_asset)
-    bool is_in_g5 = tr1E and (str.contains(sym, "EURUSD") or str.contains(sym, "GBPUSD") or str.contains(sym, "AUDUSD"))
-    bool is_in_g6 = tr1F and (str.contains(sym, "US100") or str.contains(sym, "USTEC") or str.contains(sym, "NAS100") or str.contains(sym, "US500") or str.contains(sym, "SPX500") or str.contains(sym, "SP500") or str.contains(sym, "US30"))
-    bool is_in_g7 = tr1G and (is_gc_asset or is_si_asset or is_sl_asset)
-
-    bool triad_ok = triad_selection_mode == "Off" ? false : triad_selection_mode == "Auto" ? (is_in_g2 or is_in_g3 or is_in_g4 or is_in_g5 or is_in_g6 or is_in_g7) : is_in_manual
-
-    bool match_1 = f_check_match(st1)
-    bool match_2 = f_check_match(st2)
-    bool match_3 = f_check_match(st3)
-
-    string tsym2 = ""
-    string tsym3 = ""
-    string csym = ""
-    if triad_ok
-        if is_in_manual
-            if match_1
-                tsym2 := st2
-                tsym3 := st3
-            else if match_2
-                tsym2 := st1
-                tsym3 := st3
-            else if match_3
-                tsym2 := st1
-                tsym3 := st2
-        else if is_in_g2
-            tsym2 := str.contains(sym, "XAU") ? st5 : st4
-            tsym3 := str.contains(sym, "XPT") ? st5 : st6
-        else if is_in_g3
-            tsym2 := str.contains(sym, "BTC") ? st8 : (str.contains(sym, "ETH") ? st7 : st7)
-            tsym3 := str.contains(sym, "BTC") ? st9 : (str.contains(sym, "ETH") ? st9 : st8)
-        else if is_in_g4
-            string tkr = str.upper(syminfo.ticker)
-            string root3 = str.substring(tkr, 0, 3)
-            string root2 = str.substring(tkr, 0, 2)
-            bool is_micro = root3 == "MES" or root3 == "MNQ" or root3 == "MYM"
-            string root = is_micro ? root3 : root2
-            int root_len = is_micro ? 3 : 2
-            string month_code = str.length(tkr) > root_len ? str.substring(tkr, root_len, root_len + 1) : ""
-            string year_raw = str.length(tkr) > root_len + 1 ? str.substring(tkr, root_len + 1, str.length(tkr)) : ""
-            string year_str = str.length(year_raw) >= 4 ? str.substring(year_raw, 0, 4) : year_raw
-            bool has_contract = str.contains("FGHJKMNQUVXZ", month_code) and not na(str.tonumber(year_str))
-            if has_contract
-                string root_a = root == "ES" or root == "MES" ? (is_micro ? "MNQ" : "NQ") : root == "NQ" or root == "MNQ" ? (is_micro ? "MES" : "ES") : (is_micro ? "MES" : "ES")
-                string root_b = root == "ES" or root == "MES" ? (is_micro ? "MYM" : "YM") : root == "NQ" or root == "MNQ" ? (is_micro ? "MYM" : "YM") : (is_micro ? "MNQ" : "NQ")
-                string ex_a = (root_a == "YM" or root_a == "MYM") ? (is_micro ? "CBOT_MINI" : "CBOT") : "CME_MINI"
-                string ex_b = (root_b == "YM" or root_b == "MYM") ? (is_micro ? "CBOT_MINI" : "CBOT") : "CME_MINI"
-                tsym2 := ex_a + ":" + root_a + month_code + year_str
-                tsym3 := ex_b + ":" + root_b + month_code + year_str
-            else
-                if is_nq_asset
-                    tsym2 := st11
-                    tsym3 := st12
-                else if is_es_asset
-                    tsym2 := st10
-                    tsym3 := st12
-                else if is_ym_asset
-                    tsym2 := st10
-                    tsym3 := st11
-        else if is_in_g5
-            tsym2 := str.contains(sym, "EURUSD") ? st14 : (str.contains(sym, "GBPUSD") ? st13 : st13)
-            tsym3 := str.contains(sym, "EURUSD") ? st15 : (str.contains(sym, "GBPUSD") ? st15 : st14)
-        else if is_in_g6
-            tsym2 := str.contains(sym, "US100") ? st17 : (str.contains(sym, "US500") ? st16 : st16)
-            tsym3 := str.contains(sym, "US100") ? st18 : (str.contains(sym, "US500") ? st18 : st17)
-        else if is_in_g7
-            if is_mgc_asset
-                tsym2 := s14
-                tsym3 := st22
-            else if is_sil_asset
-                tsym2 := s13
-                tsym3 := st22
-            else if is_gc_asset
-                tsym2 := st20
-                tsym3 := st22
-            else if is_si_asset
-                tsym2 := st19
-                tsym3 := st22
-            else if is_sl_asset
-                tsym2 := st19
-                tsym3 := st20
-
-    if triad_ok
-        if str.length(tsym2) > 0
-            tsym2 := f_ssmt_match_chart_contract_size(tsym2, sym)
-            tsym2 := syminfo.type == "futures" ? ticker.modify(tsym2, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : tsym2
-        if str.length(tsym3) > 0
-            tsym3 := f_ssmt_match_chart_contract_size(tsym3, sym)
-            tsym3 := syminfo.type == "futures" ? ticker.modify(tsym3, session=syminfo.session, backadjustment=badj ? backadjustment.off : backadjustment.on) : tsym3
-    else if dyad_selection_mode != "Off"
-        if dyad_selection_mode == "Manual"
-            bool is_on_dyad_m1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
-            bool is_on_dyad_m2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
-            bool is_on_dyad_m3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
-            bool is_on_dyad_m4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
-            bool is_on_dyad_m5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
-            if is_on_dyad_m1
-                csym := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
-            else if is_on_dyad_m2
-                csym := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
-            else if is_on_dyad_m3
-                csym := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
-            else if is_on_dyad_m4
-                csym := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
-            else if is_on_dyad_m5
-                csym := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
-        else if dyad_selection_mode == "Auto"
-            if str.contains(sym, s1) or sym == s1
-                csym := s2
-            else if str.contains(sym, s2) or sym == s2
-                csym := s1
-            else if str.contains(sym, s3) or sym == s3
-                csym := s4
-            else if str.contains(sym, s4) or sym == s4
-                csym := s3
-            else if str.contains(sym, s5) or sym == s5
-                csym := s6
-            else if str.contains(sym, s6) or sym == s6
-                csym := s5
-            else if str.contains(sym, s7) or sym == s7
-                csym := s8
-            else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
-                csym := s7
-            else if is_nq_asset
-                csym := s10
-            else if is_es_asset
-                csym := s9
-            else if is_mgc_asset
-                csym := s14
-            else if is_sil_asset
-                csym := s13
-            else if is_gc_asset
-                csym := s12
-            else if is_si_asset
-                csym := s11
-        if str.length(csym) > 0
-            csym := f_ssmt_match_chart_contract_size(csym, sym)
-            csym := syminfo.type == "futures" ? ticker.modify(csym, session=syminfo.session, backadjustment=badj ? backadjustment.on : backadjustment.off) : csym
-            tsym2 := csym
-            tsym3 := ""
-
-    if str.length(tsym2) > 0 and f_check_match(tsym2)
-        tsym2 := ""
-    if str.length(tsym3) > 0 and f_check_match(tsym3)
-        tsym3 := ""
-    if str.length(tsym2) > 0 and str.length(tsym3) > 0 and str.upper(tsym2) == str.upper(tsym3)
-        tsym3 := ""
-    dbgSsmtAsset2 := str.length(tsym2) > 0 ? f_ssmt_sym_ticker(tsym2) : ""
-    dbgSsmtAsset3 := str.length(tsym3) > 0 ? f_ssmt_sym_ticker(tsym3) : ""
-    dbgSsmtAsset2Short := str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : ""
-    dbgSsmtAsset3Short := str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : ""
-
-    bool dyad_ok = not triad_ok and str.length(tsym2) > 0 and str.length(tsym3) == 0
 
     float chHcur = na
     int   chHcurTs = na
@@ -3077,20 +3115,14 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
                     int qEnd = curQTs + ssmtQuarterLen
                     if na(wSsmtPurgeTs) and time >= curQTs and time < qEnd and high > prevH
                         wSsmtPurgeTs := time
-                    int solidCut = curQTs
-                    int dottedStart = prevHTs
-                    if solidCut > prevHTs
-                        wSsmtLine2 := f_set_or_make_hline_w_style(wSsmtLine2, prevHTs, solidCut, prevH, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Solid")
-                        dottedStart := solidCut
-                    else
-                        wSsmtLine2 := f_kill(wSsmtLine2)
-                    wSsmtLine := f_set_or_make_hline_w_style(wSsmtLine, dottedStart, qEnd, prevH, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Dotted")
+                    wSsmtLine2 := f_kill(wSsmtLine2)
+                    wSsmtLine := f_set_or_make_hline_w_style(wSsmtLine, prevHTs, qEnd, prevH, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Solid")
                 else if hasPoints and not curSweep and not na(curH) and not na(curHTs)
                     wSsmtPurgeTs := na
                     wSsmtLine2 := f_kill(wSsmtLine2)
                     wSsmtLine := f_set_or_make_line(wSsmtLine, prevHTs, prevH, curHTs, curH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
 
-                bool showLabel = cracked != "" and not chartSweep
+                bool showLabel = cracked != "" and not curSweep and na(wSsmtPurgeTs)
                 if hasPoints and showLabel
                     string lblText = ssmtLabelPrefix + cracked
                     if na(wSsmtLbl)
@@ -3196,26 +3228,23 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
                     int qEndB = curQTsB + ssmtQuarterLen
                     if na(wBSsmtPurgeTs) and time >= curQTsB and time < qEndB and low < prevL
                         wBSsmtPurgeTs := time
-                    int solidCutB = curQTsB
-                    int dottedStartB = prevLTs
-                    if solidCutB > prevLTs
-                        wBSsmtLine2 := f_set_or_make_hline_w_style(wBSsmtLine2, prevLTs, solidCutB, prevL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
-                        dottedStartB := solidCutB
-                    else
-                        wBSsmtLine2 := f_kill(wBSsmtLine2)
-                    wBSsmtLine := f_set_or_make_hline_w_style(wBSsmtLine, dottedStartB, qEndB, prevL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Dotted")
+                    wBSsmtLine2 := f_kill(wBSsmtLine2)
+                    wBSsmtLine := f_set_or_make_hline_w_style(wBSsmtLine, prevLTs, qEndB, prevL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
                 else if hasPointsB and not curSweepB and not na(curL) and not na(curLTs)
                     wBSsmtPurgeTs := na
                     wBSsmtLine2 := f_kill(wBSsmtLine2)
                     wBSsmtLine := f_set_or_make_line(wBSsmtLine, prevLTs, prevL, curLTs, curL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
 
-                bool showLabelB = crackedB != "" and not chartSweepB
+                bool showLabelB = not curSweepB and na(wBSsmtPurgeTs) and not na(curL) and not na(curLTs)
                 if hasPointsB and showLabelB
-                    string lblTextB = ssmtLabelPrefix + crackedB
+                    string crackedLabelB = crackedB != "" ? crackedB : (str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : chartAsset)
+                    string lblTextB = ssmtLabelPrefix + crackedLabelB
+                    int lblTsB = prevLTs + int(math.floor((curLTs - prevLTs) / 2))
+                    float lblYB = (prevL + curL) * 0.5
                     if na(wBSsmtLbl)
-                        wBSsmtLbl := label.new(prevLTs, prevL, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                        wBSsmtLbl := label.new(lblTsB, lblYB, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
                     else
-                        label.set_xy(wBSsmtLbl, prevLTs, prevL)
+                        label.set_xy(wBSsmtLbl, lblTsB, lblYB)
                         label.set_text(wBSsmtLbl, lblTextB)
                         label.set_textcolor(wBSsmtLbl, color.black)
                         label.set_color(wBSsmtLbl, color.new(color.black, 100))
@@ -3311,26 +3340,23 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
                     int qEndHB = curQTsHB + ssmtQuarterLen
                     if na(wHBSsmtPurgeTs) and time >= curQTsHB and time < qEndHB and math.min(open, close) < prevLL
                         wHBSsmtPurgeTs := time
-                    int solidCutHB = curQTsHB
-                    int dottedStartHB = prevLLTs
-                    if solidCutHB > prevLLTs
-                        wHBSsmtLine2 := f_set_or_make_hline_w_style(wHBSsmtLine2, prevLLTs, solidCutHB, prevLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
-                        dottedStartHB := solidCutHB
-                    else
-                        wHBSsmtLine2 := f_kill(wHBSsmtLine2)
-                    wHBSsmtLine := f_set_or_make_hline_w_style(wHBSsmtLine, dottedStartHB, qEndHB, prevLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Dotted")
+                    wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+                    wHBSsmtLine := f_set_or_make_hline_w_style(wHBSsmtLine, prevLLTs, qEndHB, prevLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
                 else if hasPointsHB and not curSweepHB and not na(curLL) and not na(curLLTs)
                     wHBSsmtPurgeTs := na
                     wHBSsmtLine2 := f_kill(wHBSsmtLine2)
                     wHBSsmtLine := f_set_or_make_line(wHBSsmtLine, prevLLTs, prevLL, curLLTs, curLL, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
 
-                bool showLabelHB = crackedHB != "" and not chartSweepHB
+                bool showLabelHB = not curSweepHB and na(wHBSsmtPurgeTs) and not na(curLL) and not na(curLLTs)
                 if hasPointsHB and showLabelHB
-                    string lblTextHB = ssmtHiddenLabelPrefix + crackedHB
+                    string crackedLabelHB = crackedHB != "" ? crackedHB : (str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : chartAsset)
+                    string lblTextHB = ssmtHiddenLabelPrefix + crackedLabelHB
+                    int lblTsHB = prevLLTs + int(math.floor((curLLTs - prevLLTs) / 2))
+                    float lblYHB = (prevLL + curLL) * 0.5
                     if na(wHBSsmtLbl)
-                        wHBSsmtLbl := label.new(prevLLTs, prevLL, lblTextHB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                        wHBSsmtLbl := label.new(lblTsHB, lblYHB, lblTextHB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
                     else
-                        label.set_xy(wHBSsmtLbl, prevLLTs, prevLL)
+                        label.set_xy(wHBSsmtLbl, lblTsHB, lblYHB)
                         label.set_text(wHBSsmtLbl, lblTextHB)
                         label.set_textcolor(wHBSsmtLbl, color.black)
                         label.set_color(wHBSsmtLbl, color.new(color.black, 100))
@@ -3431,20 +3457,14 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
                     int qEndH = curQTsH + ssmtQuarterLen
                     if na(wHSsmtPurgeTs) and time >= curQTsH and time < qEndH and math.max(open, close) > prevHH
                         wHSsmtPurgeTs := time
-                    int solidCutH = curQTsH
-                    int dottedStartH = prevHHTs
-                    if solidCutH > prevHHTs
-                        wHSsmtLine2 := f_set_or_make_hline_w_style(wHSsmtLine2, prevHHTs, solidCutH, prevHH, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Solid")
-                        dottedStartH := solidCutH
-                    else
-                        wHSsmtLine2 := f_kill(wHSsmtLine2)
-                    wHSsmtLine := f_set_or_make_hline_w_style(wHSsmtLine, dottedStartH, qEndH, prevHH, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Dotted")
+                    wHSsmtLine2 := f_kill(wHSsmtLine2)
+                    wHSsmtLine := f_set_or_make_hline_w_style(wHSsmtLine, prevHHTs, qEndH, prevHH, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Solid")
                 else if hasPointsH and not curSweepH and not na(curHH) and not na(curHHTs)
                     wHSsmtPurgeTs := na
                     wHSsmtLine2 := f_kill(wHSsmtLine2)
                     wHSsmtLine := f_set_or_make_line(wHSsmtLine, prevHHTs, prevHH, curHHTs, curHH, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
 
-                bool showLabelH = crackedH != "" and not chartSweepH
+                bool showLabelH = crackedH != "" and not curSweepH and na(wHSsmtPurgeTs)
                 if hasPointsH and showLabelH
                     string lblTextH = ssmtHiddenLabelPrefix + crackedH
                     if na(wHSsmtLbl)

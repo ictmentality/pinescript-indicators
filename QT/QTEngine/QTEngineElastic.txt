@@ -2,13 +2,13 @@
 library("QTEngineElastic", overlay=false)
 
 // ============================================================================
-// QT Engine — Fixed cycles (Daily / m90 / Micro / Nano)
+// QT Engine — Fixed + Elastic cycles (Daily / m90 / Micro / Nano / Weekly / Monthly)
 // - Data-first: timestamps + OHLC + state flags
 // - No drawings, no styling opinions
 // - Timestamp anchoring only (bar_time), never bar_index
 // - State-trigger correctness everywhere: realized = (time_close > ts)
 // - Non-repaint: any request.security(..., lookahead_off) only
-// - Elastic cycles (weekly/monthly) are implemented in this test copy
+// - Elastic cycles (weekly/monthly) are implemented here
 //
 // NOTE: Micro/Nano use aligned-TF quarters for H/L/C with aligned actual-open.
 //       90m/Daily use aligned-TF quarter OHLC with aligned actual-open.
@@ -461,7 +461,9 @@ f_make_empty_q(int qStart) =>
     )
 
 // ============================================================================
-// FIXED-CYCLE MODULE (timestamp math only)
+// CYCLE WINDOW MODULE (timestamp math only)
+// - Fixed lengths for Daily/m90/Micro/Nano
+// - Elastic bounds for Weekly/Monthly
 // ============================================================================
 
 f_fixed_cycle_window(int tRef, QTConfig cfg, int lenMs) =>
@@ -539,7 +541,7 @@ f_fixed_cycle_quarter_id(int boundaryTs, int q1Ts, int q2Ts, int q3Ts, int q4Ts,
 
 
 // ============================================================================
-// NANO ALIGNMENT HELPERS
+// ALIGNED-TF CAPTURE HELPERS
 // ============================================================================
 
 f_ceil_to_5s(int ts) =>
@@ -860,10 +862,8 @@ f_aligned_ohlc_pick(bool isNano, bool isMicro, bool isM90, bool isDaily) =>
     pickActualQi := pack.actualQi
     [pickO, pickH, pickL, pickC, pickT, pickTClose, pickActualOpen, pickActualOpenTs, pickActualBoundaryTs, pickActualQi]
 
-f_aligned_bar_timing(bool isNano, bool isMicro, bool isM90, bool isDaily, int aT, int aTClose) =>
-    int aLen = isNano ? 5 * MS_SEC : isMicro ? 30 * MS_SEC : isM90 ? 5 * MS_MIN : isDaily ? 15 * MS_MIN : int(na)
-    int aRef = aTClose - 1
-    [aLen, aRef]
+f_aligned_bar_ref(int aTClose) =>
+    aTClose - 1
 
 // ============================================================================
 // STEP 2 HELPERS — Chart-TF quarter OHLC aggregation (minimal, gap-safe)
@@ -956,7 +956,7 @@ f_apply_aligned_qr(QuarterRecord qIn, QuarterRecord aIn) =>
     q
 
 // ============================================================================
-// CORE HELPERS (initial implementation; used by refactor steps 1–3)
+// CORE HELPERS
 // ============================================================================
 
 f_q_has_count(QuarterRecord q1, QuarterRecord q2, QuarterRecord q3, QuarterRecord q4, QuarterRecord q5) =>
@@ -1138,8 +1138,8 @@ f_push_printed_start(int[] startsIn, int startTs, int keepCycles) =>
 
 // ============================================================================
 
-// CORE FIXED-CYCLE UPDATE (Chart-TF aggregation + aligned overrides)
-// - Enabled for Daily + m90 + Micro + Nano.
+// CORE CYCLE UPDATE (Chart-TF aggregation + aligned overrides)
+// - Enabled for Daily + m90 + Micro + Nano + Weekly + Monthly.
 // - Aggregates quarter OHLC on chart TF into QuarterRecords, then applies
 //   aligned-TF overrides for Micro/Nano (H/L/C) and m90/Daily (OHLC).
 // - Gap-safe: skipped quarters finalize as isEmpty/isFinal on the next printed bar
@@ -1273,7 +1273,7 @@ f_fixed_cycle_update(
     bool aNew = not na(aT) and (na(alignedLastBar2) or aT != alignedLastBar2)
     if aNew
         alignedLastBar2 := aT
-        [aLen, aRef] = f_aligned_bar_timing(isNano, isMicro, isM90, isDaily, aT, aTClose)
+        int aRef = f_aligned_bar_ref(aTClose)
         [aCStart, aCEnd, aq1Ts, aq2Ts, aq3Ts, aq4Ts, aq5Ts, aQi, aInW] = f_fixed_cycle_window(aRef, cfg, lenMs)
         bool aCycleChanged = na(alignedLastStart2) or aCStart != alignedLastStart2
         if aCycleChanged
@@ -1430,7 +1430,7 @@ f_fixed_cycle_update(
             if aprev2.has
                 prev2 := f_apply_aligned_qr(prev2, aprev2)
 
-    // Apply pending actual-open when its quarter becomes active (all fixed cycles).
+    // Apply pending actual-open when its quarter becomes active.
     if pendingHas2
         if pendingBoundary2 == q1Ts and qiOut == 1
             q1.o   := pendingOpen2
@@ -1558,6 +1558,18 @@ export qt_micro_aligned_qr_debug(CycleState st) =>
 
 export qt_nano_aligned_qr_debug(CycleState st) =>
     [st.nano.aq1, st.nano.aq2, st.nano.aq3, st.nano.aq4]
+
+export qt_daily_qr_debug(CycleState st) =>
+    [st.daily.q1, st.daily.q2, st.daily.q3, st.daily.q4, st.daily.q5, st.daily.prev1, st.daily.prev2]
+
+export qt_m90_qr_debug(CycleState st) =>
+    [st.m90.q1, st.m90.q2, st.m90.q3, st.m90.q4, st.m90.q5, st.m90.prev1, st.m90.prev2]
+
+export qt_micro_qr_debug(CycleState st) =>
+    [st.micro.q1, st.micro.q2, st.micro.q3, st.micro.q4, st.micro.q5, st.micro.prev1, st.micro.prev2]
+
+export qt_nano_qr_debug(CycleState st) =>
+    [st.nano.q1, st.nano.q2, st.nano.q3, st.nano.q4, st.nano.q5, st.nano.prev1, st.nano.prev2]
 
 export qt_weekly_qr_debug(CycleState st) =>
     [st.weekly.q1, st.weekly.q2, st.weekly.q3, st.weekly.q4, st.weekly.q5, st.weekly.prev1, st.weekly.prev2]
