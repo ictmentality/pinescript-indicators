@@ -378,6 +378,66 @@ f_next_ds_after(int t, QTConfig cfg) =>
     int ds0 = f_qt_day_start(t, cfg)
     ds0 <= t ? ds0 + LEN_24H : ds0
 
+f_shift_ds_days(int t, QTConfig cfg, int days) =>
+    int y = year(t, cfg.tz)
+    int mo = month(t, cfg.tz)
+    int da = dayofmonth(t, cfg.tz)
+    timestamp(cfg.tz, y, mo, da + days, cfg.dayStartHour, cfg.dayStartMin)
+
+f_month_week_start(int tRef, QTConfig cfg) =>
+    int ds = f_qt_day_start(tRef, cfg)
+    int dow = dayofweek(ds, cfg.tz)
+    int back = dow == dayofweek.sunday ? 0 : dow == dayofweek.monday ? 1 : dow == dayofweek.tuesday ? 2 : dow == dayofweek.wednesday ? 3 : dow == dayofweek.thursday ? 4 : dow == dayofweek.friday ? 5 : 6
+    f_shift_ds_days(ds, cfg, -back)
+
+f_month_week_key(int weekStartTs, QTConfig cfg) =>
+    int mondayTs = f_shift_ds_days(weekStartTs, cfg, 1)
+    int y = year(mondayTs, cfg.tz)
+    int mo = month(mondayTs, cfg.tz)
+    y * 100 + mo
+
+f_monthly_cycle_bounds(int tRef, QTConfig cfg) =>
+    int wsCur = f_month_week_start(tRef, cfg)
+    int keyCur = f_month_week_key(wsCur, cfg)
+
+    int probeBack = f_shift_ds_days(wsCur, cfg, -7)
+    int guardBack = 0
+    while guardBack < 8 and f_month_week_key(probeBack, cfg) == keyCur
+        probeBack := f_shift_ds_days(probeBack, cfg, -7)
+        guardBack += 1
+    int cStart = f_shift_ds_days(probeBack, cfg, 7)
+
+    int probeFwd = f_shift_ds_days(wsCur, cfg, 7)
+    int guardFwd = 0
+    while guardFwd < 8 and f_month_week_key(probeFwd, cfg) == keyCur
+        probeFwd := f_shift_ds_days(probeFwd, cfg, 7)
+        guardFwd += 1
+    int cEnd = probeFwd
+
+    int q1Ts = cStart
+    int q2Ts = int(na)
+    int q3Ts = int(na)
+    int q4Ts = int(na)
+    int q5Ts = int(na)
+
+    int b2 = f_shift_ds_days(q1Ts, cfg, 7)
+    if b2 < cEnd
+        q2Ts := b2
+    if not na(q2Ts)
+        int b3 = f_shift_ds_days(q2Ts, cfg, 7)
+        if b3 < cEnd
+            q3Ts := b3
+    if not na(q3Ts)
+        int b4 = f_shift_ds_days(q3Ts, cfg, 7)
+        if b4 < cEnd
+            q4Ts := b4
+    if not na(q4Ts)
+        int b5 = f_shift_ds_days(q4Ts, cfg, 7)
+        if b5 < cEnd
+            q5Ts := b5
+
+    [cStart, cEnd, q1Ts, q2Ts, q3Ts, q4Ts, q5Ts]
+
 f_cycle_start(int t, int baseTs, int lenMs) =>
     // Computes start = baseTs + floor((t - baseTs)/lenMs) * lenMs
     // Assumes baseTs is the correct anchor for t (e.g., DS for the day containing t)
@@ -407,8 +467,8 @@ f_make_empty_q(int qStart) =>
 f_fixed_cycle_window(int tRef, QTConfig cfg, int lenMs) =>
     bool isWeeklyElastic = lenMs == LEN_WEEK_ELASTIC
     bool isMonthlyElastic = lenMs == LEN_MONTH_ELASTIC
-    int cStart = isWeeklyElastic ? time("W") : isMonthlyElastic ? time("M") : int(na)
-    int cEnd = isWeeklyElastic ? time_close("W") : isMonthlyElastic ? time_close("M") : int(na)
+    int cStart = isWeeklyElastic ? time("W") : int(na)
+    int cEnd = isWeeklyElastic ? time_close("W") : int(na)
     if not isWeeklyElastic and not isMonthlyElastic
         int ds = f_qt_day_start(tRef, cfg)
         cStart := f_cycle_start(tRef, ds, lenMs)
@@ -425,6 +485,15 @@ f_fixed_cycle_window(int tRef, QTConfig cfg, int lenMs) =>
         q3Ts := q2Ts + LEN_24H
         q4Ts := q3Ts + LEN_24H
         q5Ts := q4Ts + LEN_24H
+    else if isMonthlyElastic
+        [mStart, mEnd, mQ1, mQ2, mQ3, mQ4, mQ5] = f_monthly_cycle_bounds(tRef, cfg)
+        cStart := mStart
+        cEnd := mEnd
+        q1Ts := mQ1
+        q2Ts := mQ2
+        q3Ts := mQ3
+        q4Ts := mQ4
+        q5Ts := mQ5
     else
         int span = cEnd - cStart
         int qLen = int(math.floor(span / 4))
@@ -435,15 +504,9 @@ f_fixed_cycle_window(int tRef, QTConfig cfg, int lenMs) =>
         q4Ts := cStart + 3 * qLen
 
     int qi = 1
-    if isWeeklyElastic
-        if tRef >= q5Ts and tRef < cEnd
-            qi := 5
-        else if tRef >= q4Ts and tRef < cEnd
-            qi := 4
-        else if tRef >= q3Ts and tRef < cEnd
-            qi := 3
-        else if tRef >= q2Ts and tRef < cEnd
-            qi := 2
+    bool hasQ5 = not na(q5Ts)
+    if hasQ5 and tRef >= q5Ts and tRef < cEnd
+        qi := 5
     else if tRef >= q4Ts and tRef < cEnd
         qi := 4
     else if tRef >= q3Ts and tRef < cEnd
@@ -1094,14 +1157,16 @@ f_fixed_cycle_update(
     bool isM90 = (lenMs == LEN_6H)
     bool isDaily = (lenMs == LEN_24H)
     bool isWeekly = (lenMs == LEN_WEEK_ELASTIC)
+    bool isMonthly = (lenMs == LEN_MONTH_ELASTIC)
     int tRef = isNano ? t : (tClose - 1)
 
     [cStart, cEnd, q1Ts, q2Ts, q3Ts, q4Ts, q5Ts, qi, inW] = f_fixed_cycle_window(tRef, cfg, lenMs)
+    bool hasQ5Cycle = (isWeekly or isMonthly) and not na(q5Ts)
 
     bool q2R = tClose > q2Ts
     bool q3R = tClose > q3Ts
     bool q4R = tClose > q4Ts
-    bool q5R = isWeekly and not na(q5Ts) and tClose > q5Ts
+    bool q5R = hasQ5Cycle and tClose > q5Ts
 
     bool sR  = tClose > cStart
     bool eR  = tClose > cEnd
@@ -1244,7 +1309,7 @@ f_fixed_cycle_update(
         bool aQ2R = aTClose > aq2Ts
         bool aQ3R = aTClose > aq3Ts
         bool aQ4R = aTClose > aq4Ts
-        bool aQ5R = isWeekly and not na(aq5Ts) and aTClose > aq5Ts
+        bool aQ5R = (isWeekly or isMonthly) and not na(aq5Ts) and aTClose > aq5Ts
         bool aSR = aTClose > aCStart
         bool aER = aTClose > aCEnd
 
