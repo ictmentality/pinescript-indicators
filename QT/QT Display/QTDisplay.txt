@@ -1,6 +1,7 @@
 //@version=6
 indicator("QT Display", overlay=true, max_lines_count=500, max_labels_count=500)
 import Jaw1312/QTEngineElastic/10 as qt
+import Jaw1312/QTAssets/4 as qta
 
 // ============================================================================
 // CONSTANTS
@@ -35,87 +36,18 @@ enableDailySSMT = input.bool(true, "Enable Daily SSMT", group=groupSSMTCycles)
 enableWeeklySSMT = input.bool(true, "Enable Weekly SSMT", group=groupSSMTCycles)
 enableMonthlySSMT = input.bool(true, "Enable Monthly SSMT", group=groupSSMTCycles)
 
-// TPD [JAW] asset selection (Triad/Dyad)
-tr1B = true, st4 = "OANDA:XAUUSD", st5 = "OANDA:XAGUSD", st6 = "OANDA:XPTUSD"
-tr1C = true, st7 = "BINANCE:BTCUSDT.P", st8 = "BINANCE:ETHUSDT.P", st9 = "BINANCE:ADAUSDT.P"
-tr1D = true, st10 = "CME_MINI:NQ1!", st11 = "CME_MINI:ES1!", st12 = "CBOT_MINI:YM1!"
-tr1E = true, st13 = "FOREXCOM:EURUSD", st14 = "FOREXCOM:GBPUSD", st15 = "FOREXCOM:AUDUSD"
-tr1F = true, st16 = "CAPITALCOM:NAS100", st17 = "CAPITALCOM:US500", st18 = "CAPITALCOM:US30"
-tr1G = true, st19 = "COMEX:GC1!", st20 = "COMEX:SI1!", st21 = "NYMEX:PL1!", st22 = "COMEX:MHG1!", st23 = "COMEX:HG1!"
-
-s1 = "CAPITALCOM:US100", s2 = "CAPITALCOM:US500"
-s3 = "OANDA:XAUUSD", s4 = "OANDA:XAGUSD"
-s5 = "FOREXCOM:EURUSD", s6 = "FOREXCOM:GBPUSD"
-s7 = "BINANCE:BTCUSDT.P", s8 = "BINANCE:ETHUSDT.P"
-s9 = "CME_MINI:MNQ1!", s10 = "CME_MINI:MES1!"
-s11 = "COMEX:GC1!", s12 = "COMEX:SI1!"
-s13 = "COMEX:MGC1!", s14 = "COMEX:SIL1!"
-
-groupSSMTTriad = "Triad"
-groupSSMTDyad = "Dyad"
 groupSSMTFut = "Futures"
 
-badj = input.bool(defval=false, title="Backadjust (Futures)", group=groupSSMTFut)
+badj = input.bool(defval=false, title="Backadjust Fallback (Futures)", group=groupSSMTFut)
 
-triad_selection_mode = input.string("Off", "Triad Selection", options=["Auto", "Manual", "Off"], group=groupSSMTTriad, tooltip="Auto: \n US100:US500:US30 \n XAUUSD:XAGUSD:XPTUSD \n EURUSD:GBPUSD:AUDUSD \n BTCUSDT.P:ETHUSDT.P:ADAUSDT.P \n NQ1:ES1:YM1")
-tr1A = triad_selection_mode == "Manual"
+selection_mode = input.string("Off", "Pair Selection", options=["Triad", "Dyad", "Off"], group=groupSSMT)
 
-enable_m1 = input.bool(false, "Triad 1", group=groupSSMTTriad, inline="m1")
-st1_m1 = input.symbol("CME_MINI:ESH2026", "", group=groupSSMTTriad, inline="m1")
-st2_m1 = input.symbol("CME_MINI:NQH2026", "&", group=groupSSMTTriad, inline="m1")
-st3_m1 = input.symbol("CBOT_MINI:YMH2026", "&", group=groupSSMTTriad, inline="m1")
-inv_m1 = input.bool(false, "Inverse", group=groupSSMTTriad, inline="m1")
-
-enable_m2 = input.bool(false, "Triad 2", group=groupSSMTTriad, inline="m2")
-st1_m2 = input.symbol("", "", group=groupSSMTTriad, inline="m2")
-st2_m2 = input.symbol("", "&", group=groupSSMTTriad, inline="m2")
-st3_m2 = input.symbol("", "&", group=groupSSMTTriad, inline="m2")
-inv_m2 = input.bool(false, "Inverse", group=groupSSMTTriad, inline="m2")
-
-enable_m3 = input.bool(false, "Triad 3", group=groupSSMTTriad, inline="m3")
-st1_m3 = input.symbol("", "", group=groupSSMTTriad, inline="m3")
-st2_m3 = input.symbol("", "&", group=groupSSMTTriad, inline="m3")
-st3_m3 = input.symbol("", "&", group=groupSSMTTriad, inline="m3")
-inv_m3 = input.bool(false, "Inverse", group=groupSSMTTriad, inline="m3")
-
-enable_m4 = input.bool(false, "Triad 4", group=groupSSMTTriad, inline="m4")
-st1_m4 = input.symbol("", "", group=groupSSMTTriad, inline="m4")
-st2_m4 = input.symbol("", "&", group=groupSSMTTriad, inline="m4")
-st3_m4 = input.symbol("", "&", group=groupSSMTTriad, inline="m4")
-inv_m4 = input.bool(false, "Inverse", group=groupSSMTTriad, inline="m4")
-
-enable_m5 = input.bool(false, "Triad 5", group=groupSSMTTriad, inline="m5")
-st1_m5 = input.symbol("", "", group=groupSSMTTriad, inline="m5")
-st2_m5 = input.symbol("", "&", group=groupSSMTTriad, inline="m5")
-st3_m5 = input.symbol("", "&", group=groupSSMTTriad, inline="m5")
-inv_m5 = input.bool(false, "Inverse", group=groupSSMTTriad, inline="m5")
-
-dyad_selection_mode = input.string("Manual", "Dyad Selection", options=["Auto", "Manual", "Off"], group=groupSSMTDyad, inline="dyad_mode", tooltip="Auto: \n CAPITALCOM=US100:US500 \n OANDA=XAUUSD:XAGUSD \n FOREXCOM=URUSD:GBPUSD \n BINANCE=BTCUSDT.P:ETHUSDT.P: \n NQ1:ES1 \n GC,SI")
-
-enable_dyad_m1 = input.bool(true, "Dyad 1", group=groupSSMTDyad, inline="dyad_m1")
-dyad_m1_sym1 = input.symbol("CME_MINI:ESH2026", "", group=groupSSMTDyad, inline="dyad_m1")
-dyad_m1_sym2 = input.symbol("CME_MINI:NQH2026", "&", group=groupSSMTDyad, inline="dyad_m1")
-inv_dyad_m1 = input.bool(false, "Inverse", group=groupSSMTDyad, inline="dyad_m1")
-
-enable_dyad_m2 = input.bool(false, "Dyad 2", group=groupSSMTDyad, inline="dyad_m2")
-dyad_m2_sym1 = input.symbol("", "", group=groupSSMTDyad, inline="dyad_m2")
-dyad_m2_sym2 = input.symbol("", "&", group=groupSSMTDyad, inline="dyad_m2")
-inv_dyad_m2 = input.bool(false, "Inverse", group=groupSSMTDyad, inline="dyad_m2")
-
-enable_dyad_m3 = input.bool(false, "Dyad 3", group=groupSSMTDyad, inline="dyad_m3")
-dyad_m3_sym1 = input.symbol("", "", group=groupSSMTDyad, inline="dyad_m3")
-dyad_m3_sym2 = input.symbol("", "&", group=groupSSMTDyad, inline="dyad_m3")
-inv_dyad_m3 = input.bool(false, "Inverse", group=groupSSMTDyad, inline="dyad_m3")
-
-enable_dyad_m4 = input.bool(false, "Dyad 4", group=groupSSMTDyad, inline="dyad_m4")
-dyad_m4_sym1 = input.symbol("", "", group=groupSSMTDyad, inline="dyad_m4")
-dyad_m4_sym2 = input.symbol("", "&", group=groupSSMTDyad, inline="dyad_m4")
-inv_dyad_m4 = input.bool(false, "Inverse", group=groupSSMTDyad, inline="dyad_m4")
-
-enable_dyad_m5 = input.bool(false, "Dyad 5", group=groupSSMTDyad, inline="dyad_m5")
-dyad_m5_sym1 = input.symbol("", "", group=groupSSMTDyad, inline="dyad_m5")
-dyad_m5_sym2 = input.symbol("", "&", group=groupSSMTDyad, inline="dyad_m5")
-inv_dyad_m5 = input.bool(false, "Inverse", group=groupSSMTDyad, inline="dyad_m5")
+triad1_sym1 = "TVC:DXY", triad1_sym2 = "CME:6E1!", triad1_sym3 = "CME:6B1!"
+triad2_sym1 = "NYMEX:CL1!", triad2_sym2 = "NYMEX:RB1!", triad2_sym3 = "NYMEX:HO1!"
+triad3_sym1 = "CBOT:ZB1!", triad3_sym2 = "CBOT:TN1!", triad3_sym3 = "CBOT:ZF1!"
+triad4_sym1 = "COMEX:GC1!", triad4_sym2 = "COMEX:SI1!", triad4_sym3 = "COMEX:HG1!"
+triad5_sym1 = "CME_MINI:NQ1!", triad5_sym2 = "CME_MINI:ES1!", triad5_sym3 = "CBOT_MINI:YM1!"
+dyad1_sym1 = "CBOT:ZB1!", dyad1_sym2 = "CBOT:TN1!"
 
 ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)
 ssmtBullLineCol = input.color(color.rgb(41, 98, 255), "Bullish SSMT Color", group=groupSSMT)
@@ -131,6 +63,12 @@ showWeeklySSMTDebug = input.bool(false, "Show Monthly SSMT Debug (Data Window)",
 // ============================================================================
 f_ssmt_sym_ticker(string sym) =>
     string s = str.upper(sym)
+    if str.contains(s, "\"SYMBOL\":\"")
+        string[] partsSym = str.split(s, "\"SYMBOL\":\"")
+        if array.size(partsSym) > 1
+            string right = array.get(partsSym, 1)
+            string[] partsEnd = str.split(right, "\"")
+            s := array.get(partsEnd, 0)
     if str.contains(s, "{")
         string[] partsBrace = str.split(s, "{")
         s := array.get(partsBrace, 0)
@@ -140,8 +78,42 @@ f_ssmt_sym_ticker(string sym) =>
     string[] parts = str.split(s, ":")
     array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
 
-f_ssmt_norm_sym(string sym) =>
-    syminfo.type == "futures" ? ticker.modify(sym, session=syminfo.session) : sym
+f_ssmt_match_tag(string sym) =>
+    string tk = str.upper(f_ssmt_sym_ticker(sym))
+    string tag = ""
+    if str.contains(tk, "DXY")
+        tag := "DXY"
+    else if str.contains(tk, "MNQ") or str.contains(tk, "NQ")
+        tag := "NQ"
+    else if str.contains(tk, "MES") or str.contains(tk, "ES")
+        tag := "ES"
+    else if str.contains(tk, "MYM") or str.contains(tk, "YM")
+        tag := "YM"
+    else if str.contains(tk, "M2K") or str.contains(tk, "RTY")
+        tag := "RTY"
+    else if str.contains(tk, "MCL") or str.contains(tk, "CL")
+        tag := "CL"
+    else if str.contains(tk, "MRB") or str.contains(tk, "RB")
+        tag := "RB"
+    else if str.contains(tk, "MHO") or str.contains(tk, "HO")
+        tag := "HO"
+    else if str.contains(tk, "M6E") or str.contains(tk, "6E")
+        tag := "6E"
+    else if str.contains(tk, "M6B") or str.contains(tk, "6B")
+        tag := "6B"
+    else if str.contains(tk, "ZB")
+        tag := "ZB"
+    else if str.contains(tk, "TN")
+        tag := "TN"
+    else if str.contains(tk, "ZF")
+        tag := "ZF"
+    else if str.contains(tk, "MGC") or str.contains(tk, "GC")
+        tag := "GC"
+    else if str.contains(tk, "SIL") or str.contains(tk, "SI")
+        tag := "SI"
+    else if str.contains(tk, "MHG") or str.contains(tk, "HG")
+        tag := "HG"
+    tag
 
 f_check_match(string input_sym) =>
     bool valid = str.length(input_sym) > 0 and str.contains(input_sym, ":")
@@ -153,33 +125,13 @@ f_check_match(string input_sym) =>
         string tSym = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : inputUp
         string curTicker = str.upper(syminfo.ticker)
         string curId = str.upper(syminfo.tickerid)
-        (curTicker == tSym) or str.contains(curId, tSym) or str.contains(inputUp, curTicker)
-
-f_is_same_symbol_exact(string input_sym) =>
-    bool valid = str.length(input_sym) > 0 and str.contains(input_sym, ":")
-    if not valid
-        false
-    else
-        string inTicker = str.upper(str.trim(str.replace_all(f_ssmt_sym_ticker(input_sym), "=", "")))
-        string curTicker = str.upper(str.trim(str.replace_all(f_ssmt_sym_ticker(syminfo.tickerid), "=", "")))
-        str.length(inTicker) > 0 and str.length(curTicker) > 0 and inTicker == curTicker
-
-f_ssmt_tag(string sym) =>
-    string s = f_ssmt_sym_ticker(sym)
-    string tag = s
-    if str.contains(s, "MES")
-        tag := "ES"
-    else if str.contains(s, "MNQ")
-        tag := "NQ"
-    else if str.contains(s, "MYM")
-        tag := "YM"
-    else if str.contains(s, "ES")
-        tag := "ES"
-    else if str.contains(s, "NQ")
-        tag := "NQ"
-    else if str.contains(s, "YM")
-        tag := "YM"
-    tag
+        bool directMatch = (curTicker == tSym) or str.contains(curId, tSym) or str.contains(inputUp, curTicker)
+        if directMatch
+            true
+        else
+            string inTag = f_ssmt_match_tag(input_sym)
+            string curTag = f_ssmt_match_tag(syminfo.tickerid)
+            str.length(inTag) > 0 and str.length(curTag) > 0 and inTag == curTag
 
 f_ssmt_label_sym(string sym) =>
     string allUp = str.upper(f_ssmt_sym_ticker(sym))
@@ -233,71 +185,30 @@ f_ssmt_label_sym(string sym) =>
                 out := r2
     out
 
-f_ssmt_match_chart_contract_size(string inputSym, string chartSym) =>
-    string out = inputSym
-    string chartT = f_ssmt_sym_ticker(chartSym)
-
-    bool chartMicro = str.contains(chartT, "MES") or str.contains(chartT, "MNQ") or str.contains(chartT, "MYM")
-    bool chartMini = (str.contains(chartT, "ES") and not str.contains(chartT, "MES")) or (str.contains(chartT, "NQ") and not str.contains(chartT, "MNQ")) or (str.contains(chartT, "YM") and not str.contains(chartT, "MYM"))
-
-    if chartMicro or chartMini
-        string up = str.upper(inputSym)
-        string[] parts = str.split(up, ":")
-        string ex = array.size(parts) > 1 ? array.get(parts, 0) : ""
-        string tk = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : up
-
-        bool tkMicro = str.length(tk) >= 3 and (str.substring(tk, 0, 3) == "MES" or str.substring(tk, 0, 3) == "MNQ" or str.substring(tk, 0, 3) == "MYM")
-        bool tkMini = str.length(tk) >= 2 and (str.substring(tk, 0, 2) == "ES" or str.substring(tk, 0, 2) == "NQ" or str.substring(tk, 0, 2) == "YM")
-
-        if chartMicro and tkMini
-            string root2 = str.substring(tk, 0, 2)
-            string suffix2 = str.substring(tk, 2, str.length(tk))
-            if root2 == "ES"
-                tk := "MES" + suffix2
-            else if root2 == "NQ"
-                tk := "MNQ" + suffix2
-            else if root2 == "YM"
-                tk := "MYM" + suffix2
-        else if chartMini and tkMicro
-            string root3 = str.substring(tk, 0, 3)
-            string suffix3 = str.substring(tk, 3, str.length(tk))
-            if root3 == "MES"
-                tk := "ES" + suffix3
-            else if root3 == "MNQ"
-                tk := "NQ" + suffix3
-            else if root3 == "MYM"
-                tk := "YM" + suffix3
-
-        out := str.length(ex) > 0 ? ex + ":" + tk : tk
-    out
-
-f_ssmt_apply_futures_modifiers(string sym, bool useBackadjust) =>
+f_ssmt_debug_symbol_text(string sym) =>
     string out = sym
-    if syminfo.type == "futures"
-        bool isContinuous = str.contains(f_ssmt_sym_ticker(sym), "!")
-        if isContinuous
-            if useBackadjust
-                out := ticker.modify(sym, session=syminfo.session, backadjustment=backadjustment.on)
-            else
-                out := ticker.modify(sym, session=syminfo.session, backadjustment=backadjustment.off)
-        else
-            out := ticker.modify(sym, session=syminfo.session)
-        string outTrim = str.trim(out)
-        if str.length(outTrim) == 0 or outTrim == "="
-            out := sym
+    if str.length(sym) > 0
+        string up = str.upper(sym)
+        bool hasBackadjMeta = str.contains(up, "BACKADJUSTMENT") or str.contains(up, "BACKADJUST") or str.contains(up, "BACKADJUSTED")
+        if hasBackadjMeta
+            string tk = f_ssmt_sym_ticker(sym)
+            out := "B-ADJ " + (str.length(tk) > 0 ? tk : sym)
     out
 
-f_ssmt_chart_backadjust_state(bool fallback) =>
-    bool out = fallback
-    if syminfo.type == "futures"
-        string tid = str.upper(syminfo.tickerid)
-        bool hasOn = str.contains(tid, "BACKADJUSTMENT.ON") or str.contains(tid, "BACKADJUSTMENT=ON") or str.contains(tid, "BACKADJUSTMENT=TRUE") or str.contains(tid, "\"BACKADJUSTMENT\":\"ON\"") or str.contains(tid, "\"BACKADJUSTMENT\":\"TRUE\"")
-        bool hasOff = str.contains(tid, "BACKADJUSTMENT.OFF") or str.contains(tid, "BACKADJUSTMENT=OFF") or str.contains(tid, "BACKADJUSTMENT=FALSE") or str.contains(tid, "\"BACKADJUSTMENT\":\"OFF\"") or str.contains(tid, "\"BACKADJUSTMENT\":\"FALSE\"")
-        if hasOn and not hasOff
-            out := true
-        else if hasOff and not hasOn
-            out := false
-    out
+f_ssmt_is_dxy_symbol(string sym) =>
+    str.contains(str.upper(f_ssmt_sym_ticker(sym)), "DXY")
+
+f_ssmt_sweep_high(float hCur, float hPrev, float lCur, float lPrev, bool inverse) =>
+    inverse ? (lCur < lPrev) : (hCur > hPrev)
+
+f_ssmt_sweep_low(float hCur, float hPrev, float lCur, float lPrev, bool inverse) =>
+    inverse ? (hCur > hPrev) : (lCur < lPrev)
+
+f_ssmt_sweep_body_high(float bhCur, float bhPrev, float blCur, float blPrev, bool inverse) =>
+    inverse ? (blCur < blPrev) : (bhCur > bhPrev)
+
+f_ssmt_sweep_body_low(float bhCur, float bhPrev, float blCur, float blPrev, bool inverse) =>
+    inverse ? (bhCur > bhPrev) : (blCur < blPrev)
 
 f_ssmt_weekly_highs_expr() =>
     var qt.QTConfig peerCfg = qt.qt_config_default()
@@ -1200,223 +1111,62 @@ dbgSsmtAsset2Short := ""
 dbgSsmtAsset3Short := ""
 
 string sym = syminfo.tickerid
-
-bool match_m1_1 = f_check_match(st1_m1), match_m1_2 = f_check_match(st2_m1), match_m1_3 = f_check_match(st3_m1)
-bool match_m2_1 = f_check_match(st1_m2), match_m2_2 = f_check_match(st2_m2), match_m2_3 = f_check_match(st3_m2)
-bool match_m3_1 = f_check_match(st1_m3), match_m3_2 = f_check_match(st2_m3), match_m3_3 = f_check_match(st3_m3)
-bool match_m4_1 = f_check_match(st1_m4), match_m4_2 = f_check_match(st2_m4), match_m4_3 = f_check_match(st3_m4)
-bool match_m5_1 = f_check_match(st1_m5), match_m5_2 = f_check_match(st2_m5), match_m5_3 = f_check_match(st3_m5)
-
-bool is_in_manual_m1 = tr1A and enable_m1 and (match_m1_1 or match_m1_2 or match_m1_3)
-bool is_in_manual_m2 = tr1A and enable_m2 and (match_m2_1 or match_m2_2 or match_m2_3)
-bool is_in_manual_m3 = tr1A and enable_m3 and (match_m3_1 or match_m3_2 or match_m3_3)
-bool is_in_manual_m4 = tr1A and enable_m4 and (match_m4_1 or match_m4_2 or match_m4_3)
-bool is_in_manual_m5 = tr1A and enable_m5 and (match_m5_1 or match_m5_2 or match_m5_3)
-bool is_in_manual = is_in_manual_m1 or is_in_manual_m2 or is_in_manual_m3 or is_in_manual_m4 or is_in_manual_m5
-
-string st1 = ""
-string st2 = ""
-string st3 = ""
-if is_in_manual_m1 and enable_m1
-    st1 := st1_m1
-    st2 := st2_m1
-    st3 := st3_m1
-else if is_in_manual_m2 and enable_m2
-    st1 := st1_m2
-    st2 := st2_m2
-    st3 := st3_m2
-else if is_in_manual_m3 and enable_m3
-    st1 := st1_m3
-    st2 := st2_m3
-    st3 := st3_m3
-else if is_in_manual_m4 and enable_m4
-    st1 := st1_m4
-    st2 := st2_m4
-    st3 := st3_m4
-else if is_in_manual_m5 and enable_m5
-    st1 := st1_m5
-    st2 := st2_m5
-    st3 := st3_m5
-
 string symTicker = str.upper(f_ssmt_sym_ticker(sym))
 string chartTicker = str.upper(syminfo.ticker)
 string chartRoot = str.upper(syminfo.root)
-bool is_nq_asset = str.contains(symTicker, "NQ") or str.contains(symTicker, "MNQ") or str.contains(chartTicker, "NQ") or str.contains(chartTicker, "MNQ") or chartRoot == "NQ" or chartRoot == "MNQ"
-bool is_es_asset = str.contains(symTicker, "ES") or str.contains(symTicker, "MES") or str.contains(chartTicker, "ES") or str.contains(chartTicker, "MES") or chartRoot == "ES" or chartRoot == "MES"
-bool is_ym_asset = str.contains(symTicker, "YM") or str.contains(symTicker, "MYM") or str.contains(chartTicker, "YM") or str.contains(chartTicker, "MYM") or chartRoot == "YM" or chartRoot == "MYM"
-bool is_gc_asset = str.contains(symTicker, "GC") or str.contains(symTicker, "MGC") or str.contains(chartTicker, "GC") or str.contains(chartTicker, "MGC") or chartRoot == "GC" or chartRoot == "MGC"
-bool is_si_asset = str.contains(symTicker, "SI") or str.contains(symTicker, "MSI") or str.contains(chartTicker, "SI") or str.contains(chartTicker, "SIL") or chartRoot == "SI" or chartRoot == "SIL"
-bool is_sl_asset = str.contains(symTicker, "PL") or str.contains(symTicker, "MSL") or str.contains(chartTicker, "PL") or chartRoot == "PL"
-bool is_mgc_asset = str.contains(symTicker, "MGC")
-bool is_sil_asset = str.contains(symTicker, "SIL")
 
-bool is_in_g2 = tr1B and (str.contains(sym, "XAU") or str.contains(sym, "XAG") or str.contains(sym, "XPT"))
-bool is_in_g3 = tr1C and (str.contains(sym, "BTC") or str.contains(sym, "ETH") or str.contains(sym, "ADA"))
-bool is_in_g4 = tr1D and (is_nq_asset or is_es_asset or is_ym_asset)
-bool is_in_g5 = tr1E and (str.contains(sym, "EURUSD") or str.contains(sym, "GBPUSD") or str.contains(sym, "AUDUSD"))
-bool is_in_g6 = tr1F and (str.contains(sym, "US100") or str.contains(sym, "USTEC") or str.contains(sym, "NAS100") or str.contains(sym, "US500") or str.contains(sym, "SPX500") or str.contains(sym, "SP500") or str.contains(sym, "US30"))
-bool is_in_g7 = tr1G and (is_gc_asset or is_si_asset or is_sl_asset)
+bool triadModeActive = selection_mode == "Triad"
+bool dyadModeActive = selection_mode == "Dyad"
+string st1 = ""
+string st2 = ""
+string st3 = ""
+bool in_triad1 = f_check_match(triad1_sym1) or f_check_match(triad1_sym2) or f_check_match(triad1_sym3)
+bool in_triad2 = f_check_match(triad2_sym1) or f_check_match(triad2_sym2) or f_check_match(triad2_sym3)
+bool in_triad3 = f_check_match(triad3_sym1) or f_check_match(triad3_sym2) or f_check_match(triad3_sym3)
+bool in_triad4 = f_check_match(triad4_sym1) or f_check_match(triad4_sym2) or f_check_match(triad4_sym3)
+bool in_triad5 = f_check_match(triad5_sym1) or f_check_match(triad5_sym2) or f_check_match(triad5_sym3)
+bool in_dyad1 = f_check_match(dyad1_sym1) or f_check_match(dyad1_sym2)
+string chartMatchTag = f_ssmt_match_tag(syminfo.tickerid)
+string triadBranch = in_triad1 ? "Forex Triad (DXY/6E/6B)" : in_triad2 ? "Oil Triad (CL/RB/HO)" : in_triad3 ? "Interest Rate Triad (ZB/TN/ZF)" : in_triad4 ? "Metals Triad (GC/SI/HG)" : in_triad5 ? "Indices Triad (NQ/ES/YM)" : "none"
+string dyadBranch = in_dyad1 ? "Dyad Group E (ZB/TN)" : (chartMatchTag == "ES" or chartMatchTag == "NQ") ? "Indices Dyad A (ES/NQ)" : (chartMatchTag == "YM" or chartMatchTag == "RTY") ? "Indices Dyad B (YM/RTY)" : (chartMatchTag == "CL" or chartMatchTag == "RB") ? "Oil Dyad (CL/RB)" : (chartMatchTag == "DXY" or chartMatchTag == "6E") ? "Forex Dyad (DXY/6E)" : "Auto Dyad"
 
-bool triad_ok = triad_selection_mode == "Off" ? false : triad_selection_mode == "Auto" ? (is_in_g2 or is_in_g3 or is_in_g4 or is_in_g5 or is_in_g6 or is_in_g7) : is_in_manual
+if in_triad1
+    st1 := triad1_sym1
+    st2 := triad1_sym2
+    st3 := triad1_sym3
+else if in_triad2
+    st1 := triad2_sym1
+    st2 := triad2_sym2
+    st3 := triad2_sym3
+else if in_triad3
+    st1 := triad3_sym1
+    st2 := triad3_sym2
+    st3 := triad3_sym3
+else if in_triad4
+    st1 := triad4_sym1
+    st2 := triad4_sym2
+    st3 := triad4_sym3
+else if in_triad5
+    st1 := triad5_sym1
+    st2 := triad5_sym2
+    st3 := triad5_sym3
 
 bool match_1 = f_check_match(st1)
 bool match_2 = f_check_match(st2)
 bool match_3 = f_check_match(st3)
+bool triad_ok = triadModeActive and (in_triad1 or in_triad2 or in_triad3 or in_triad4 or in_triad5) and (match_1 or match_2 or match_3)
 
-string tsym2 = ""
-string tsym3 = ""
-string csym = ""
-if triad_ok
-    if is_in_manual
-        if match_1
-            tsym2 := st2
-            tsym3 := st3
-        else if match_2
-            tsym2 := st1
-            tsym3 := st3
-        else if match_3
-            tsym2 := st1
-            tsym3 := st2
-    else if is_in_g2
-        tsym2 := str.contains(sym, "XAU") ? st5 : st4
-        tsym3 := str.contains(sym, "XPT") ? st5 : st6
-    else if is_in_g3
-        tsym2 := str.contains(sym, "BTC") ? st8 : (str.contains(sym, "ETH") ? st7 : st7)
-        tsym3 := str.contains(sym, "BTC") ? st9 : (str.contains(sym, "ETH") ? st9 : st8)
-    else if is_in_g4
-        string tkr = str.upper(syminfo.ticker)
-        string root3 = str.substring(tkr, 0, 3)
-        string root2 = str.substring(tkr, 0, 2)
-        bool is_micro = root3 == "MES" or root3 == "MNQ" or root3 == "MYM"
-        string root = is_micro ? root3 : root2
-        int root_len = is_micro ? 3 : 2
-        string month_code = str.length(tkr) > root_len ? str.substring(tkr, root_len, root_len + 1) : ""
-        string year_raw = str.length(tkr) > root_len + 1 ? str.substring(tkr, root_len + 1, str.length(tkr)) : ""
-        string year_str = str.length(year_raw) >= 4 ? str.substring(year_raw, 0, 4) : year_raw
-        bool has_contract = str.contains("FGHJKMNQUVXZ", month_code) and not na(str.tonumber(year_str))
-        if has_contract
-            string root_a = root == "ES" or root == "MES" ? (is_micro ? "MNQ" : "NQ") : root == "NQ" or root == "MNQ" ? (is_micro ? "MES" : "ES") : (is_micro ? "MES" : "ES")
-            string root_b = root == "ES" or root == "MES" ? (is_micro ? "MYM" : "YM") : root == "NQ" or root == "MNQ" ? (is_micro ? "MYM" : "YM") : (is_micro ? "MNQ" : "NQ")
-            string ex_a = (root_a == "YM" or root_a == "MYM") ? "CBOT_MINI" : "CME_MINI"
-            string ex_b = (root_b == "YM" or root_b == "MYM") ? "CBOT_MINI" : "CME_MINI"
-            tsym2 := ex_a + ":" + root_a + month_code + year_str
-            tsym3 := ex_b + ":" + root_b + month_code + year_str
-        else
-            if is_nq_asset
-                tsym2 := st11
-                tsym3 := st12
-            else if is_es_asset
-                tsym2 := st10
-                tsym3 := st12
-            else if is_ym_asset
-                tsym2 := st10
-                tsym3 := st11
-    else if is_in_g5
-        tsym2 := str.contains(sym, "EURUSD") ? st14 : (str.contains(sym, "GBPUSD") ? st13 : st13)
-        tsym3 := str.contains(sym, "EURUSD") ? st15 : (str.contains(sym, "GBPUSD") ? st15 : st14)
-    else if is_in_g6
-        tsym2 := str.contains(sym, "US100") ? st17 : (str.contains(sym, "US500") ? st16 : st16)
-        tsym3 := str.contains(sym, "US100") ? st18 : (str.contains(sym, "US500") ? st18 : st17)
-    else if is_in_g7
-        if is_mgc_asset
-            tsym2 := s14
-            tsym3 := st22
-        else if is_sil_asset
-            tsym2 := s13
-            tsym3 := st22
-        else if is_gc_asset
-            tsym2 := st20
-            tsym3 := st23
-        else if is_si_asset
-            tsym2 := st19
-            tsym3 := st23
-        else if is_sl_asset
-            tsym2 := st19
-            tsym3 := st20
-
-if triad_ok
-    if str.length(tsym2) > 0
-        tsym2 := f_ssmt_match_chart_contract_size(tsym2, sym)
-        tsym2 := f_ssmt_apply_futures_modifiers(tsym2, not badj)
-    if str.length(tsym3) > 0
-        tsym3 := f_ssmt_match_chart_contract_size(tsym3, sym)
-        tsym3 := f_ssmt_apply_futures_modifiers(tsym3, not badj)
-else if dyad_selection_mode != "Off"
-    bool runDyadAuto = dyad_selection_mode == "Auto"
-    if dyad_selection_mode == "Manual"
-        bool is_on_dyad_m1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
-        bool is_on_dyad_m2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
-        bool is_on_dyad_m3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
-        bool is_on_dyad_m4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
-        bool is_on_dyad_m5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
-        if is_on_dyad_m1
-            csym := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
-        else if is_on_dyad_m2
-            csym := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
-        else if is_on_dyad_m3
-            csym := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
-        else if is_on_dyad_m4
-            csym := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
-        else if is_on_dyad_m5
-            csym := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
-        runDyadAuto := str.length(csym) == 0
-    if runDyadAuto
-        if str.contains(sym, s1) or sym == s1
-            csym := s2
-        else if str.contains(sym, s2) or sym == s2
-            csym := s1
-        else if str.contains(sym, s3) or sym == s3
-            csym := s4
-        else if str.contains(sym, s4) or sym == s4
-            csym := s3
-        else if str.contains(sym, s5) or sym == s5
-            csym := s6
-        else if str.contains(sym, s6) or sym == s6
-            csym := s5
-        else if str.contains(sym, s7) or sym == s7
-            csym := s8
-        else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
-            csym := s7
-        else if is_nq_asset
-            csym := str.contains(symTicker, "NQ1!") ? st11 : s10
-        else if is_es_asset
-            csym := s9
-        else if is_mgc_asset
-            csym := s14
-        else if is_sil_asset
-            csym := s13
-        else if is_gc_asset
-            csym := s12
-        else if is_si_asset
-            csym := s11
-    if str.length(csym) > 0
-        csym := f_ssmt_match_chart_contract_size(csym, syminfo.ticker)
-        csym := f_ssmt_apply_futures_modifiers(csym, badj)
-        tsym2 := csym
-        tsym3 := ""
-
-if str.length(tsym2) > 0 and f_is_same_symbol_exact(tsym2)
-    tsym2 := ""
-if str.length(tsym3) > 0 and f_is_same_symbol_exact(tsym3)
-    tsym3 := ""
-if str.length(tsym2) > 0 and str.length(tsym3) > 0 and str.upper(tsym2) == str.upper(tsym3)
-    tsym3 := ""
-if triad_selection_mode == "Auto" and is_in_g4 and str.length(tsym2) == 0 and str.length(tsym3) == 0
-    if is_nq_asset
-        tsym2 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st11, sym), not badj)
-        tsym3 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st12, sym), not badj)
-    else if is_es_asset
-        tsym2 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st10, sym), not badj)
-        tsym3 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st12, sym), not badj)
-    else if is_ym_asset
-        tsym2 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st10, sym), not badj)
-        tsym3 := f_ssmt_apply_futures_modifiers(f_ssmt_match_chart_contract_size(st11, sym), not badj)
+[tsym2, tsym3] = qta.resolve_pair_symbols(selection_mode, badj, sym, symTicker, chartTicker, chartRoot)
 dbgSsmtAsset2 := str.length(tsym2) > 0 ? tsym2 : ""
 dbgSsmtAsset3 := str.length(tsym3) > 0 ? tsym3 : ""
 dbgSsmtAsset2Short := str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : ""
 dbgSsmtAsset3Short := str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : ""
+bool triad1InverseMode = triadModeActive and in_triad1
+bool chartInverse = triad1InverseMode and f_ssmt_is_dxy_symbol(syminfo.tickerid)
+bool peer2Inverse = triad1InverseMode and str.length(tsym2) > 0 and f_ssmt_is_dxy_symbol(tsym2)
+bool peer3Inverse = triad1InverseMode and str.length(tsym3) > 0 and f_ssmt_is_dxy_symbol(tsym3)
 
-bool dyad_ok = not triad_ok and str.length(tsym2) > 0 and str.length(tsym3) == 0
+bool dyad_ok = dyadModeActive and str.length(tsym2) > 0 and str.length(tsym3) == 0
 
 if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsmtLive or nanoSsmtLive
     bool runWeeklyBearSSMT = showWeeklyBearBoth
@@ -2188,9 +1938,9 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
 
     // Bearish Weekly SSMT (normal)
     if runWeeklyBearSSMT
-        bool hasPeer2 = str.length(tsym2) > 0 and not na(peer2Hcur) and not na(peer2Hprev) and not na(peer2HcurTs) and not na(peer2HprevTs) and not na(peer2Qts)
-        bool hasPeer3 = str.length(tsym3) > 0 and not na(peer3Hcur) and not na(peer3Hprev) and not na(peer3HcurTs) and not na(peer3HprevTs) and not na(peer3Qts)
-        bool ssmtReady = isPairChart and not na(chHcur) and not na(chHprev) and not na(chHcurTs) and not na(chHprevTs) and (hasPeer2 or hasPeer3)
+        bool hasPeer2 = str.length(tsym2) > 0 and not na(peer2Hcur) and not na(peer2Hprev) and not na(peer2HcurTs) and not na(peer2HprevTs) and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2Qts)
+        bool hasPeer3 = str.length(tsym3) > 0 and not na(peer3Hcur) and not na(peer3Hprev) and not na(peer3HcurTs) and not na(peer3HprevTs) and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3Qts)
+        bool ssmtReady = isPairChart and not na(chHcur) and not na(chHprev) and not na(chHcurTs) and not na(chHprevTs) and not na(chLcur) and not na(chLprev) and (hasPeer2 or hasPeer3)
         if not na(chQts)
             bool qChanged = na(wSsmtLastQTs) or chQts != wSsmtLastQTs
             if qChanged
@@ -2198,12 +1948,12 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
                 wSsmtSplitLastBar := false
                 wSsmtLastQTs := chQts
         if ssmtReady
-            bool chartSweep = chHcur > chHprev
-            bool split2 = hasPeer2 and (chartSweep != (peer2Hcur > peer2Hprev))
-            bool split3 = hasPeer3 and (chartSweep != (peer3Hcur > peer3Hprev))
+            bool chartSweep = f_ssmt_sweep_high(chHcur, chHprev, chLcur, chLprev, chartInverse)
+            bool split2 = hasPeer2 and (chartSweep != f_ssmt_sweep_high(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse))
+            bool split3 = hasPeer3 and (chartSweep != f_ssmt_sweep_high(peer3Hcur, peer3Hprev, peer3Lcur, peer3Lprev, peer3Inverse))
             bool split = split2 or split3
-            bool peer2Sweep = hasPeer2 ? (peer2Hcur > peer2Hprev) : false
-            bool peer3Sweep = hasPeer3 ? (peer3Hcur > peer3Hprev) : false
+            bool peer2Sweep = hasPeer2 ? f_ssmt_sweep_high(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse) : false
+            bool peer3Sweep = hasPeer3 ? f_ssmt_sweep_high(peer3Hcur, peer3Hprev, peer3Lcur, peer3Lprev, peer3Inverse) : false
             wSsmtSplitLastBar := split
             dbgWRegBearSplit := split ? 1.0 : 0.0
             dbgWRegBearChartSweep := chartSweep ? 1.0 : 0.0
@@ -2312,16 +2062,16 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
 
     // Bullish Weekly SSMT (normal)
     if runWeeklyBullSSMT
-        bool hasPeer2B = str.length(tsym2) > 0 and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2LcurTs) and not na(peer2LprevTs) and not na(peer2Qts)
-        bool hasPeer3B = str.length(tsym3) > 0 and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3LcurTs) and not na(peer3LprevTs) and not na(peer3Qts)
-        bool ssmtReadyB = isPairChart and not na(chLcur) and not na(chLprev) and not na(chLcurTs) and not na(chLprevTs) and (hasPeer2B or hasPeer3B)
+        bool hasPeer2B = str.length(tsym2) > 0 and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2LcurTs) and not na(peer2LprevTs) and not na(peer2Hcur) and not na(peer2Hprev) and not na(peer2Qts)
+        bool hasPeer3B = str.length(tsym3) > 0 and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3LcurTs) and not na(peer3LprevTs) and not na(peer3Hcur) and not na(peer3Hprev) and not na(peer3Qts)
+        bool ssmtReadyB = isPairChart and not na(chLcur) and not na(chLprev) and not na(chLcurTs) and not na(chLprevTs) and not na(chHcur) and not na(chHprev) and (hasPeer2B or hasPeer3B)
         if ssmtReadyB
-            bool chartSweepB = chLcur < chLprev
-            bool split2B = hasPeer2B and (chartSweepB != (peer2Lcur < peer2Lprev))
-            bool split3B = hasPeer3B and (chartSweepB != (peer3Lcur < peer3Lprev))
+            bool chartSweepB = f_ssmt_sweep_low(chHcur, chHprev, chLcur, chLprev, chartInverse)
+            bool split2B = hasPeer2B and (chartSweepB != f_ssmt_sweep_low(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse))
+            bool split3B = hasPeer3B and (chartSweepB != f_ssmt_sweep_low(peer3Hcur, peer3Hprev, peer3Lcur, peer3Lprev, peer3Inverse))
             bool splitB = split2B or split3B
-            bool peer2SweepB = hasPeer2B ? (peer2Lcur < peer2Lprev) : false
-            bool peer3SweepB = hasPeer3B ? (peer3Lcur < peer3Lprev) : false
+            bool peer2SweepB = hasPeer2B ? f_ssmt_sweep_low(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse) : false
+            bool peer3SweepB = hasPeer3B ? f_ssmt_sweep_low(peer3Hcur, peer3Hprev, peer3Lcur, peer3Lprev, peer3Inverse) : false
 
             float curL = chLcur
             int   curLTs = chLcurTs
@@ -2424,35 +2174,35 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
 
     // Bullish Weekly HSSMT (hidden)
     if runWeeklyBullHSSMT
-        bool suppressHiddenByRegularBull = false
-        bool hasPeer2HB = str.length(tsym2) > 0 and not na(peer2BLcur) and not na(peer2BLprev) and not na(peer2BLcurTs) and not na(peer2BLprevTs) and not na(peer2Qts)
-        bool hasPeer3HB = str.length(tsym3) > 0 and not na(peer3BLcur) and not na(peer3BLprev) and not na(peer3BLcurTs) and not na(peer3BLprevTs) and not na(peer3Qts)
+        bool suppressHiddenByRegularBull = preferRegularVisualBull and regularVisualCandidateBull
+        bool hasPeer2HB = str.length(tsym2) > 0 and not na(peer2BLcur) and not na(peer2BLprev) and not na(peer2BLcurTs) and not na(peer2BLprevTs) and not na(peer2BHcur) and not na(peer2BHprev) and not na(peer2Qts)
+        bool hasPeer3HB = str.length(tsym3) > 0 and not na(peer3BLcur) and not na(peer3BLprev) and not na(peer3BLcurTs) and not na(peer3BLprevTs) and not na(peer3BHcur) and not na(peer3BHprev) and not na(peer3Qts)
         dbgWHidBullChartBodyLowCur := chBLcur
         dbgWHidBullChartBodyLowPrev := chBLprev
         dbgWHidBullPeer2BodyLowCur := hasPeer2HB ? peer2BLcur : na
         dbgWHidBullPeer2BodyLowPrev := hasPeer2HB ? peer2BLprev : na
         dbgWHidBullPeer3BodyLowCur := hasPeer3HB ? peer3BLcur : na
         dbgWHidBullPeer3BodyLowPrev := hasPeer3HB ? peer3BLprev : na
-        bool hssmtReadyB = isPairChart and not na(chBLcur) and not na(chBLprev) and not na(chBLcurTs) and not na(chBLprevTs) and (hasPeer2HB or hasPeer3HB)
+        bool hssmtReadyB = isPairChart and not na(chBLcur) and not na(chBLprev) and not na(chBLcurTs) and not na(chBLprevTs) and not na(chBHcur) and not na(chBHprev) and (hasPeer2HB or hasPeer3HB)
         dbgWHidBullReady := hssmtReadyB ? 1.0 : 0.0
         if hssmtReadyB
-            bool chartSweepHBDbg = chBLcur < chBLprev
-            bool split2HBDbg = hasPeer2HB and (chartSweepHBDbg != (peer2BLcur < peer2BLprev))
-            bool split3HBDbg = hasPeer3HB and (chartSweepHBDbg != (peer3BLcur < peer3BLprev))
+            bool chartSweepHBDbg = f_ssmt_sweep_body_low(chBHcur, chBHprev, chBLcur, chBLprev, chartInverse)
+            bool split2HBDbg = hasPeer2HB and (chartSweepHBDbg != f_ssmt_sweep_body_low(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse))
+            bool split3HBDbg = hasPeer3HB and (chartSweepHBDbg != f_ssmt_sweep_body_low(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse))
             bool splitHBDbg = split2HBDbg or split3HBDbg
-            bool peer2SweepHBDbg = hasPeer2HB ? (peer2BLcur < peer2BLprev) : false
-            bool peer3SweepHBDbg = hasPeer3HB ? (peer3BLcur < peer3BLprev) : false
+            bool peer2SweepHBDbg = hasPeer2HB ? f_ssmt_sweep_body_low(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse) : false
+            bool peer3SweepHBDbg = hasPeer3HB ? f_ssmt_sweep_body_low(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse) : false
             dbgWHidBullChartSweep := chartSweepHBDbg ? 1.0 : 0.0
             dbgWHidBullPeer2Sweep := peer2SweepHBDbg ? 1.0 : 0.0
             dbgWHidBullPeer3Sweep := peer3SweepHBDbg ? 1.0 : 0.0
             dbgWHidBullSplit := splitHBDbg ? 1.0 : 0.0
         if hssmtEvalConfirmed and hssmtReadyB and not suppressHiddenByRegularBull
-            bool chartSweepHB = chBLcur < chBLprev
-            bool split2HB = hasPeer2HB and (chartSweepHB != (peer2BLcur < peer2BLprev))
-            bool split3HB = hasPeer3HB and (chartSweepHB != (peer3BLcur < peer3BLprev))
+            bool chartSweepHB = f_ssmt_sweep_body_low(chBHcur, chBHprev, chBLcur, chBLprev, chartInverse)
+            bool split2HB = hasPeer2HB and (chartSweepHB != f_ssmt_sweep_body_low(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse))
+            bool split3HB = hasPeer3HB and (chartSweepHB != f_ssmt_sweep_body_low(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse))
             bool splitHB = split2HB or split3HB
-            bool peer2SweepHB = hasPeer2HB ? (peer2BLcur < peer2BLprev) : false
-            bool peer3SweepHB = hasPeer3HB ? (peer3BLcur < peer3BLprev) : false
+            bool peer2SweepHB = hasPeer2HB ? f_ssmt_sweep_body_low(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse) : false
+            bool peer3SweepHB = hasPeer3HB ? f_ssmt_sweep_body_low(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse) : false
             dbgWHidBullChartSweep := chartSweepHB ? 1.0 : 0.0
             dbgWHidBullPeer2Sweep := peer2SweepHB ? 1.0 : 0.0
             dbgWHidBullPeer3Sweep := peer3SweepHB ? 1.0 : 0.0
@@ -2559,17 +2309,17 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
 
     // Bearish Weekly HSSMT (hidden)
     if runWeeklyBearHSSMT
-        bool suppressHiddenByRegular = false
-        bool hasPeer2H = str.length(tsym2) > 0 and not na(peer2BHcur) and not na(peer2BHprev) and not na(peer2BHcurTs) and not na(peer2BHprevTs) and not na(peer2Qts)
-        bool hasPeer3H = str.length(tsym3) > 0 and not na(peer3BHcur) and not na(peer3BHprev) and not na(peer3BHcurTs) and not na(peer3BHprevTs) and not na(peer3Qts)
-        bool hssmtReady = isPairChart and not na(chBHcur) and not na(chBHprev) and not na(chBHcurTs) and not na(chBHprevTs) and (hasPeer2H or hasPeer3H)
+        bool suppressHiddenByRegular = preferRegularVisual and regularVisualCandidate
+        bool hasPeer2H = str.length(tsym2) > 0 and not na(peer2BHcur) and not na(peer2BHprev) and not na(peer2BHcurTs) and not na(peer2BHprevTs) and not na(peer2BLcur) and not na(peer2BLprev) and not na(peer2Qts)
+        bool hasPeer3H = str.length(tsym3) > 0 and not na(peer3BHcur) and not na(peer3BHprev) and not na(peer3BHcurTs) and not na(peer3BHprevTs) and not na(peer3BLcur) and not na(peer3BLprev) and not na(peer3Qts)
+        bool hssmtReady = isPairChart and not na(chBHcur) and not na(chBHprev) and not na(chBHcurTs) and not na(chBHprevTs) and not na(chBLcur) and not na(chBLprev) and (hasPeer2H or hasPeer3H)
         if hssmtEvalConfirmed and hssmtReady and not suppressHiddenByRegular
-            bool chartSweepH = chBHcur > chBHprev
-            bool split2H = hasPeer2H and (chartSweepH != (peer2BHcur > peer2BHprev))
-            bool split3H = hasPeer3H and (chartSweepH != (peer3BHcur > peer3BHprev))
+            bool chartSweepH = f_ssmt_sweep_body_high(chBHcur, chBHprev, chBLcur, chBLprev, chartInverse)
+            bool split2H = hasPeer2H and (chartSweepH != f_ssmt_sweep_body_high(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse))
+            bool split3H = hasPeer3H and (chartSweepH != f_ssmt_sweep_body_high(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse))
             bool splitH = split2H or split3H
-            bool peer2SweepH = hasPeer2H ? (peer2BHcur > peer2BHprev) : false
-            bool peer3SweepH = hasPeer3H ? (peer3BHcur > peer3BHprev) : false
+            bool peer2SweepH = hasPeer2H ? f_ssmt_sweep_body_high(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse) : false
+            bool peer3SweepH = hasPeer3H ? f_ssmt_sweep_body_high(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse) : false
             dbgWHidBearSplit := splitH ? 1.0 : 0.0
             dbgWHidBearChartSweep := chartSweepH ? 1.0 : 0.0
             dbgWHidBearPeer2Sweep := peer2SweepH ? 1.0 : 0.0
@@ -2752,153 +2502,26 @@ plot(showWeeklySSMTDebug ? dbgWHidBullPeer3BodyLowPrev : na, "DBG M Hidden Bull 
 
 if barstate.islast
     if showWeeklyQOpenTable
-        bool dyadModeActive = not triad_ok and dyad_selection_mode != "Off"
-        string modeTxt = triad_ok ? (is_in_manual ? "Triad Manual" : "Triad Auto") : dyadModeActive ? (dyad_selection_mode == "Manual" ? "Dyad Manual" : "Dyad Auto") : "Off"
-        string branchTxt = triad_ok ? (is_in_manual ? (is_in_manual_m1 ? "manual m1" : is_in_manual_m2 ? "manual m2" : is_in_manual_m3 ? "manual m3" : is_in_manual_m4 ? "manual m4" : is_in_manual_m5 ? "manual m5" : "manual") : is_in_g2 ? "auto g2" : is_in_g3 ? "auto g3" : is_in_g4 ? "auto g4" : is_in_g5 ? "auto g5" : is_in_g6 ? "auto g6" : is_in_g7 ? "auto g7" : "auto") : dyadModeActive ? (dyad_selection_mode == "Manual" ? "manual dyad" : "auto dyad") : "none"
+        string modeTxt = triadModeActive ? "Triad" : dyadModeActive ? "Dyad" : "Off"
+        string branchTxt = triadModeActive ? triadBranch : dyadModeActive ? dyadBranch : "none"
 
-        string exp2 = ""
-        string exp3 = ""
-        if triad_ok
-            if is_in_manual
-                if match_1
-                    exp2 := st2
-                    exp3 := st3
-                else if match_2
-                    exp2 := st1
-                    exp3 := st3
-                else if match_3
-                    exp2 := st1
-                    exp3 := st2
-            else if is_in_g2
-                exp2 := str.contains(sym, "XAU") ? st5 : st4
-                exp3 := str.contains(sym, "XPT") ? st5 : st6
-            else if is_in_g3
-                exp2 := str.contains(sym, "BTC") ? st8 : (str.contains(sym, "ETH") ? st7 : st7)
-                exp3 := str.contains(sym, "BTC") ? st9 : (str.contains(sym, "ETH") ? st9 : st8)
-            else if is_in_g4
-                string tkrDbg = str.upper(syminfo.ticker)
-                string root3Dbg = str.substring(tkrDbg, 0, 3)
-                string root2Dbg = str.substring(tkrDbg, 0, 2)
-                bool isMicroDbg = root3Dbg == "MES" or root3Dbg == "MNQ" or root3Dbg == "MYM"
-                string rootDbg = isMicroDbg ? root3Dbg : root2Dbg
-                int rootLenDbg = isMicroDbg ? 3 : 2
-                string monthDbg = str.length(tkrDbg) > rootLenDbg ? str.substring(tkrDbg, rootLenDbg, rootLenDbg + 1) : ""
-                string yearRawDbg = str.length(tkrDbg) > rootLenDbg + 1 ? str.substring(tkrDbg, rootLenDbg + 1, str.length(tkrDbg)) : ""
-                string yearDbg = str.length(yearRawDbg) >= 4 ? str.substring(yearRawDbg, 0, 4) : yearRawDbg
-                bool hasContractDbg = str.contains("FGHJKMNQUVXZ", monthDbg) and not na(str.tonumber(yearDbg))
-                if hasContractDbg
-                    string rootADbg = rootDbg == "ES" or rootDbg == "MES" ? (isMicroDbg ? "MNQ" : "NQ") : rootDbg == "NQ" or rootDbg == "MNQ" ? (isMicroDbg ? "MES" : "ES") : (isMicroDbg ? "MES" : "ES")
-                    string rootBDbg = rootDbg == "ES" or rootDbg == "MES" ? (isMicroDbg ? "MYM" : "YM") : rootDbg == "NQ" or rootDbg == "MNQ" ? (isMicroDbg ? "MYM" : "YM") : (isMicroDbg ? "MNQ" : "NQ")
-                    string exADbg = (rootADbg == "YM" or rootADbg == "MYM") ? "CBOT_MINI" : "CME_MINI"
-                    string exBDbg = (rootBDbg == "YM" or rootBDbg == "MYM") ? "CBOT_MINI" : "CME_MINI"
-                    exp2 := exADbg + ":" + rootADbg + monthDbg + yearDbg
-                    exp3 := exBDbg + ":" + rootBDbg + monthDbg + yearDbg
-                else
-                    if is_nq_asset
-                        exp2 := st11
-                        exp3 := st12
-                    else if is_es_asset
-                        exp2 := st10
-                        exp3 := st12
-                    else if is_ym_asset
-                        exp2 := st10
-                        exp3 := st11
-            else if is_in_g5
-                exp2 := str.contains(sym, "EURUSD") ? st14 : (str.contains(sym, "GBPUSD") ? st13 : st13)
-                exp3 := str.contains(sym, "EURUSD") ? st15 : (str.contains(sym, "GBPUSD") ? st15 : st14)
-            else if is_in_g6
-                exp2 := str.contains(sym, "US100") ? st17 : (str.contains(sym, "US500") ? st16 : st16)
-                exp3 := str.contains(sym, "US100") ? st18 : (str.contains(sym, "US500") ? st18 : st17)
-            else if is_in_g7
-                if is_mgc_asset
-                    exp2 := s14
-                    exp3 := st22
-                else if is_sil_asset
-                    exp2 := s13
-                    exp3 := st22
-                else if is_gc_asset
-                    exp2 := st20
-                    exp3 := st23
-                else if is_si_asset
-                    exp2 := st19
-                    exp3 := st23
-                else if is_sl_asset
-                    exp2 := st19
-                    exp3 := st20
-            if str.length(exp2) > 0
-                exp2 := f_ssmt_match_chart_contract_size(exp2, syminfo.ticker)
-                exp2 := f_ssmt_apply_futures_modifiers(exp2, not badj)
-            if str.length(exp3) > 0
-                exp3 := f_ssmt_match_chart_contract_size(exp3, sym)
-                exp3 := f_ssmt_apply_futures_modifiers(exp3, not badj)
-        else if dyadModeActive
-            if dyad_selection_mode == "Manual"
-                bool onDyadM1 = enable_dyad_m1 and dyad_m1_sym1 != "" and dyad_m1_sym2 != "" and (f_check_match(dyad_m1_sym1) or f_check_match(dyad_m1_sym2))
-                bool onDyadM2 = enable_dyad_m2 and dyad_m2_sym1 != "" and dyad_m2_sym2 != "" and (f_check_match(dyad_m2_sym1) or f_check_match(dyad_m2_sym2))
-                bool onDyadM3 = enable_dyad_m3 and dyad_m3_sym1 != "" and dyad_m3_sym2 != "" and (f_check_match(dyad_m3_sym1) or f_check_match(dyad_m3_sym2))
-                bool onDyadM4 = enable_dyad_m4 and dyad_m4_sym1 != "" and dyad_m4_sym2 != "" and (f_check_match(dyad_m4_sym1) or f_check_match(dyad_m4_sym2))
-                bool onDyadM5 = enable_dyad_m5 and dyad_m5_sym1 != "" and dyad_m5_sym2 != "" and (f_check_match(dyad_m5_sym1) or f_check_match(dyad_m5_sym2))
-                if onDyadM1
-                    exp2 := f_check_match(dyad_m1_sym1) ? dyad_m1_sym2 : dyad_m1_sym1
-                else if onDyadM2
-                    exp2 := f_check_match(dyad_m2_sym1) ? dyad_m2_sym2 : dyad_m2_sym1
-                else if onDyadM3
-                    exp2 := f_check_match(dyad_m3_sym1) ? dyad_m3_sym2 : dyad_m3_sym1
-                else if onDyadM4
-                    exp2 := f_check_match(dyad_m4_sym1) ? dyad_m4_sym2 : dyad_m4_sym1
-                else if onDyadM5
-                    exp2 := f_check_match(dyad_m5_sym1) ? dyad_m5_sym2 : dyad_m5_sym1
-            else
-                if str.contains(sym, s1) or sym == s1
-                    exp2 := s2
-                else if str.contains(sym, s2) or sym == s2
-                    exp2 := s1
-                else if str.contains(sym, s3) or sym == s3
-                    exp2 := s4
-                else if str.contains(sym, s4) or sym == s4
-                    exp2 := s3
-                else if str.contains(sym, s5) or sym == s5
-                    exp2 := s6
-                else if str.contains(sym, s6) or sym == s6
-                    exp2 := s5
-                else if str.contains(sym, s7) or sym == s7
-                    exp2 := s8
-                else if str.contains(sym, s8) or str.contains(sym, "ETH") or sym == s8
-                    exp2 := s7
-                else if is_nq_asset
-                    exp2 := str.contains(symTicker, "NQ1!") ? st11 : s10
-                else if is_es_asset
-                    exp2 := s9
-                else if is_mgc_asset
-                    exp2 := s14
-                else if is_sil_asset
-                    exp2 := s13
-                else if is_gc_asset
-                    exp2 := s12
-                else if is_si_asset
-                    exp2 := s11
-            if str.length(exp2) > 0
-                exp2 := f_ssmt_match_chart_contract_size(exp2, syminfo.ticker)
-                exp2 := f_ssmt_apply_futures_modifiers(exp2, badj)
+        [exp2, exp3] = qta.resolve_pair_symbols(selection_mode, badj, sym, symTicker, chartTicker, chartRoot)
 
-        if str.length(exp2) > 0 and f_is_same_symbol_exact(exp2)
-            exp2 := ""
-        if str.length(exp3) > 0 and f_is_same_symbol_exact(exp3)
-            exp3 := ""
-        if str.length(exp2) > 0 and str.length(exp3) > 0 and str.upper(exp2) == str.upper(exp3)
-            exp3 := ""
-
-        string actualTxt = str.length(tsym2) > 0 and str.length(tsym3) > 0 ? tsym2 + " | " + tsym3 : str.length(tsym2) > 0 ? tsym2 : "none"
-        string expectedTxt = str.length(exp2) > 0 and str.length(exp3) > 0 ? exp2 + " | " + exp3 : str.length(exp2) > 0 ? exp2 : "none"
+        string actual2Txt = str.length(tsym2) > 0 ? f_ssmt_debug_symbol_text(tsym2) : ""
+        string actual3Txt = str.length(tsym3) > 0 ? f_ssmt_debug_symbol_text(tsym3) : ""
+        string expected2Txt = str.length(exp2) > 0 ? f_ssmt_debug_symbol_text(exp2) : ""
+        string expected3Txt = str.length(exp3) > 0 ? f_ssmt_debug_symbol_text(exp3) : ""
+        string actualTxt = str.length(actual2Txt) > 0 and str.length(actual3Txt) > 0 ? actual2Txt + " | " + actual3Txt : str.length(actual2Txt) > 0 ? actual2Txt : "none"
+        string expectedTxt = str.length(expected2Txt) > 0 and str.length(expected3Txt) > 0 ? expected2Txt + " | " + expected3Txt : str.length(expected2Txt) > 0 ? expected2Txt : "none"
 
         bool triadPass = false
-        if triad_ok
+        if triadModeActive and triad_ok
             bool directMatch = str.upper(tsym2) == str.upper(exp2) and str.upper(tsym3) == str.upper(exp3)
             bool swappedMatch = str.upper(tsym2) == str.upper(exp3) and str.upper(tsym3) == str.upper(exp2)
             triadPass := directMatch or swappedMatch
         bool dyadPass = dyadModeActive and str.upper(tsym2) == str.upper(exp2) and str.length(tsym3) == 0 and str.length(exp3) == 0
-        bool offPass = not triad_ok and not dyadModeActive and str.length(tsym2) == 0 and str.length(tsym3) == 0
-        bool passSel = triad_ok ? triadPass : dyadModeActive ? dyadPass : offPass
+        bool offPass = not triadModeActive and not dyadModeActive and str.length(tsym2) == 0 and str.length(tsym3) == 0
+        bool passSel = triadModeActive ? triadPass : dyadModeActive ? dyadPass : offPass
 
         color headBg = color.new(color.gray, 85)
         color bodyBg = color.white

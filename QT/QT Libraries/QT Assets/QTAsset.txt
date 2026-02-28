@@ -1,0 +1,488 @@
+//@version=6
+library("QTAssets", overlay=false)
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+const string IDX_ES_CONT = "CME_MINI:ES1!"
+
+const string S1 = "CAPITALCOM:US100"
+const string S2 = "CAPITALCOM:US500"
+const string S3 = "OANDA:XAUUSD"
+const string S4 = "OANDA:XAGUSD"
+const string S5 = "FOREXCOM:EURUSD"
+const string S6 = "FOREXCOM:GBPUSD"
+const string S7 = "BINANCE:BTCUSDT.P"
+const string S8 = "BINANCE:ETHUSDT.P"
+const string S9 = "CME_MINI:MNQ1!"
+const string S10 = "CME_MINI:MES1!"
+const string S11 = "COMEX:GC1!"
+const string S12 = "COMEX:SI1!"
+const string S13 = "COMEX:MGC1!"
+const string S14 = "COMEX:SIL1!"
+
+const string DYAD_YM = "CBOT_MINI:YM1!"
+const string DYAD_RTY = "CME_MINI:RTY1!"
+const string DYAD_MYM = "CBOT_MINI:MYM1!"
+const string DYAD_M2K = "CME_MINI:M2K1!"
+const string DYAD_CL = "NYMEX:CL1!"
+const string DYAD_RB = "NYMEX:RB1!"
+const string DYAD_MCL = "NYMEX:MCL1!"
+const string DYAD_MRB = "NYMEX:MRB1!"
+const string DYAD_6E = "CME:6E1!"
+const string DYAD_6B = "CME:6B1!"
+const string DYAD_M6E = "CME:M6E1!"
+const string DYAD_M6B = "CME:M6B1!"
+
+const string TRIAD1_SYM1 = "TVC:DXY"
+const string TRIAD1_SYM2 = "CME:6E1!"
+const string TRIAD1_SYM3 = "CME:6B1!"
+const string TRIAD2_SYM1 = "NYMEX:CL1!"
+const string TRIAD2_SYM2 = "NYMEX:RB1!"
+const string TRIAD2_SYM3 = "NYMEX:HO1!"
+const string TRIAD3_SYM1 = "CBOT:ZB1!"
+const string TRIAD3_SYM2 = "CBOT:TN1!"
+const string TRIAD3_SYM3 = "CBOT:ZF1!"
+const string TRIAD4_SYM1 = "COMEX:GC1!"
+const string TRIAD4_SYM2 = "COMEX:SI1!"
+const string TRIAD4_SYM3 = "COMEX:HG1!"
+const string TRIAD5_SYM1 = "CME_MINI:NQ1!"
+const string TRIAD5_SYM2 = "CME_MINI:ES1!"
+const string TRIAD5_SYM3 = "CBOT_MINI:YM1!"
+const string DYAD1_SYM1 = "CBOT:ZB1!"
+const string DYAD1_SYM2 = "CBOT:TN1!"
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+f_ssmt_sym_ticker(string sym) =>
+    string s = str.upper(sym)
+    if str.contains(s, "\"SYMBOL\":\"")
+        string[] partsSym = str.split(s, "\"SYMBOL\":\"")
+        if array.size(partsSym) > 1
+            string right = array.get(partsSym, 1)
+            string[] partsEnd = str.split(right, "\"")
+            s := array.get(partsEnd, 0)
+    if str.contains(s, "{")
+        string[] partsBrace = str.split(s, "{")
+        s := array.get(partsBrace, 0)
+    if str.contains(s, "|")
+        string[] partsPipe = str.split(s, "|")
+        s := array.get(partsPipe, 0)
+    string[] parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+f_ssmt_match_tag(string sym) =>
+    string tk = str.upper(f_ssmt_sym_ticker(sym))
+    string tag = ""
+    if str.contains(tk, "DXY")
+        tag := "DXY"
+    else if str.contains(tk, "MNQ") or str.contains(tk, "NQ")
+        tag := "NQ"
+    else if str.contains(tk, "MES") or str.contains(tk, "ES")
+        tag := "ES"
+    else if str.contains(tk, "MYM") or str.contains(tk, "YM")
+        tag := "YM"
+    else if str.contains(tk, "M2K") or str.contains(tk, "RTY")
+        tag := "RTY"
+    else if str.contains(tk, "MCL") or str.contains(tk, "CL")
+        tag := "CL"
+    else if str.contains(tk, "MRB") or str.contains(tk, "RB")
+        tag := "RB"
+    else if str.contains(tk, "MHO") or str.contains(tk, "HO")
+        tag := "HO"
+    else if str.contains(tk, "M6E") or str.contains(tk, "6E")
+        tag := "6E"
+    else if str.contains(tk, "M6B") or str.contains(tk, "6B")
+        tag := "6B"
+    else if str.contains(tk, "ZB")
+        tag := "ZB"
+    else if str.contains(tk, "TN")
+        tag := "TN"
+    else if str.contains(tk, "ZF")
+        tag := "ZF"
+    else if str.contains(tk, "MGC") or str.contains(tk, "GC")
+        tag := "GC"
+    else if str.contains(tk, "SIL") or str.contains(tk, "SI")
+        tag := "SI"
+    else if str.contains(tk, "MHG") or str.contains(tk, "HG")
+        tag := "HG"
+    tag
+
+f_check_match(string input_sym) =>
+    bool valid = str.length(input_sym) > 0 and str.contains(input_sym, ":")
+    if not valid
+        false
+    else
+        string inputUp = str.upper(input_sym)
+        string[] parts = str.split(inputUp, ":")
+        string tSym = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : inputUp
+        string curTicker = str.upper(syminfo.ticker)
+        string curId = str.upper(syminfo.tickerid)
+        bool directMatch = (curTicker == tSym) or str.contains(curId, tSym) or str.contains(inputUp, curTicker)
+        if directMatch
+            true
+        else
+            string inTag = f_ssmt_match_tag(input_sym)
+            string curTag = f_ssmt_match_tag(syminfo.tickerid)
+            str.length(inTag) > 0 and str.length(curTag) > 0 and inTag == curTag
+
+f_is_same_symbol_exact(string input_sym) =>
+    bool valid = str.length(input_sym) > 0 and str.contains(input_sym, ":")
+    if not valid
+        false
+    else
+        string inTicker = str.upper(str.trim(str.replace_all(f_ssmt_sym_ticker(input_sym), "=", "")))
+        string curTicker = str.upper(str.trim(str.replace_all(f_ssmt_sym_ticker(syminfo.tickerid), "=", "")))
+        str.length(inTicker) > 0 and str.length(curTicker) > 0 and inTicker == curTicker
+
+f_ssmt_group_tag(string tag) =>
+    int grp = 0
+    if tag == "ES" or tag == "NQ" or tag == "YM" or tag == "RTY"
+        grp := 1
+    else if tag == "CL" or tag == "RB" or tag == "HO"
+        grp := 2
+    else if tag == "6E" or tag == "6B"
+        grp := 3
+    else if tag == "GC" or tag == "SI" or tag == "HG"
+        grp := 4
+    grp
+
+f_ssmt_micro_prefix(string tag) =>
+    string p = ""
+    if tag == "ES"
+        p := "MES"
+    else if tag == "NQ"
+        p := "MNQ"
+    else if tag == "YM"
+        p := "MYM"
+    else if tag == "RTY"
+        p := "M2K"
+    else if tag == "CL"
+        p := "MCL"
+    else if tag == "RB"
+        p := "MRB"
+    else if tag == "HO"
+        p := "MHO"
+    else if tag == "6E"
+        p := "M6E"
+    else if tag == "6B"
+        p := "M6B"
+    else if tag == "GC"
+        p := "MGC"
+    else if tag == "SI"
+        p := "SIL"
+    else if tag == "HG"
+        p := "MHG"
+    p
+
+f_ssmt_standard_prefix(string tag) =>
+    string p = ""
+    if tag == "ES"
+        p := "ES"
+    else if tag == "NQ"
+        p := "NQ"
+    else if tag == "YM"
+        p := "YM"
+    else if tag == "RTY"
+        p := "RTY"
+    else if tag == "CL"
+        p := "CL"
+    else if tag == "RB"
+        p := "RB"
+    else if tag == "HO"
+        p := "HO"
+    else if tag == "6E"
+        p := "6E"
+    else if tag == "6B"
+        p := "6B"
+    else if tag == "GC"
+        p := "GC"
+    else if tag == "SI"
+        p := "SI"
+    else if tag == "HG"
+        p := "HG"
+    p
+
+f_ssmt_is_micro_ticker(string tk, string tag) =>
+    string m = f_ssmt_micro_prefix(tag)
+    str.length(m) > 0 and str.length(tk) >= str.length(m) and str.substring(tk, 0, str.length(m)) == m
+
+f_ssmt_match_chart_contract_size(string inputSym, string chartSym) =>
+    string out = inputSym
+    string chartT = f_ssmt_sym_ticker(chartSym)
+    string chartTag = f_ssmt_match_tag(chartSym)
+    int chartGroup = f_ssmt_group_tag(chartTag)
+    bool chartMicro = f_ssmt_is_micro_ticker(chartT, chartTag)
+
+    if chartGroup > 0
+        string up = str.upper(inputSym)
+        string[] parts = str.split(up, ":")
+        string ex = array.size(parts) > 1 ? array.get(parts, 0) : ""
+        string tk = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : up
+        string tkTag = f_ssmt_match_tag(tk)
+        int tkGroup = f_ssmt_group_tag(tkTag)
+        if tkGroup == chartGroup and str.length(tkTag) > 0
+            bool tkMicro = f_ssmt_is_micro_ticker(tk, tkTag)
+            if chartMicro != tkMicro
+                string oldPrefix = tkMicro ? f_ssmt_micro_prefix(tkTag) : f_ssmt_standard_prefix(tkTag)
+                string newPrefix = chartMicro ? f_ssmt_micro_prefix(tkTag) : f_ssmt_standard_prefix(tkTag)
+                if str.length(oldPrefix) > 0 and str.length(newPrefix) > 0 and str.length(tk) >= str.length(oldPrefix) and str.substring(tk, 0, str.length(oldPrefix)) == oldPrefix
+                    string suffix = str.substring(tk, str.length(oldPrefix), str.length(tk))
+                    tk := newPrefix + suffix
+
+        out := str.length(ex) > 0 ? ex + ":" + tk : tk
+    out
+
+f_ssmt_apply_futures_modifiers(string sym, bool useBackadjust) =>
+    string out = sym
+    if syminfo.type == "futures"
+        bool isContinuous = str.contains(f_ssmt_sym_ticker(sym), "!")
+        if isContinuous
+            if useBackadjust
+                out := ticker.modify(sym, session=syminfo.session, backadjustment=backadjustment.on)
+            else
+                out := ticker.modify(sym, session=syminfo.session, backadjustment=backadjustment.off)
+        else
+            out := ticker.modify(sym, session=syminfo.session)
+        string outTrim = str.trim(out)
+        if str.length(outTrim) == 0 or outTrim == "="
+            out := sym
+    out
+
+f_ssmt_backadjust_detect(string rawTickerId) =>
+    string tid = str.upper(rawTickerId)
+    string tidFlat = str.replace_all(tid, " ", "")
+    bool hasOn = str.contains(tidFlat, "BACKADJUSTMENT.ON") or str.contains(tidFlat, "BACKADJUSTMENT=ON") or str.contains(tidFlat, "BACKADJUSTMENT=TRUE") or str.contains(tidFlat, "BACKADJUSTMENT=1") or str.contains(tidFlat, "BACKADJUSTMENT:ON") or str.contains(tidFlat, "BACKADJUSTMENT:TRUE") or str.contains(tidFlat, "BACKADJUSTMENT:1") or str.contains(tidFlat, "\"BACKADJUSTMENT\":\"ON\"") or str.contains(tidFlat, "\"BACKADJUSTMENT\":\"TRUE\"") or str.contains(tidFlat, "\"BACKADJUSTMENT\":ON") or str.contains(tidFlat, "\"BACKADJUSTMENT\":TRUE") or str.contains(tidFlat, "\"BACKADJUSTMENT\":1") or str.contains(tidFlat, "BACKADJUST=ON") or str.contains(tidFlat, "BACKADJUST=TRUE") or str.contains(tidFlat, "BACKADJUST=1") or str.contains(tidFlat, "BACKADJUST:ON") or str.contains(tidFlat, "BACKADJUST:TRUE") or str.contains(tidFlat, "BACKADJUST:1") or str.contains(tidFlat, "\"BACKADJUST\":\"ON\"") or str.contains(tidFlat, "\"BACKADJUST\":\"TRUE\"") or str.contains(tidFlat, "\"BACKADJUST\":ON") or str.contains(tidFlat, "\"BACKADJUST\":TRUE") or str.contains(tidFlat, "\"BACKADJUST\":1") or str.contains(tidFlat, "\"BACKADJUSTED\":\"TRUE\"") or str.contains(tidFlat, "\"BACKADJUSTED\":TRUE") or str.contains(tidFlat, "BACKADJUSTED=TRUE") or str.contains(tidFlat, "BACKADJUSTED=1") or str.contains(tidFlat, "BACKADJUSTED:TRUE") or str.contains(tidFlat, "BACKADJUSTED:1")
+    bool hasOff = str.contains(tidFlat, "BACKADJUSTMENT.OFF") or str.contains(tidFlat, "BACKADJUSTMENT=OFF") or str.contains(tidFlat, "BACKADJUSTMENT=FALSE") or str.contains(tidFlat, "BACKADJUSTMENT=0") or str.contains(tidFlat, "BACKADJUSTMENT:OFF") or str.contains(tidFlat, "BACKADJUSTMENT:FALSE") or str.contains(tidFlat, "BACKADJUSTMENT:0") or str.contains(tidFlat, "\"BACKADJUSTMENT\":\"OFF\"") or str.contains(tidFlat, "\"BACKADJUSTMENT\":\"FALSE\"") or str.contains(tidFlat, "\"BACKADJUSTMENT\":OFF") or str.contains(tidFlat, "\"BACKADJUSTMENT\":FALSE") or str.contains(tidFlat, "\"BACKADJUSTMENT\":0") or str.contains(tidFlat, "BACKADJUST=OFF") or str.contains(tidFlat, "BACKADJUST=FALSE") or str.contains(tidFlat, "BACKADJUST=0") or str.contains(tidFlat, "BACKADJUST:OFF") or str.contains(tidFlat, "BACKADJUST:FALSE") or str.contains(tidFlat, "BACKADJUST:0") or str.contains(tidFlat, "\"BACKADJUST\":\"OFF\"") or str.contains(tidFlat, "\"BACKADJUST\":\"FALSE\"") or str.contains(tidFlat, "\"BACKADJUST\":OFF") or str.contains(tidFlat, "\"BACKADJUST\":FALSE") or str.contains(tidFlat, "\"BACKADJUST\":0") or str.contains(tidFlat, "\"BACKADJUSTED\":\"FALSE\"") or str.contains(tidFlat, "\"BACKADJUSTED\":FALSE") or str.contains(tidFlat, "BACKADJUSTED=FALSE") or str.contains(tidFlat, "BACKADJUSTED=0") or str.contains(tidFlat, "BACKADJUSTED:FALSE") or str.contains(tidFlat, "BACKADJUSTED:0")
+    bool hasDefault = str.contains(tidFlat, "BACKADJUSTMENT=DEFAULT") or str.contains(tidFlat, "BACKADJUSTMENT:DEFAULT") or str.contains(tidFlat, "\"BACKADJUSTMENT\":\"DEFAULT\"") or str.contains(tidFlat, "\"BACKADJUSTMENT\":DEFAULT") or str.contains(tidFlat, "BACKADJUST=DEFAULT") or str.contains(tidFlat, "BACKADJUST:DEFAULT") or str.contains(tidFlat, "\"BACKADJUST\":\"DEFAULT\"") or str.contains(tidFlat, "\"BACKADJUST\":DEFAULT")
+    bool metaOn = hasOn and not hasOff
+    bool metaOff = hasOff and not hasOn
+    int state = metaOn ? 1 : metaOff ? -1 : 0
+    string detected = metaOn ? "ON" : metaOff ? "OFF" : hasDefault ? "DEFAULT" : "NONE"
+    [state, detected]
+
+f_ssmt_chart_backadjust_state(bool fallback) =>
+    bool out = fallback
+    if syminfo.type == "futures"
+        [state, _] = f_ssmt_backadjust_detect(syminfo.tickerid)
+        if state == 1
+            out := true
+        else if state == -1
+            out := false
+    out
+
+f_ssmt_chart_dated_suffix(string chartTicker, string chartRoot) =>
+    string suffix = ""
+    bool hasDated = false
+    string ct = str.upper(chartTicker)
+    string cr = str.upper(chartRoot)
+    int rootLen = str.length(cr)
+    bool hasPrefix = rootLen > 0 and str.length(ct) > rootLen and str.substring(ct, 0, rootLen) == cr
+    if hasPrefix
+        suffix := str.substring(ct, rootLen, str.length(ct))
+        string monthCode = str.length(suffix) > 0 ? str.substring(suffix, 0, 1) : ""
+        string yearPart = str.length(suffix) > 1 ? str.substring(suffix, 1, str.length(suffix)) : ""
+        hasDated := str.contains("FGHJKMNQUVXZ", monthCode) and not na(str.tonumber(yearPart))
+    [suffix, hasDated]
+
+f_ssmt_apply_chart_dated_suffix(string inputSym, string chartTicker, string chartRoot) =>
+    string out = inputSym
+    [chartSuffix, chartHasDated] = f_ssmt_chart_dated_suffix(chartTicker, chartRoot)
+    if chartHasDated and str.length(chartSuffix) > 0 and str.length(inputSym) > 0
+        string up = str.upper(inputSym)
+        string[] parts = str.split(up, ":")
+        string ex = array.size(parts) > 1 ? array.get(parts, 0) : ""
+        string tk = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : up
+        int tkLen = str.length(tk)
+        bool isCont = tkLen > 2 and str.substring(tk, tkLen - 2, tkLen) == "1!"
+        if isCont
+            string root = str.substring(tk, 0, tkLen - 2)
+            if str.length(root) > 0
+                tk := root + chartSuffix
+                out := str.length(ex) > 0 ? ex + ":" + tk : tk
+    out
+
+f_ssmt_asset_root(string symTicker, string chartTicker, string chartRoot) =>
+    string out = f_ssmt_match_tag(symTicker)
+    if str.length(out) == 0
+        out := f_ssmt_match_tag(chartTicker)
+    if str.length(out) == 0
+        out := f_ssmt_match_tag(chartRoot)
+    out
+
+f_ssmt_dyad_auto_peer(string sym, string symTicker, string chartTicker, string chartRoot) =>
+    string out = ""
+    if str.contains(sym, S1) or sym == S1
+        out := S2
+    else if str.contains(sym, S2) or sym == S2
+        out := S1
+    else if str.contains(sym, S3) or sym == S3
+        out := S4
+    else if str.contains(sym, S4) or sym == S4
+        out := S3
+    else if str.contains(sym, S5) or sym == S5
+        out := S6
+    else if str.contains(sym, S6) or sym == S6
+        out := S5
+    else if str.contains(sym, S7) or sym == S7
+        out := S8
+    else if str.contains(sym, S8) or str.contains(sym, "ETH") or sym == S8
+        out := S7
+    else
+        string root = f_ssmt_asset_root(symTicker, chartTicker, chartRoot)
+        [chartSuffix, chartHasDated] = f_ssmt_chart_dated_suffix(chartTicker, chartRoot)
+        bool chartMicroEq = str.contains(chartTicker, "MES") or str.contains(chartTicker, "MNQ") or chartRoot == "MES" or chartRoot == "MNQ"
+        bool chartMicroRty = str.contains(chartTicker, "MYM") or str.contains(chartTicker, "M2K") or chartRoot == "MYM" or chartRoot == "M2K"
+        bool chartMicroOil = str.contains(chartTicker, "MCL") or str.contains(chartTicker, "MRB") or str.contains(chartTicker, "MHO") or chartRoot == "MCL" or chartRoot == "MRB" or chartRoot == "MHO"
+        bool chartMicroGc = str.contains(chartTicker, "MGC") or chartRoot == "MGC"
+        bool chartMicroSi = str.contains(chartTicker, "SIL") or chartRoot == "SIL"
+        if root == "NQ"
+            if chartHasDated
+                out := "CME_MINI:" + (chartMicroEq ? "MES" : "ES") + chartSuffix
+            else
+                out := str.contains(symTicker, "NQ1!") ? IDX_ES_CONT : S10
+        else if root == "ES"
+            if chartHasDated
+                out := "CME_MINI:" + (chartMicroEq ? "MNQ" : "NQ") + chartSuffix
+            else
+                out := S9
+        else if root == "YM"
+            if chartHasDated
+                out := "CME_MINI:" + (chartMicroRty ? "M2K" : "RTY") + chartSuffix
+            else
+                out := chartMicroRty ? DYAD_M2K : DYAD_RTY
+        else if root == "RTY"
+            if chartHasDated
+                out := (chartMicroRty ? "CBOT_MINI:MYM" : "CBOT_MINI:YM") + chartSuffix
+            else
+                out := chartMicroRty ? DYAD_MYM : DYAD_YM
+        else if root == "CL"
+            if chartHasDated
+                out := "NYMEX:" + (chartMicroOil ? "MRB" : "RB") + chartSuffix
+            else
+                out := chartMicroOil ? DYAD_MRB : DYAD_RB
+        else if root == "RB"
+            if chartHasDated
+                out := "NYMEX:" + (chartMicroOil ? "MCL" : "CL") + chartSuffix
+            else
+                out := chartMicroOil ? DYAD_MCL : DYAD_CL
+        else if root == "6E"
+            out := "TVC:DXY"
+        else if root == "DXY"
+            out := DYAD_6E
+        else if root == "GC"
+            if chartHasDated
+                out := "COMEX:" + (chartMicroGc ? "SIL" : "SI") + chartSuffix
+            else
+                out := chartMicroGc ? S14 : S12
+        else if root == "SI"
+            if chartHasDated
+                out := "COMEX:" + (chartMicroSi ? "MGC" : "GC") + chartSuffix
+            else
+                out := chartMicroSi ? S13 : S11
+        else if root == "ZB"
+            if chartHasDated
+                out := "CBOT:TN" + chartSuffix
+            else
+                out := DYAD1_SYM2
+        else if root == "TN"
+            if chartHasDated
+                out := "CBOT:ZB" + chartSuffix
+            else
+                out := DYAD1_SYM1
+    out
+
+export chart_backadjust_debug(bool fallback) =>
+    string rawTickerId = syminfo.tickerid
+    [state, detected] = f_ssmt_backadjust_detect(rawTickerId)
+    bool chartBadj = state == 1 ? true : state == -1 ? false : fallback
+    bool usedFallback = state == 0
+    string source = usedFallback ? "fallback" : "metadata"
+    string chartTk = f_ssmt_sym_ticker(rawTickerId)
+    bool isContinuous = str.contains(chartTk, "!")
+    [rawTickerId, chartTk, isContinuous, chartBadj, source, detected]
+
+export resolve_pair_symbols(string selection_mode, bool badj, string sym, string symTicker, string chartTicker, string chartRoot) =>
+    bool chartBadj = f_ssmt_chart_backadjust_state(badj)
+    bool triadModeActive = selection_mode == "Triad"
+    bool dyadModeActive = selection_mode == "Dyad"
+    string st1 = ""
+    string st2 = ""
+    string st3 = ""
+    bool in_triad1 = f_check_match(TRIAD1_SYM1) or f_check_match(TRIAD1_SYM2) or f_check_match(TRIAD1_SYM3)
+    bool in_triad2 = f_check_match(TRIAD2_SYM1) or f_check_match(TRIAD2_SYM2) or f_check_match(TRIAD2_SYM3)
+    bool in_triad3 = f_check_match(TRIAD3_SYM1) or f_check_match(TRIAD3_SYM2) or f_check_match(TRIAD3_SYM3)
+    bool in_triad4 = f_check_match(TRIAD4_SYM1) or f_check_match(TRIAD4_SYM2) or f_check_match(TRIAD4_SYM3)
+    bool in_triad5 = f_check_match(TRIAD5_SYM1) or f_check_match(TRIAD5_SYM2) or f_check_match(TRIAD5_SYM3)
+    bool in_dyad1 = f_check_match(DYAD1_SYM1) or f_check_match(DYAD1_SYM2)
+
+    if in_triad1
+        st1 := TRIAD1_SYM1
+        st2 := TRIAD1_SYM2
+        st3 := TRIAD1_SYM3
+    else if in_triad2
+        st1 := TRIAD2_SYM1
+        st2 := TRIAD2_SYM2
+        st3 := TRIAD2_SYM3
+    else if in_triad3
+        st1 := TRIAD3_SYM1
+        st2 := TRIAD3_SYM2
+        st3 := TRIAD3_SYM3
+    else if in_triad4
+        st1 := TRIAD4_SYM1
+        st2 := TRIAD4_SYM2
+        st3 := TRIAD4_SYM3
+    else if in_triad5
+        st1 := TRIAD5_SYM1
+        st2 := TRIAD5_SYM2
+        st3 := TRIAD5_SYM3
+
+    bool match_1 = f_check_match(st1)
+    bool match_2 = f_check_match(st2)
+    bool match_3 = f_check_match(st3)
+    bool triad_ok = triadModeActive and (in_triad1 or in_triad2 or in_triad3 or in_triad4 or in_triad5) and (match_1 or match_2 or match_3)
+
+    string tsym2 = ""
+    string tsym3 = ""
+    string csym = ""
+    if triad_ok
+        if match_1
+            tsym2 := st2
+            tsym3 := st3
+        else if match_2
+            tsym2 := st1
+            tsym3 := st3
+        else if match_3
+            tsym2 := st1
+            tsym3 := st2
+
+    if triad_ok
+        if str.length(tsym2) > 0
+            tsym2 := f_ssmt_match_chart_contract_size(tsym2, sym)
+            tsym2 := f_ssmt_apply_chart_dated_suffix(tsym2, chartTicker, chartRoot)
+            tsym2 := f_ssmt_apply_futures_modifiers(tsym2, chartBadj)
+        if str.length(tsym3) > 0
+            tsym3 := f_ssmt_match_chart_contract_size(tsym3, sym)
+            tsym3 := f_ssmt_apply_chart_dated_suffix(tsym3, chartTicker, chartRoot)
+            tsym3 := f_ssmt_apply_futures_modifiers(tsym3, chartBadj)
+    else if dyadModeActive
+        if in_dyad1 and f_check_match(DYAD1_SYM1)
+            csym := DYAD1_SYM2
+        else if in_dyad1 and f_check_match(DYAD1_SYM2)
+            csym := DYAD1_SYM1
+        else
+            csym := f_ssmt_dyad_auto_peer(sym, symTicker, chartTicker, chartRoot)
+        if str.length(csym) > 0
+            csym := f_ssmt_match_chart_contract_size(csym, syminfo.ticker)
+            csym := f_ssmt_apply_futures_modifiers(csym, chartBadj)
+            tsym2 := csym
+            tsym3 := ""
+
+    if str.length(tsym2) > 0 and f_is_same_symbol_exact(tsym2)
+        tsym2 := ""
+    if str.length(tsym3) > 0 and f_is_same_symbol_exact(tsym3)
+        tsym3 := ""
+    if str.length(tsym2) > 0 and str.length(tsym3) > 0 and str.upper(tsym2) == str.upper(tsym3)
+        tsym3 := ""
+    [tsym2, tsym3]

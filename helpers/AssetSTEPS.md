@@ -1,5 +1,7 @@
 1. Freeze a baseline in [`QT/QTDisplay.txt`](/Users/jack/Desktop/GitHub-ictmentality/pinescript-indicators/QT/QTDisplay.txt) and capture current PASS/FAIL screenshots for existing dyads.
 
+DONE
+
 2. Define canonical asset IDs (`ES`, `NQ`, `YM`, `RTY`, `CL`, `RB`, `6E`, `6B`, etc.) in one constants section.
 
 3. Add one symbol parser function that returns: root ID, micro/mini flag, continuous flag, month code, year, exchange.
