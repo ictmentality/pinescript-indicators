@@ -1,6 +1,5 @@
 QTDisplayTODO
 
-1. Remove hidden SSMT lines if regular SSMT is present in the same direction
 
 2. Add Label toggle box options in the user settings
 - Labels ON (Turns SSMT Line labels on or off, master control)

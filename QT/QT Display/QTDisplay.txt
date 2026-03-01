@@ -848,6 +848,20 @@ f_ssmt_nano_highs_expr() =>
 
     [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
 
+f_ssmt_peer_highs_expr(bool useNano, bool useM90, bool useMicro, bool useDaily, bool useMonthly) =>
+    if useNano
+        f_ssmt_nano_highs_expr()
+    else if useM90
+        f_ssmt_m90_highs_expr()
+    else if useMicro
+        f_ssmt_micro_highs_expr()
+    else if useDaily
+        f_ssmt_daily_highs_expr()
+    else if useMonthly
+        f_ssmt_monthly_highs_expr()
+    else
+        f_ssmt_weekly_highs_expr()
+
 // ============================================================================
 // PROJECTION HELPERS
 // ============================================================================
@@ -1037,9 +1051,6 @@ var line wSsmtLine2 = na
 var label wSsmtLbl = na
 var int wSsmtEventKey = na
 var int wSsmtPurgeTs = na
-var int wSsmtLastQTs = na
-var bool wSsmtSplitLastBar = false
-var bool wSsmtCarryAllowed = false
 
 var line[] wBSsmtHistLines = array.new_line()
 var label[] wBSsmtHistLbls = array.new_label()
@@ -1685,121 +1696,33 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
     float peer2BLprev = na
     int   peer2BLprevTs = na
     int   peer2Qts = na
+    string peerTf = nanoSsmtLive ? timeframe.period : m90SsmtLive ? "5" : microSsmtLive ? timeframe.period : dailySsmtLive ? "15" : monthlySsmtLive ? "240" : "60"
     if str.length(tsym2) > 0
-        if nanoSsmtLive
-            [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, timeframe.period, f_ssmt_nano_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer2Hcur := p2Hcur
-            peer2HcurTs := p2HcurTs
-            peer2Hprev := p2Hprev
-            peer2HprevTs := p2HprevTs
-            peer2BHcur := p2BHcur
-            peer2BHcurTs := p2BHcurTs
-            peer2BHprev := p2BHprev
-            peer2BHprevTs := p2BHprevTs
-            peer2Lcur := p2Lcur
-            peer2LcurTs := p2LcurTs
-            peer2Lprev := p2Lprev
-            peer2LprevTs := p2LprevTs
-            peer2BLcur := p2BLcur
-            peer2BLcurTs := p2BLcurTs
-            peer2BLprev := p2BLprev
-            peer2BLprevTs := p2BLprevTs
-            peer2Qts := p2Qts
-        else if m90SsmtLive
-            [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, "5", f_ssmt_m90_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer2Hcur := p2Hcur
-            peer2HcurTs := p2HcurTs
-            peer2Hprev := p2Hprev
-            peer2HprevTs := p2HprevTs
-            peer2BHcur := p2BHcur
-            peer2BHcurTs := p2BHcurTs
-            peer2BHprev := p2BHprev
-            peer2BHprevTs := p2BHprevTs
-            peer2Lcur := p2Lcur
-            peer2LcurTs := p2LcurTs
-            peer2Lprev := p2Lprev
-            peer2LprevTs := p2LprevTs
-            peer2BLcur := p2BLcur
-            peer2BLcurTs := p2BLcurTs
-            peer2BLprev := p2BLprev
-            peer2BLprevTs := p2BLprevTs
-            peer2Qts := p2Qts
-        else if microSsmtLive
-            [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, timeframe.period, f_ssmt_micro_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer2Hcur := p2Hcur
-            peer2HcurTs := p2HcurTs
-            peer2Hprev := p2Hprev
-            peer2HprevTs := p2HprevTs
-            peer2BHcur := p2BHcur
-            peer2BHcurTs := p2BHcurTs
-            peer2BHprev := p2BHprev
-            peer2BHprevTs := p2BHprevTs
-            peer2Lcur := p2Lcur
-            peer2LcurTs := p2LcurTs
-            peer2Lprev := p2Lprev
-            peer2LprevTs := p2LprevTs
-            peer2BLcur := p2BLcur
-            peer2BLcurTs := p2BLcurTs
-            peer2BLprev := p2BLprev
-            peer2BLprevTs := p2BLprevTs
-            peer2Qts := p2Qts
-        else if dailySsmtLive
-            [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, "15", f_ssmt_daily_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer2Hcur := p2Hcur
-            peer2HcurTs := p2HcurTs
-            peer2Hprev := p2Hprev
-            peer2HprevTs := p2HprevTs
-            peer2BHcur := p2BHcur
-            peer2BHcurTs := p2BHcurTs
-            peer2BHprev := p2BHprev
-            peer2BHprevTs := p2BHprevTs
-            peer2Lcur := p2Lcur
-            peer2LcurTs := p2LcurTs
-            peer2Lprev := p2Lprev
-            peer2LprevTs := p2LprevTs
-            peer2BLcur := p2BLcur
-            peer2BLcurTs := p2BLcurTs
-            peer2BLprev := p2BLprev
-            peer2BLprevTs := p2BLprevTs
-            peer2Qts := p2Qts
-        else if monthlySsmtLive
-            [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, "240", f_ssmt_monthly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer2Hcur := p2Hcur
-            peer2HcurTs := p2HcurTs
-            peer2Hprev := p2Hprev
-            peer2HprevTs := p2HprevTs
-            peer2BHcur := p2BHcur
-            peer2BHcurTs := p2BHcurTs
-            peer2BHprev := p2BHprev
-            peer2BHprevTs := p2BHprevTs
-            peer2Lcur := p2Lcur
-            peer2LcurTs := p2LcurTs
-            peer2Lprev := p2Lprev
-            peer2LprevTs := p2LprevTs
-            peer2BLcur := p2BLcur
-            peer2BLcurTs := p2BLcurTs
-            peer2BLprev := p2BLprev
-            peer2BLprevTs := p2BLprevTs
-            peer2Qts := p2Qts
-        else
-            [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(tsym2, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer2Hcur := p2Hcur
-            peer2HcurTs := p2HcurTs
-            peer2Hprev := p2Hprev
-            peer2HprevTs := p2HprevTs
-            peer2BHcur := p2BHcur
-            peer2BHcurTs := p2BHcurTs
-            peer2BHprev := p2BHprev
-            peer2BHprevTs := p2BHprevTs
-            peer2Lcur := p2Lcur
-            peer2LcurTs := p2LcurTs
-            peer2Lprev := p2Lprev
-            peer2LprevTs := p2LprevTs
-            peer2BLcur := p2BLcur
-            peer2BLcurTs := p2BLcurTs
-            peer2BLprev := p2BLprev
-            peer2BLprevTs := p2BLprevTs
-            peer2Qts := p2Qts
+        [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(
+             tsym2,
+             peerTf,
+             f_ssmt_peer_highs_expr(nanoSsmtLive, m90SsmtLive, microSsmtLive, dailySsmtLive, monthlySsmtLive),
+             gaps=barmerge.gaps_off,
+             lookahead=barmerge.lookahead_off,
+             ignore_invalid_symbol=true
+         )
+        peer2Hcur := p2Hcur
+        peer2HcurTs := p2HcurTs
+        peer2Hprev := p2Hprev
+        peer2HprevTs := p2HprevTs
+        peer2BHcur := p2BHcur
+        peer2BHcurTs := p2BHcurTs
+        peer2BHprev := p2BHprev
+        peer2BHprevTs := p2BHprevTs
+        peer2Lcur := p2Lcur
+        peer2LcurTs := p2LcurTs
+        peer2Lprev := p2Lprev
+        peer2LprevTs := p2LprevTs
+        peer2BLcur := p2BLcur
+        peer2BLcurTs := p2BLcurTs
+        peer2BLprev := p2BLprev
+        peer2BLprevTs := p2BLprevTs
+        peer2Qts := p2Qts
     float peer3Hcur = na
     int   peer3HcurTs = na
     float peer3Hprev = na
@@ -1818,120 +1741,31 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
     int   peer3BLprevTs = na
     int   peer3Qts = na
     if str.length(tsym3) > 0
-        if nanoSsmtLive
-            [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, timeframe.period, f_ssmt_nano_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer3Hcur := p3Hcur
-            peer3HcurTs := p3HcurTs
-            peer3Hprev := p3Hprev
-            peer3HprevTs := p3HprevTs
-            peer3BHcur := p3BHcur
-            peer3BHcurTs := p3BHcurTs
-            peer3BHprev := p3BHprev
-            peer3BHprevTs := p3BHprevTs
-            peer3Lcur := p3Lcur
-            peer3LcurTs := p3LcurTs
-            peer3Lprev := p3Lprev
-            peer3LprevTs := p3LprevTs
-            peer3BLcur := p3BLcur
-            peer3BLcurTs := p3BLcurTs
-            peer3BLprev := p3BLprev
-            peer3BLprevTs := p3BLprevTs
-            peer3Qts := p3Qts
-        else if m90SsmtLive
-            [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, "5", f_ssmt_m90_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer3Hcur := p3Hcur
-            peer3HcurTs := p3HcurTs
-            peer3Hprev := p3Hprev
-            peer3HprevTs := p3HprevTs
-            peer3BHcur := p3BHcur
-            peer3BHcurTs := p3BHcurTs
-            peer3BHprev := p3BHprev
-            peer3BHprevTs := p3BHprevTs
-            peer3Lcur := p3Lcur
-            peer3LcurTs := p3LcurTs
-            peer3Lprev := p3Lprev
-            peer3LprevTs := p3LprevTs
-            peer3BLcur := p3BLcur
-            peer3BLcurTs := p3BLcurTs
-            peer3BLprev := p3BLprev
-            peer3BLprevTs := p3BLprevTs
-            peer3Qts := p3Qts
-        else if microSsmtLive
-            [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, timeframe.period, f_ssmt_micro_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer3Hcur := p3Hcur
-            peer3HcurTs := p3HcurTs
-            peer3Hprev := p3Hprev
-            peer3HprevTs := p3HprevTs
-            peer3BHcur := p3BHcur
-            peer3BHcurTs := p3BHcurTs
-            peer3BHprev := p3BHprev
-            peer3BHprevTs := p3BHprevTs
-            peer3Lcur := p3Lcur
-            peer3LcurTs := p3LcurTs
-            peer3Lprev := p3Lprev
-            peer3LprevTs := p3LprevTs
-            peer3BLcur := p3BLcur
-            peer3BLcurTs := p3BLcurTs
-            peer3BLprev := p3BLprev
-            peer3BLprevTs := p3BLprevTs
-            peer3Qts := p3Qts
-        else if dailySsmtLive
-            [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, "15", f_ssmt_daily_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer3Hcur := p3Hcur
-            peer3HcurTs := p3HcurTs
-            peer3Hprev := p3Hprev
-            peer3HprevTs := p3HprevTs
-            peer3BHcur := p3BHcur
-            peer3BHcurTs := p3BHcurTs
-            peer3BHprev := p3BHprev
-            peer3BHprevTs := p3BHprevTs
-            peer3Lcur := p3Lcur
-            peer3LcurTs := p3LcurTs
-            peer3Lprev := p3Lprev
-            peer3LprevTs := p3LprevTs
-            peer3BLcur := p3BLcur
-            peer3BLcurTs := p3BLcurTs
-            peer3BLprev := p3BLprev
-            peer3BLprevTs := p3BLprevTs
-            peer3Qts := p3Qts
-        else if monthlySsmtLive
-            [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, "240", f_ssmt_monthly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer3Hcur := p3Hcur
-            peer3HcurTs := p3HcurTs
-            peer3Hprev := p3Hprev
-            peer3HprevTs := p3HprevTs
-            peer3BHcur := p3BHcur
-            peer3BHcurTs := p3BHcurTs
-            peer3BHprev := p3BHprev
-            peer3BHprevTs := p3BHprevTs
-            peer3Lcur := p3Lcur
-            peer3LcurTs := p3LcurTs
-            peer3Lprev := p3Lprev
-            peer3LprevTs := p3LprevTs
-            peer3BLcur := p3BLcur
-            peer3BLcurTs := p3BLcurTs
-            peer3BLprev := p3BLprev
-            peer3BLprevTs := p3BLprevTs
-            peer3Qts := p3Qts
-        else
-            [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(tsym3, "60", f_ssmt_weekly_highs_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
-            peer3Hcur := p3Hcur
-            peer3HcurTs := p3HcurTs
-            peer3Hprev := p3Hprev
-            peer3HprevTs := p3HprevTs
-            peer3BHcur := p3BHcur
-            peer3BHcurTs := p3BHcurTs
-            peer3BHprev := p3BHprev
-            peer3BHprevTs := p3BHprevTs
-            peer3Lcur := p3Lcur
-            peer3LcurTs := p3LcurTs
-            peer3Lprev := p3Lprev
-            peer3LprevTs := p3LprevTs
-            peer3BLcur := p3BLcur
-            peer3BLcurTs := p3BLcurTs
-            peer3BLprev := p3BLprev
-            peer3BLprevTs := p3BLprevTs
-            peer3Qts := p3Qts
+        [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(
+             tsym3,
+             peerTf,
+             f_ssmt_peer_highs_expr(nanoSsmtLive, m90SsmtLive, microSsmtLive, dailySsmtLive, monthlySsmtLive),
+             gaps=barmerge.gaps_off,
+             lookahead=barmerge.lookahead_off,
+             ignore_invalid_symbol=true
+         )
+        peer3Hcur := p3Hcur
+        peer3HcurTs := p3HcurTs
+        peer3Hprev := p3Hprev
+        peer3HprevTs := p3HprevTs
+        peer3BHcur := p3BHcur
+        peer3BHcurTs := p3BHcurTs
+        peer3BHprev := p3BHprev
+        peer3BHprevTs := p3BHprevTs
+        peer3Lcur := p3Lcur
+        peer3LcurTs := p3LcurTs
+        peer3Lprev := p3Lprev
+        peer3LprevTs := p3LprevTs
+        peer3BLcur := p3BLcur
+        peer3BLcurTs := p3BLcurTs
+        peer3BLprev := p3BLprev
+        peer3BLprevTs := p3BLprevTs
+        peer3Qts := p3Qts
 
     string chartAsset = f_ssmt_label_sym(syminfo.tickerid)
     bool isPairChart = (triad_ok or dyad_ok) and (str.length(tsym2) > 0 or str.length(tsym3) > 0)
@@ -1941,12 +1775,6 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
         bool hasPeer2 = str.length(tsym2) > 0 and not na(peer2Hcur) and not na(peer2Hprev) and not na(peer2HcurTs) and not na(peer2HprevTs) and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2Qts)
         bool hasPeer3 = str.length(tsym3) > 0 and not na(peer3Hcur) and not na(peer3Hprev) and not na(peer3HcurTs) and not na(peer3HprevTs) and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3Qts)
         bool ssmtReady = isPairChart and not na(chHcur) and not na(chHprev) and not na(chHcurTs) and not na(chHprevTs) and not na(chLcur) and not na(chLprev) and (hasPeer2 or hasPeer3)
-        if not na(chQts)
-            bool qChanged = na(wSsmtLastQTs) or chQts != wSsmtLastQTs
-            if qChanged
-                wSsmtCarryAllowed := wSsmtSplitLastBar
-                wSsmtSplitLastBar := false
-                wSsmtLastQTs := chQts
         if ssmtReady
             bool chartSweep = f_ssmt_sweep_high(chHcur, chHprev, chLcur, chLprev, chartInverse)
             bool split2 = hasPeer2 and (chartSweep != f_ssmt_sweep_high(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse))
@@ -1954,7 +1782,6 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
             bool split = split2 or split3
             bool peer2Sweep = hasPeer2 ? f_ssmt_sweep_high(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse) : false
             bool peer3Sweep = hasPeer3 ? f_ssmt_sweep_high(peer3Hcur, peer3Hprev, peer3Lcur, peer3Lprev, peer3Inverse) : false
-            wSsmtSplitLastBar := split
             dbgWRegBearSplit := split ? 1.0 : 0.0
             dbgWRegBearChartSweep := chartSweep ? 1.0 : 0.0
             dbgWRegBearPeer2Sweep := peer2Sweep ? 1.0 : 0.0
@@ -2030,7 +1857,6 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
                     label.delete(wSsmtLbl)
                     wSsmtLbl := na
         else
-            wSsmtSplitLastBar := false
             if not na(wSsmtLine)
                 line.delete(wSsmtLine)
                 wSsmtLine := na
@@ -2056,9 +1882,6 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
         f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
         wSsmtEventKey := na
         wSsmtPurgeTs := na
-        wSsmtLastQTs := na
-        wSsmtSplitLastBar := false
-        wSsmtCarryAllowed := false
 
     // Bullish Weekly SSMT (normal)
     if runWeeklyBullSSMT
@@ -2433,9 +2256,6 @@ else
     f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
     wSsmtEventKey := na
     wSsmtPurgeTs := na
-    wSsmtLastQTs := na
-    wSsmtSplitLastBar := false
-    wSsmtCarryAllowed := false
     if not na(wBSsmtLine)
         line.delete(wBSsmtLine)
         wBSsmtLine := na
