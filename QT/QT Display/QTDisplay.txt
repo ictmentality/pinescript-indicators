@@ -983,14 +983,43 @@ bool monthlySsmtLive = f_ssmt_cycle_gate(enableMonthlySSMT, monthlyLive, weeklyS
 var qt.QTConfig   qtCfg = qt.qt_config_default()
 var qt.CycleState qtSt  = qt.qt_state_new()
 
-[qtSt1, dayCycle] = qt.qt_daily_update(qtSt, qtCfg, time, time_close)
-[qtSt2, m90Cycle] = qt.qt_m90_update(qtSt1, qtCfg, time, time_close)
-[qtSt3, microCycle] = qt.qt_micro_update(qtSt2, qtCfg, time, time_close)
-[qtSt4, nanoCycle] = qt.qt_nano_update(qtSt3, qtCfg, time, time_close)
-[qtSt5, wkCycle] = qt.qt_weekly_update(qtSt4, qtCfg, time, time_close)
-[qtStNext, moCycle] = qt.qt_monthly_update(qtSt5, qtCfg, time, time_close)
-qtSt := qtStNext
-[_, _, _, _, _, wprev1, _] = qt.qt_weekly_qr_debug(qtSt)
+qt.CycleState stWork = qtSt
+qt.CycleResult dayCycle = na
+qt.CycleResult m90Cycle = na
+qt.CycleResult microCycle = na
+qt.CycleResult nanoCycle = na
+qt.CycleResult wkCycle = na
+qt.CycleResult moCycle = na
+qt.QuarterRecord wprev1 = na
+
+if dailyLive
+    [stD, dRes] = qt.qt_daily_update(stWork, qtCfg, time, time_close)
+    stWork := stD
+    dayCycle := dRes
+if m90Live
+    [stM, mRes] = qt.qt_m90_update(stWork, qtCfg, time, time_close)
+    stWork := stM
+    m90Cycle := mRes
+if microLive
+    [stU, uRes] = qt.qt_micro_update(stWork, qtCfg, time, time_close)
+    stWork := stU
+    microCycle := uRes
+if nanoLive
+    [stN, nRes] = qt.qt_nano_update(stWork, qtCfg, time, time_close)
+    stWork := stN
+    nanoCycle := nRes
+if weeklyLive
+    [stW, wRes] = qt.qt_weekly_update(stWork, qtCfg, time, time_close)
+    stWork := stW
+    wkCycle := wRes
+    [_, _, _, _, _, wPrevTmp, _] = qt.qt_weekly_qr_debug(stWork)
+    wprev1 := wPrevTmp
+if monthlyLive
+    [stMo, moRes] = qt.qt_monthly_update(stWork, qtCfg, time, time_close)
+    stWork := stMo
+    moCycle := moRes
+
+qtSt := stWork
 
 // Data Window exports (QTEngine-style: boundaries, realized flags, quarter opens)
 // plot(weeklyLive ? wkCycle.startTs : na, "Weekly startTs", display=display.data_window)

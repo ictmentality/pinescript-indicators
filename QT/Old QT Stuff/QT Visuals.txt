@@ -894,20 +894,59 @@ var line monthProjEnd = na
 var qt.QTConfig   qtCfg = qt.qt_config_default()
 var qt.CycleState qtSt  = qt.qt_state_new()
 
-[qtSt1, dayCycle] = qt.qt_daily_update(qtSt, qtCfg, time, time_close)
-[qtSt2, m90Cycle] = qt.qt_m90_update(qtSt1, qtCfg, time, time_close)
-[qtSt3, microCycle] = qt.qt_micro_update(qtSt2, qtCfg, time, time_close)
-[qtSt4, nanoCycle] = qt.qt_nano_update(qtSt3, qtCfg, time, time_close)
-[qtSt5, wkCycle] = qt.qt_weekly_update(qtSt4, qtCfg, time, time_close)
-[qtStNext, moCycle] = qt.qt_monthly_update(qtSt5, qtCfg, time, time_close)
-qtSt := qtStNext
+qt.CycleState stWork = qtSt
+qt.CycleResult dayCycle = na
+qt.CycleResult m90Cycle = na
+qt.CycleResult microCycle = na
+qt.CycleResult nanoCycle = na
+qt.CycleResult wkCycle = na
+qt.CycleResult moCycle = na
 
-int   dayEndPrj = dayCycle.endTs
-int   m90EndPrj = m90Cycle.endTs
-int   microEndPrj = microCycle.endTs
-int   nanoEndPrj = nanoCycle.endTs
-int   wkEndPrj = wkCycle.endTs
-int   moEndPrj = moCycle.endTs
+if dailyLive
+    [stD, dRes] = qt.qt_daily_update(stWork, qtCfg, time, time_close)
+    stWork := stD
+    dayCycle := dRes
+if m90Live
+    [stM, mRes] = qt.qt_m90_update(stWork, qtCfg, time, time_close)
+    stWork := stM
+    m90Cycle := mRes
+if microLive
+    [stU, uRes] = qt.qt_micro_update(stWork, qtCfg, time, time_close)
+    stWork := stU
+    microCycle := uRes
+if nanoLive
+    [stN, nRes] = qt.qt_nano_update(stWork, qtCfg, time, time_close)
+    stWork := stN
+    nanoCycle := nRes
+if weeklyLive
+    [stW, wRes] = qt.qt_weekly_update(stWork, qtCfg, time, time_close)
+    stWork := stW
+    wkCycle := wRes
+if monthlyLive
+    [stMo, moRes] = qt.qt_monthly_update(stWork, qtCfg, time, time_close)
+    stWork := stMo
+    moCycle := moRes
+
+qtSt := stWork
+
+int dayEndPrj = int(na)
+int m90EndPrj = int(na)
+int microEndPrj = int(na)
+int nanoEndPrj = int(na)
+int wkEndPrj = int(na)
+int moEndPrj = int(na)
+if dailyLive
+    dayEndPrj := dayCycle.endTs
+if m90Live
+    m90EndPrj := m90Cycle.endTs
+if microLive
+    microEndPrj := microCycle.endTs
+if nanoLive
+    nanoEndPrj := nanoCycle.endTs
+if weeklyLive
+    wkEndPrj := wkCycle.endTs
+if monthlyLive
+    moEndPrj := moCycle.endTs
 
 
 if not dailyLive
