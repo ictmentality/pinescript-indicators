@@ -25,8 +25,8 @@ f_ssmt_cycle_gate(bool cycleEnabled, bool cycleLive, bool modeEnabled) =>
 // INPUTS
 // ============================================================================
 groupSSMT = "SSMT DISPLAY MODES"
-showWeeklyBearBoth = input.bool(true, "Show Bearish SSMT", group=groupSSMT)
-showWeeklyBullBoth = input.bool(true, "Show Bullish SSMT", group=groupSSMT)
+showBearBoth = input.bool(true, "Show Bearish SSMT", group=groupSSMT)
+showBullBoth = input.bool(true, "Show Bullish SSMT", group=groupSSMT)
 
 groupSSMTCycles = "SSMT CYCLES (SCAFFOLD)"
 enableNanoSSMT = input.bool(false, "Enable Nano SSMT", group=groupSSMTCycles)
@@ -969,10 +969,10 @@ bool dailyLive  = dailyAlignedTf
 bool weeklyLive = weeklyAlignedTf
 bool monthlyLive = monthlyAlignedTf
 
-bool weeklySsmtAnyMode = showWeeklyBearBoth or showWeeklyBullBoth
-bool nanoSsmtLive   = f_ssmt_cycle_gate(enableNanoSSMT, nanoLive, true)
-bool microSsmtLive  = f_ssmt_cycle_gate(enableMicroSSMT, microLive, true)
-bool m90SsmtLive    = f_ssmt_cycle_gate(enableM90SSMT, m90Live, true)
+bool weeklySsmtAnyMode = showBearBoth or showBullBoth
+bool nanoSsmtLive   = f_ssmt_cycle_gate(enableNanoSSMT, nanoLive, weeklySsmtAnyMode)
+bool microSsmtLive  = f_ssmt_cycle_gate(enableMicroSSMT, microLive, weeklySsmtAnyMode)
+bool m90SsmtLive    = f_ssmt_cycle_gate(enableM90SSMT, m90Live, weeklySsmtAnyMode)
 bool dailySsmtLive  = f_ssmt_cycle_gate(enableDailySSMT, dailyLive, weeklySsmtAnyMode)
 bool weeklySsmtLive = f_ssmt_cycle_gate(enableWeeklySSMT, weeklyLive, weeklySsmtAnyMode)
 bool monthlySsmtLive = f_ssmt_cycle_gate(enableMonthlySSMT, monthlyLive, weeklySsmtAnyMode)
@@ -992,29 +992,29 @@ qt.CycleResult wkCycle = na
 qt.CycleResult moCycle = na
 qt.QuarterRecord wprev1 = na
 
-if dailyLive
+if dailySsmtLive
     [stD, dRes] = qt.qt_daily_update(stWork, qtCfg, time, time_close)
     stWork := stD
     dayCycle := dRes
-if m90Live
+if m90SsmtLive
     [stM, mRes] = qt.qt_m90_update(stWork, qtCfg, time, time_close)
     stWork := stM
     m90Cycle := mRes
-if microLive
+if microSsmtLive
     [stU, uRes] = qt.qt_micro_update(stWork, qtCfg, time, time_close)
     stWork := stU
     microCycle := uRes
-if nanoLive
+if nanoSsmtLive
     [stN, nRes] = qt.qt_nano_update(stWork, qtCfg, time, time_close)
     stWork := stN
     nanoCycle := nRes
-if weeklyLive
+if weeklySsmtLive
     [stW, wRes] = qt.qt_weekly_update(stWork, qtCfg, time, time_close)
     stWork := stW
     wkCycle := wRes
     [_, _, _, _, _, wPrevTmp, _] = qt.qt_weekly_qr_debug(stWork)
     wprev1 := wPrevTmp
-if monthlyLive
+if monthlySsmtLive
     [stMo, moRes] = qt.qt_monthly_update(stWork, qtCfg, time, time_close)
     stWork := stMo
     moCycle := moRes
@@ -1205,17 +1205,18 @@ bool triad1InverseMode = triadModeActive and in_triad1
 bool chartInverse = triad1InverseMode and f_ssmt_is_dxy_symbol(syminfo.tickerid)
 bool peer2Inverse = triad1InverseMode and str.length(tsym2) > 0 and f_ssmt_is_dxy_symbol(tsym2)
 bool peer3Inverse = triad1InverseMode and str.length(tsym3) > 0 and f_ssmt_is_dxy_symbol(tsym3)
+bool hasPeerAssets = str.length(tsym2) > 0 or str.length(tsym3) > 0
 
 bool dyad_ok = dyadModeActive and str.length(tsym2) > 0 and str.length(tsym3) == 0
 
-if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsmtLive or nanoSsmtLive
-    bool runWeeklyBearSSMT = showWeeklyBearBoth
-    bool runWeeklyBullSSMT = showWeeklyBullBoth
-    bool runWeeklyBearHSSMT = showWeeklyBearBoth
-    bool runWeeklyBullHSSMT = showWeeklyBullBoth
+if (weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsmtLive or nanoSsmtLive) and hasPeerAssets
+    bool runWeeklyBearSSMT = showBearBoth
+    bool runWeeklyBullSSMT = showBullBoth
+    bool runWeeklyBearHSSMT = showBearBoth
+    bool runWeeklyBullHSSMT = showBullBoth
     bool hssmtEvalConfirmed = barstate.isconfirmed
-    bool preferRegularVisual = showWeeklyBearBoth
-    bool preferRegularVisualBull = showWeeklyBullBoth
+    bool preferRegularVisual = showBearBoth
+    bool preferRegularVisualBull = showBullBoth
     bool regularVisualCandidate = false
     bool regularVisualCandidateBull = false
     int ssmtQuarterLen = nanoSsmtLive ? (90 * MS_MIN / 16) : m90SsmtLive ? (90 * MS_MIN) : microSsmtLive ? (90 * MS_MIN / 4) : dailySsmtLive ? LEN_24H / 4 : monthlySsmtLive ? (7 * LEN_24H) : LEN_24H
@@ -1708,6 +1709,7 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
         chBLprev := dayCycle.q3.bl
         chBLprevTs := dayCycle.q3.blTs
         chQts := dayCycle.q4.boundaryTs
+    bool isPairChart = (triad_ok or dyad_ok) and (str.length(tsym2) > 0 or str.length(tsym3) > 0)
     float peer2Hcur = na
     int   peer2HcurTs = na
     float peer2Hprev = na
@@ -1726,7 +1728,7 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
     int   peer2BLprevTs = na
     int   peer2Qts = na
     string peerTf = nanoSsmtLive ? timeframe.period : m90SsmtLive ? "5" : microSsmtLive ? timeframe.period : dailySsmtLive ? "15" : monthlySsmtLive ? "240" : "60"
-    if str.length(tsym2) > 0
+    if isPairChart and str.length(tsym2) > 0
         [p2Hcur, p2HcurTs, p2Hprev, p2HprevTs, p2BHcur, p2BHcurTs, p2BHprev, p2BHprevTs, p2Lcur, p2LcurTs, p2Lprev, p2LprevTs, p2BLcur, p2BLcurTs, p2BLprev, p2BLprevTs, p2Qts] = request.security(
              tsym2,
              peerTf,
@@ -1769,7 +1771,7 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
     float peer3BLprev = na
     int   peer3BLprevTs = na
     int   peer3Qts = na
-    if str.length(tsym3) > 0
+    if isPairChart and str.length(tsym3) > 0
         [p3Hcur, p3HcurTs, p3Hprev, p3HprevTs, p3BHcur, p3BHcurTs, p3BHprev, p3BHprevTs, p3Lcur, p3LcurTs, p3Lprev, p3LprevTs, p3BLcur, p3BLcurTs, p3BLprev, p3BLprevTs, p3Qts] = request.security(
              tsym3,
              peerTf,
@@ -1797,7 +1799,6 @@ if weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsm
         peer3Qts := p3Qts
 
     string chartAsset = f_ssmt_label_sym(syminfo.tickerid)
-    bool isPairChart = (triad_ok or dyad_ok) and (str.length(tsym2) > 0 or str.length(tsym3) > 0)
 
     // Bearish Weekly SSMT (normal)
     if runWeeklyBearSSMT
