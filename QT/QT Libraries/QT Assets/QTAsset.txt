@@ -49,6 +49,9 @@ const string TRIAD4_SYM3 = "COMEX:HG1!"
 const string TRIAD5_SYM1 = "CME_MINI:NQ1!"
 const string TRIAD5_SYM2 = "CME_MINI:ES1!"
 const string TRIAD5_SYM3 = "CBOT_MINI:YM1!"
+const string TRIAD6_SYM1 = "BINANCE:BTCUSDT.P"
+const string TRIAD6_SYM2 = "BINANCE:ETHUSDT.P"
+const string TRIAD6_SYM3 = "CRYPTOCAP:TOTAL3"
 const string DYAD1_SYM1 = "CBOT:ZB1!"
 const string DYAD1_SYM2 = "CBOT:TN1!"
 
@@ -415,6 +418,7 @@ export resolve_pair_symbols(string selection_mode, bool badj, string sym, string
     bool in_triad3 = f_check_match(TRIAD3_SYM1) or f_check_match(TRIAD3_SYM2) or f_check_match(TRIAD3_SYM3)
     bool in_triad4 = f_check_match(TRIAD4_SYM1) or f_check_match(TRIAD4_SYM2) or f_check_match(TRIAD4_SYM3)
     bool in_triad5 = f_check_match(TRIAD5_SYM1) or f_check_match(TRIAD5_SYM2) or f_check_match(TRIAD5_SYM3)
+    bool in_triad6 = f_check_match(TRIAD6_SYM1) or f_check_match(TRIAD6_SYM2) or f_check_match(TRIAD6_SYM3)
     bool in_dyad1 = f_check_match(DYAD1_SYM1) or f_check_match(DYAD1_SYM2)
 
     if in_triad1
@@ -437,11 +441,15 @@ export resolve_pair_symbols(string selection_mode, bool badj, string sym, string
         st1 := TRIAD5_SYM1
         st2 := TRIAD5_SYM2
         st3 := TRIAD5_SYM3
+    else if in_triad6
+        st1 := TRIAD6_SYM1
+        st2 := TRIAD6_SYM2
+        st3 := TRIAD6_SYM3
 
     bool match_1 = f_check_match(st1)
     bool match_2 = f_check_match(st2)
     bool match_3 = f_check_match(st3)
-    bool triad_ok = triadModeActive and (in_triad1 or in_triad2 or in_triad3 or in_triad4 or in_triad5) and (match_1 or match_2 or match_3)
+    bool triad_ok = triadModeActive and (in_triad1 or in_triad2 or in_triad3 or in_triad4 or in_triad5 or in_triad6) and (match_1 or match_2 or match_3)
 
     string tsym2 = ""
     string tsym3 = ""

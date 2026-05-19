@@ -1,0 +1,2951 @@
+//@version=6
+indicator("QT Visuals Crypto", overlay=true, max_lines_count=500, max_labels_count=500)
+import Jaw1312/QTEngineCrypto/2 as qt
+import Jaw1312/QTAssets/5 as qta
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+var string TZ = "America/New_York"
+
+var int MS_SEC = 1000
+var int MS_MIN = 60 * MS_SEC
+var int MS_HR  = 60 * MS_MIN
+
+var int LEN_24H = 24 * MS_HR
+
+var color COL_Q1 = color.rgb( 99,  99,  99)   // #636363
+var color COL_Q2 = color.rgb(242,  54,  69)   // #f23645
+var color COL_Q3 = color.rgb( 76, 175,  80)   // #4caf50
+var color COL_Q4 = color.rgb( 41,  98, 255)   // #2962ff
+var color COL_Q5 = color.rgb( 12,  50, 153)   // #0c3299 (weekly Q5)
+
+var int V_TRANSP = 70
+f_vcol(color c) =>
+    color.new(c, V_TRANSP)
+
+lineStyleFrom(string s) =>
+    switch s
+        "Solid"  => line.style_solid
+        "Dashed" => line.style_dashed
+        =>          line.style_dotted
+
+f_ssmt_cycle_gate(bool cycleEnabled, bool cycleLive, bool modeEnabled) =>
+    cycleEnabled and cycleLive and modeEnabled
+
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+groupCycles = "TIME CYCLES"
+useNano     = input.bool(true, "Nano", group=groupCycles)
+useMicro    = input.bool(true, "Micro", group=groupCycles)
+useM90      = input.bool(true, "m90", group=groupCycles)
+useDaily    = input.bool(true, "Daily", group=groupCycles)
+useWeekly   = input.bool(true, "Weekly", group=groupCycles)
+useMonthly  = input.bool(true, "Monthly", group=groupCycles)
+
+groupAll        = "CYCLE SETTINGS"
+showOpens       = input.bool(true,  "Show Opens", group=groupAll)
+keepCycles      = input.int(3,      "# of Cycles", minval=1, maxval=5, group=groupAll)
+q1OpenCol       = input.color(color.new(color.rgb(184, 184, 184), 20), "Q1 Open Color", group=groupAll)
+trueOpenCol     = input.color(color.new(color.red, 45), "Q2 Open Color", group=groupAll)
+q3OpenCol       = input.color(color.new(color.rgb(76, 175, 80), 70), "Q3 Open Color", group=groupAll)
+q4OpenCol       = input.color(color.new(color.rgb(41, 98, 255), 70), "Q4 Open Color", group=groupAll)
+q5OpenCol       = input.color(color.new(color.rgb(12, 50, 153), 70), "Q5 Open Color", group=groupAll)
+openStyleStr    = input.string("Dashed", "Open Style", options=["Solid","Dashed","Dotted"], group=groupAll)
+
+groupSSMT = "SSMT DISPLAY MODES"
+showBearBoth = input.bool(true, "Show Bearish SSMT", group=groupSSMT)
+showBullBoth = input.bool(true, "Show Bullish SSMT", group=groupSSMT)
+
+groupSSMTCycles = "SSMT CYCLES"
+enableNanoSSMT = input.bool(false, "Enable Nano SSMT", group=groupSSMTCycles)
+enableMicroSSMT = input.bool(false, "Enable Micro SSMT", group=groupSSMTCycles)
+enableM90SSMT = input.bool(true, "Enable m90 SSMT", group=groupSSMTCycles)
+enableDailySSMT = input.bool(true, "Enable Daily SSMT", group=groupSSMTCycles)
+enableWeeklySSMT = input.bool(true, "Enable Weekly SSMT", group=groupSSMTCycles)
+enableMonthlySSMT = input.bool(true, "Enable Monthly SSMT", group=groupSSMTCycles)
+
+selection_mode = input.string("Triad", "Pair Selection", options=["Triad", "Off"], group=groupSSMT)
+badj = input.bool(false, "Backadjust Fallback", group=groupSSMT)
+
+ssmtBearLineCol = input.color(color.rgb(242, 54, 69), "Bearish SSMT Color", group=groupSSMT)
+ssmtBullLineCol = input.color(color.rgb(41, 98, 255), "Bullish SSMT Color", group=groupSSMT)
+ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupSSMT)
+ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
+
+groupDebug = "DEBUG"
+showWeeklyQOpenTable = input.bool(true, "Show Asset Selection Debug Table", group=groupDebug)
+showWeeklySSMTDebug = input.bool(false, "Show Monthly SSMT Debug (Data Window)", group=groupDebug)
+
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+f_qt_day_start_raw(int t, string tz, int dayStartHour, int dayStartMin) =>
+    int y  = year(t, tz)
+    int mo = month(t, tz)
+    int da = dayofmonth(t, tz)
+    int h  = hour(t, tz)
+    int mi = minute(t, tz)
+    int base = timestamp(tz, y, mo, da, dayStartHour, dayStartMin)
+    int out  = (h > dayStartHour or (h == dayStartHour and mi >= dayStartMin)) ? base : base - LEN_24H
+    out
+
+f_qt_day_start(int t) =>
+    f_qt_day_start_raw(t, TZ, 18, 0)
+
+f_next_ds_after(int t) =>
+    int ds0 = f_qt_day_start(t)
+    ds0 <= t ? ds0 + LEN_24H : ds0
+
+f_ceil_to_1h(int ts) =>
+    int step = 60 * MS_MIN
+    int rem  = ts % step
+    rem == 0 ? ts : ts + (step - rem)
+
+f_weekly_aligned_open_expr(int q1Ts, int q2Ts, int q3Ts, int q4Ts, int q5Ts, int endTs) =>
+    int tRef = time
+    bool inW = tRef >= q1Ts and tRef < endTs
+
+    int qi = 1
+    if inW
+        if tRef >= q2Ts
+            qi := 2
+        if tRef >= q3Ts
+            qi := 3
+        if tRef >= q4Ts
+            qi := 4
+        if tRef >= q5Ts
+            qi := 5
+
+    int qCurTs = int(na)
+    if inW
+        qCurTs := qi == 1 ? q1Ts : qi == 2 ? q2Ts : qi == 3 ? q3Ts : qi == 4 ? q4Ts : q5Ts
+
+    int targetTs = na(qCurTs) ? int(na) : f_ceil_to_1h(qCurTs)
+
+    var int   lastTarget = int(na)
+    var float actualOpen = float(na)
+    var int   actualOpenTs = int(na)
+    var int   actualBoundaryTs = int(na)
+    var int   actualQi = int(na)
+
+    if na(lastTarget) or targetTs != lastTarget
+        lastTarget := targetTs
+        actualOpen := float(na)
+        actualOpenTs := int(na)
+        actualBoundaryTs := int(na)
+        actualQi := int(na)
+
+    bool hit = not na(targetTs) and (time >= targetTs) and (na(time[1]) or time[1] < targetTs)
+    if hit and na(actualOpen)
+        actualOpen := open
+        actualOpenTs := time
+        actualBoundaryTs := qCurTs
+        actualQi := qi
+
+    [actualOpen, actualOpenTs, actualBoundaryTs, actualQi]
+
+f_weekly_aligned_open_current(int q1Ts, int q2Ts, int q3Ts, int q4Ts, int q5Ts, int endTs) =>
+    request.security(
+        syminfo.tickerid,
+        "60",
+        f_weekly_aligned_open_expr(q1Ts, q2Ts, q3Ts, q4Ts, q5Ts, endTs),
+        lookahead=barmerge.lookahead_off
+    )
+
+f_ssmt_sym_ticker(string sym) =>
+    string s = str.upper(sym)
+    if str.contains(s, "\"SYMBOL\":\"")
+        string[] partsSym = str.split(s, "\"SYMBOL\":\"")
+        if array.size(partsSym) > 1
+            string right = array.get(partsSym, 1)
+            string[] partsEnd = str.split(right, "\"")
+            s := array.get(partsEnd, 0)
+    if str.contains(s, "{")
+        string[] partsBrace = str.split(s, "{")
+        s := array.get(partsBrace, 0)
+    if str.contains(s, "|")
+        string[] partsPipe = str.split(s, "|")
+        s := array.get(partsPipe, 0)
+    string[] parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+f_ssmt_match_tag(string sym) =>
+    string tk = str.upper(f_ssmt_sym_ticker(sym))
+    string tag = ""
+    if str.contains(tk, "BTC")
+        tag := "BTC"
+    else if str.contains(tk, "ETH")
+        tag := "ETH"
+    else if str.contains(tk, "TOTAL3")
+        tag := "TOTAL3"
+    else if str.contains(tk, "DXY")
+        tag := "DXY"
+    else if str.contains(tk, "MNQ") or str.contains(tk, "NQ")
+        tag := "NQ"
+    else if str.contains(tk, "MES") or str.contains(tk, "ES")
+        tag := "ES"
+    else if str.contains(tk, "MYM") or str.contains(tk, "YM")
+        tag := "YM"
+    else if str.contains(tk, "M2K") or str.contains(tk, "RTY")
+        tag := "RTY"
+    else if str.contains(tk, "MCL") or str.contains(tk, "CL")
+        tag := "CL"
+    else if str.contains(tk, "MRB") or str.contains(tk, "RB")
+        tag := "RB"
+    else if str.contains(tk, "MHO") or str.contains(tk, "HO")
+        tag := "HO"
+    else if str.contains(tk, "M6E") or str.contains(tk, "6E")
+        tag := "6E"
+    else if str.contains(tk, "M6B") or str.contains(tk, "6B")
+        tag := "6B"
+    else if str.contains(tk, "ZB")
+        tag := "ZB"
+    else if str.contains(tk, "TN")
+        tag := "TN"
+    else if str.contains(tk, "ZF")
+        tag := "ZF"
+    else if str.contains(tk, "MGC") or str.contains(tk, "GC")
+        tag := "GC"
+    else if str.contains(tk, "SIL") or str.contains(tk, "SI")
+        tag := "SI"
+    else if str.contains(tk, "MHG") or str.contains(tk, "HG")
+        tag := "HG"
+    tag
+
+f_check_match(string input_sym) =>
+    bool valid = str.length(input_sym) > 0 and str.contains(input_sym, ":")
+    if not valid
+        false
+    else
+        string inputUp = str.upper(input_sym)
+        string[] parts = str.split(inputUp, ":")
+        string tSym = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : inputUp
+        string curTicker = str.upper(syminfo.ticker)
+        string curId = str.upper(syminfo.tickerid)
+        bool directMatch = (curTicker == tSym) or str.contains(curId, tSym) or str.contains(inputUp, curTicker)
+        if directMatch
+            true
+        else
+            string inTag = f_ssmt_match_tag(input_sym)
+            string curTag = f_ssmt_match_tag(syminfo.tickerid)
+            str.length(inTag) > 0 and str.length(curTag) > 0 and inTag == curTag
+
+f_ssmt_label_sym(string sym) =>
+    string allUp = str.upper(f_ssmt_sym_ticker(sym))
+    string out = ""
+    if str.contains(allUp, "BTC")
+        out := "BTC"
+    else if str.contains(allUp, "ETH")
+        out := "ETH"
+    else if str.contains(allUp, "TOTAL3")
+        out := "TOTAL3"
+    else if str.contains(allUp, "MNQ")
+        out := "MNQ"
+    else if str.contains(allUp, "MES")
+        out := "MES"
+    else if str.contains(allUp, "MYM")
+        out := "MYM"
+    else if str.contains(allUp, "MGC")
+        out := "MGC"
+    else if str.contains(allUp, "SIL")
+        out := "SIL"
+    else if str.contains(allUp, "MHG")
+        out := "MHG"
+    else if str.contains(allUp, "NQ")
+        out := "NQ"
+    else if str.contains(allUp, "ES")
+        out := "ES"
+    else if str.contains(allUp, "YM")
+        out := "YM"
+    else if str.contains(allUp, "GC")
+        out := "GC"
+    else if str.contains(allUp, "SI")
+        out := "SI"
+    else if str.contains(allUp, "PL")
+        out := "PL"
+    else if str.contains(allUp, "HG")
+        out := "HG"
+    else if str.contains(allUp, "CL")
+        out := "CL"
+    string s = f_ssmt_sym_ticker(sym)
+    s := str.replace_all(s, "}", "")
+    s := str.replace_all(s, "{", "")
+    s := str.replace_all(s, "\"", "")
+    s := str.replace_all(s, "'", "")
+    s := str.replace_all(s, "=", "")
+    s := str.trim(s)
+    string up = str.upper(s)
+    if out == ""
+        out := up
+    out
+
+f_ssmt_debug_symbol_text(string sym) =>
+    string out = sym
+    if str.length(sym) > 0
+        string up = str.upper(sym)
+        bool hasBackadjMeta = str.contains(up, "BACKADJUSTMENT") or str.contains(up, "BACKADJUST") or str.contains(up, "BACKADJUSTED")
+        if hasBackadjMeta
+            string tk = f_ssmt_sym_ticker(sym)
+            out := "B-ADJ " + (str.length(tk) > 0 ? tk : sym)
+    out
+
+f_ssmt_is_dxy_symbol(string sym) =>
+    str.contains(str.upper(f_ssmt_sym_ticker(sym)), "DXY")
+
+f_ssmt_sweep_high(float hCur, float hPrev, float lCur, float lPrev, bool inverse) =>
+    inverse ? (lCur < lPrev) : (hCur > hPrev)
+
+f_ssmt_sweep_low(float hCur, float hPrev, float lCur, float lPrev, bool inverse) =>
+    inverse ? (hCur > hPrev) : (lCur < lPrev)
+
+f_ssmt_sweep_body_high(float bhCur, float bhPrev, float blCur, float blPrev, bool inverse) =>
+    inverse ? (blCur < blPrev) : (bhCur > bhPrev)
+
+f_ssmt_sweep_body_low(float bhCur, float bhPrev, float blCur, float blPrev, bool inverse) =>
+    inverse ? (bhCur > bhPrev) : (blCur < blPrev)
+
+f_ssmt_weekly_highs_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+    [peerStNext, peerWk] = qt.qt_weekly_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    [_, _, _, _, _, pwprev1, _] = qt.qt_weekly_qr_debug(peerSt)
+    float hCur = na
+    int hCurTs = na
+    float hPrev = na
+    int hPrevTs = na
+    float bhCur = na
+    int bhCurTs = na
+    float bhPrev = na
+    int bhPrevTs = na
+    float lCur = na
+    int lCurTs = na
+    float lPrev = na
+    int lPrevTs = na
+    float blCur = na
+    int blCurTs = na
+    float blPrev = na
+    int blPrevTs = na
+    int qCur = na
+    if peerWk.inWindow and peerWk.curQuarterIndex == 1
+        hCur := peerWk.q1.h
+        hCurTs := peerWk.q1.hTs
+        bhCur := peerWk.q1.bh
+        bhCurTs := peerWk.q1.bhTs
+        lCur := peerWk.q1.l
+        lCurTs := peerWk.q1.lTs
+        blCur := peerWk.q1.bl
+        blCurTs := peerWk.q1.blTs
+        hPrev := pwprev1.h
+        hPrevTs := pwprev1.hTs
+        bhPrev := pwprev1.bh
+        bhPrevTs := pwprev1.bhTs
+        lPrev := pwprev1.l
+        lPrevTs := pwprev1.lTs
+        blPrev := pwprev1.bl
+        blPrevTs := pwprev1.blTs
+        qCur := peerWk.q1.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 2
+        hCur := peerWk.q2.h
+        hCurTs := peerWk.q2.hTs
+        bhCur := peerWk.q2.bh
+        bhCurTs := peerWk.q2.bhTs
+        lCur := peerWk.q2.l
+        lCurTs := peerWk.q2.lTs
+        blCur := peerWk.q2.bl
+        blCurTs := peerWk.q2.blTs
+        hPrev := peerWk.q1.h
+        hPrevTs := peerWk.q1.hTs
+        bhPrev := peerWk.q1.bh
+        bhPrevTs := peerWk.q1.bhTs
+        lPrev := peerWk.q1.l
+        lPrevTs := peerWk.q1.lTs
+        blPrev := peerWk.q1.bl
+        blPrevTs := peerWk.q1.blTs
+        qCur := peerWk.q2.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 3
+        hCur := peerWk.q3.h
+        hCurTs := peerWk.q3.hTs
+        bhCur := peerWk.q3.bh
+        bhCurTs := peerWk.q3.bhTs
+        lCur := peerWk.q3.l
+        lCurTs := peerWk.q3.lTs
+        blCur := peerWk.q3.bl
+        blCurTs := peerWk.q3.blTs
+        hPrev := peerWk.q2.h
+        hPrevTs := peerWk.q2.hTs
+        bhPrev := peerWk.q2.bh
+        bhPrevTs := peerWk.q2.bhTs
+        lPrev := peerWk.q2.l
+        lPrevTs := peerWk.q2.lTs
+        blPrev := peerWk.q2.bl
+        blPrevTs := peerWk.q2.blTs
+        qCur := peerWk.q3.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 4
+        hCur := peerWk.q4.h
+        hCurTs := peerWk.q4.hTs
+        bhCur := peerWk.q4.bh
+        bhCurTs := peerWk.q4.bhTs
+        lCur := peerWk.q4.l
+        lCurTs := peerWk.q4.lTs
+        blCur := peerWk.q4.bl
+        blCurTs := peerWk.q4.blTs
+        hPrev := peerWk.q3.h
+        hPrevTs := peerWk.q3.hTs
+        bhPrev := peerWk.q3.bh
+        bhPrevTs := peerWk.q3.bhTs
+        lPrev := peerWk.q3.l
+        lPrevTs := peerWk.q3.lTs
+        blPrev := peerWk.q3.bl
+        blPrevTs := peerWk.q3.blTs
+        qCur := peerWk.q4.boundaryTs
+    else if peerWk.inWindow and peerWk.curQuarterIndex == 5
+        hCur := peerWk.q5.h
+        hCurTs := peerWk.q5.hTs
+        bhCur := peerWk.q5.bh
+        bhCurTs := peerWk.q5.bhTs
+        lCur := peerWk.q5.l
+        lCurTs := peerWk.q5.lTs
+        blCur := peerWk.q5.bl
+        blCurTs := peerWk.q5.blTs
+        hPrev := peerWk.q4.h
+        hPrevTs := peerWk.q4.hTs
+        bhPrev := peerWk.q4.bh
+        bhPrevTs := peerWk.q4.bhTs
+        lPrev := peerWk.q4.l
+        lPrevTs := peerWk.q4.lTs
+        blPrev := peerWk.q4.bl
+        blPrevTs := peerWk.q4.blTs
+        qCur := peerWk.q5.boundaryTs
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
+
+f_ssmt_monthly_highs_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+    [peerStNext, peerMo] = qt.qt_monthly_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    [_, _, _, _, _, pmoprev1, _] = qt.qt_monthly_qr_debug(peerSt)
+    float hCur = na
+    int hCurTs = na
+    float hPrev = na
+    int hPrevTs = na
+    float bhCur = na
+    int bhCurTs = na
+    float bhPrev = na
+    int bhPrevTs = na
+    float lCur = na
+    int lCurTs = na
+    float lPrev = na
+    int lPrevTs = na
+    float blCur = na
+    int blCurTs = na
+    float blPrev = na
+    int blPrevTs = na
+    int qCur = na
+    if peerMo.inWindow and peerMo.curQuarterIndex == 1
+        hCur := peerMo.q1.h
+        hCurTs := peerMo.q1.hTs
+        bhCur := peerMo.q1.bh
+        bhCurTs := peerMo.q1.bhTs
+        lCur := peerMo.q1.l
+        lCurTs := peerMo.q1.lTs
+        blCur := peerMo.q1.bl
+        blCurTs := peerMo.q1.blTs
+        hPrev := pmoprev1.h
+        hPrevTs := pmoprev1.hTs
+        bhPrev := pmoprev1.bh
+        bhPrevTs := pmoprev1.bhTs
+        lPrev := pmoprev1.l
+        lPrevTs := pmoprev1.lTs
+        blPrev := pmoprev1.bl
+        blPrevTs := pmoprev1.blTs
+        qCur := peerMo.q1.boundaryTs
+    else if peerMo.inWindow and peerMo.curQuarterIndex == 2
+        hCur := peerMo.q2.h
+        hCurTs := peerMo.q2.hTs
+        bhCur := peerMo.q2.bh
+        bhCurTs := peerMo.q2.bhTs
+        lCur := peerMo.q2.l
+        lCurTs := peerMo.q2.lTs
+        blCur := peerMo.q2.bl
+        blCurTs := peerMo.q2.blTs
+        hPrev := peerMo.q1.h
+        hPrevTs := peerMo.q1.hTs
+        bhPrev := peerMo.q1.bh
+        bhPrevTs := peerMo.q1.bhTs
+        lPrev := peerMo.q1.l
+        lPrevTs := peerMo.q1.lTs
+        blPrev := peerMo.q1.bl
+        blPrevTs := peerMo.q1.blTs
+        qCur := peerMo.q2.boundaryTs
+    else if peerMo.inWindow and peerMo.curQuarterIndex == 3
+        hCur := peerMo.q3.h
+        hCurTs := peerMo.q3.hTs
+        bhCur := peerMo.q3.bh
+        bhCurTs := peerMo.q3.bhTs
+        lCur := peerMo.q3.l
+        lCurTs := peerMo.q3.lTs
+        blCur := peerMo.q3.bl
+        blCurTs := peerMo.q3.blTs
+        hPrev := peerMo.q2.h
+        hPrevTs := peerMo.q2.hTs
+        bhPrev := peerMo.q2.bh
+        bhPrevTs := peerMo.q2.bhTs
+        lPrev := peerMo.q2.l
+        lPrevTs := peerMo.q2.lTs
+        blPrev := peerMo.q2.bl
+        blPrevTs := peerMo.q2.blTs
+        qCur := peerMo.q3.boundaryTs
+    else if peerMo.inWindow and peerMo.curQuarterIndex == 4
+        hCur := peerMo.q4.h
+        hCurTs := peerMo.q4.hTs
+        bhCur := peerMo.q4.bh
+        bhCurTs := peerMo.q4.bhTs
+        lCur := peerMo.q4.l
+        lCurTs := peerMo.q4.lTs
+        blCur := peerMo.q4.bl
+        blCurTs := peerMo.q4.blTs
+        hPrev := peerMo.q3.h
+        hPrevTs := peerMo.q3.hTs
+        bhPrev := peerMo.q3.bh
+        bhPrevTs := peerMo.q3.bhTs
+        lPrev := peerMo.q3.l
+        lPrevTs := peerMo.q3.lTs
+        blPrev := peerMo.q3.bl
+        blPrevTs := peerMo.q3.blTs
+        qCur := peerMo.q4.boundaryTs
+    else if peerMo.inWindow and peerMo.curQuarterIndex == 5
+        hCur := peerMo.q5.h
+        hCurTs := peerMo.q5.hTs
+        bhCur := peerMo.q5.bh
+        bhCurTs := peerMo.q5.bhTs
+        lCur := peerMo.q5.l
+        lCurTs := peerMo.q5.lTs
+        blCur := peerMo.q5.bl
+        blCurTs := peerMo.q5.blTs
+        hPrev := peerMo.q4.h
+        hPrevTs := peerMo.q4.hTs
+        bhPrev := peerMo.q4.bh
+        bhPrevTs := peerMo.q4.bhTs
+        lPrev := peerMo.q4.l
+        lPrevTs := peerMo.q4.lTs
+        blPrev := peerMo.q4.bl
+        blPrevTs := peerMo.q4.blTs
+        qCur := peerMo.q5.boundaryTs
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
+
+f_ssmt_daily_highs_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+    [peerStNext, peerDay] = qt.qt_daily_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    float hCur = na
+    int hCurTs = na
+    float hPrev = na
+    int hPrevTs = na
+    float bhCur = na
+    int bhCurTs = na
+    float bhPrev = na
+    int bhPrevTs = na
+    float lCur = na
+    int lCurTs = na
+    float lPrev = na
+    int lPrevTs = na
+    float blCur = na
+    int blCurTs = na
+    float blPrev = na
+    int blPrevTs = na
+    int qCur = na
+    if peerDay.inWindow and peerDay.curQuarterIndex == 1
+        hCur := peerDay.q1.h
+        hCurTs := peerDay.q1.hTs
+        bhCur := peerDay.q1.bh
+        bhCurTs := peerDay.q1.bhTs
+        lCur := peerDay.q1.l
+        lCurTs := peerDay.q1.lTs
+        blCur := peerDay.q1.bl
+        blCurTs := peerDay.q1.blTs
+        hPrev := peerSt.daily.prev1.h
+        hPrevTs := peerSt.daily.prev1.hTs
+        bhPrev := peerSt.daily.prev1.bh
+        bhPrevTs := peerSt.daily.prev1.bhTs
+        lPrev := peerSt.daily.prev1.l
+        lPrevTs := peerSt.daily.prev1.lTs
+        blPrev := peerSt.daily.prev1.bl
+        blPrevTs := peerSt.daily.prev1.blTs
+        qCur := peerDay.q1.boundaryTs
+    else if peerDay.inWindow and peerDay.curQuarterIndex == 2
+        hCur := peerDay.q2.h
+        hCurTs := peerDay.q2.hTs
+        bhCur := peerDay.q2.bh
+        bhCurTs := peerDay.q2.bhTs
+        lCur := peerDay.q2.l
+        lCurTs := peerDay.q2.lTs
+        blCur := peerDay.q2.bl
+        blCurTs := peerDay.q2.blTs
+        hPrev := peerDay.q1.h
+        hPrevTs := peerDay.q1.hTs
+        bhPrev := peerDay.q1.bh
+        bhPrevTs := peerDay.q1.bhTs
+        lPrev := peerDay.q1.l
+        lPrevTs := peerDay.q1.lTs
+        blPrev := peerDay.q1.bl
+        blPrevTs := peerDay.q1.blTs
+        qCur := peerDay.q2.boundaryTs
+    else if peerDay.inWindow and peerDay.curQuarterIndex == 3
+        hCur := peerDay.q3.h
+        hCurTs := peerDay.q3.hTs
+        bhCur := peerDay.q3.bh
+        bhCurTs := peerDay.q3.bhTs
+        lCur := peerDay.q3.l
+        lCurTs := peerDay.q3.lTs
+        blCur := peerDay.q3.bl
+        blCurTs := peerDay.q3.blTs
+        hPrev := peerDay.q2.h
+        hPrevTs := peerDay.q2.hTs
+        bhPrev := peerDay.q2.bh
+        bhPrevTs := peerDay.q2.bhTs
+        lPrev := peerDay.q2.l
+        lPrevTs := peerDay.q2.lTs
+        blPrev := peerDay.q2.bl
+        blPrevTs := peerDay.q2.blTs
+        qCur := peerDay.q3.boundaryTs
+    else if peerDay.inWindow and peerDay.curQuarterIndex == 4
+        hCur := peerDay.q4.h
+        hCurTs := peerDay.q4.hTs
+        bhCur := peerDay.q4.bh
+        bhCurTs := peerDay.q4.bhTs
+        lCur := peerDay.q4.l
+        lCurTs := peerDay.q4.lTs
+        blCur := peerDay.q4.bl
+        blCurTs := peerDay.q4.blTs
+        hPrev := peerDay.q3.h
+        hPrevTs := peerDay.q3.hTs
+        bhPrev := peerDay.q3.bh
+        bhPrevTs := peerDay.q3.bhTs
+        lPrev := peerDay.q3.l
+        lPrevTs := peerDay.q3.lTs
+        blPrev := peerDay.q3.bl
+        blPrevTs := peerDay.q3.blTs
+        qCur := peerDay.q4.boundaryTs
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
+
+f_ssmt_m90_highs_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+    [peerStNext, peerM90] = qt.qt_m90_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    float hCur = na
+    int hCurTs = na
+    float hPrev = na
+    int hPrevTs = na
+    float bhCur = na
+    int bhCurTs = na
+    float bhPrev = na
+    int bhPrevTs = na
+    float lCur = na
+    int lCurTs = na
+    float lPrev = na
+    int lPrevTs = na
+    float blCur = na
+    int blCurTs = na
+    float blPrev = na
+    int blPrevTs = na
+    int qCur = na
+    if peerM90.inWindow and peerM90.curQuarterIndex == 1
+        hCur := peerM90.q1.h
+        hCurTs := peerM90.q1.hTs
+        bhCur := peerM90.q1.bh
+        bhCurTs := peerM90.q1.bhTs
+        lCur := peerM90.q1.l
+        lCurTs := peerM90.q1.lTs
+        blCur := peerM90.q1.bl
+        blCurTs := peerM90.q1.blTs
+        hPrev := peerSt.m90.prev1.h
+        hPrevTs := peerSt.m90.prev1.hTs
+        bhPrev := peerSt.m90.prev1.bh
+        bhPrevTs := peerSt.m90.prev1.bhTs
+        lPrev := peerSt.m90.prev1.l
+        lPrevTs := peerSt.m90.prev1.lTs
+        blPrev := peerSt.m90.prev1.bl
+        blPrevTs := peerSt.m90.prev1.blTs
+        qCur := peerM90.q1.boundaryTs
+    else if peerM90.inWindow and peerM90.curQuarterIndex == 2
+        hCur := peerM90.q2.h
+        hCurTs := peerM90.q2.hTs
+        bhCur := peerM90.q2.bh
+        bhCurTs := peerM90.q2.bhTs
+        lCur := peerM90.q2.l
+        lCurTs := peerM90.q2.lTs
+        blCur := peerM90.q2.bl
+        blCurTs := peerM90.q2.blTs
+        hPrev := peerM90.q1.h
+        hPrevTs := peerM90.q1.hTs
+        bhPrev := peerM90.q1.bh
+        bhPrevTs := peerM90.q1.bhTs
+        lPrev := peerM90.q1.l
+        lPrevTs := peerM90.q1.lTs
+        blPrev := peerM90.q1.bl
+        blPrevTs := peerM90.q1.blTs
+        qCur := peerM90.q2.boundaryTs
+    else if peerM90.inWindow and peerM90.curQuarterIndex == 3
+        hCur := peerM90.q3.h
+        hCurTs := peerM90.q3.hTs
+        bhCur := peerM90.q3.bh
+        bhCurTs := peerM90.q3.bhTs
+        lCur := peerM90.q3.l
+        lCurTs := peerM90.q3.lTs
+        blCur := peerM90.q3.bl
+        blCurTs := peerM90.q3.blTs
+        hPrev := peerM90.q2.h
+        hPrevTs := peerM90.q2.hTs
+        bhPrev := peerM90.q2.bh
+        bhPrevTs := peerM90.q2.bhTs
+        lPrev := peerM90.q2.l
+        lPrevTs := peerM90.q2.lTs
+        blPrev := peerM90.q2.bl
+        blPrevTs := peerM90.q2.blTs
+        qCur := peerM90.q3.boundaryTs
+    else if peerM90.inWindow and peerM90.curQuarterIndex == 4
+        hCur := peerM90.q4.h
+        hCurTs := peerM90.q4.hTs
+        bhCur := peerM90.q4.bh
+        bhCurTs := peerM90.q4.bhTs
+        lCur := peerM90.q4.l
+        lCurTs := peerM90.q4.lTs
+        blCur := peerM90.q4.bl
+        blCurTs := peerM90.q4.blTs
+        hPrev := peerM90.q3.h
+        hPrevTs := peerM90.q3.hTs
+        bhPrev := peerM90.q3.bh
+        bhPrevTs := peerM90.q3.bhTs
+        lPrev := peerM90.q3.l
+        lPrevTs := peerM90.q3.lTs
+        blPrev := peerM90.q3.bl
+        blPrevTs := peerM90.q3.blTs
+        qCur := peerM90.q4.boundaryTs
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
+
+f_ssmt_micro_highs_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+    [peerStNext, peerMicro] = qt.qt_micro_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    float hCur = na
+    int hCurTs = na
+    float hPrev = na
+    int hPrevTs = na
+    float bhCur = na
+    int bhCurTs = na
+    float bhPrev = na
+    int bhPrevTs = na
+    float lCur = na
+    int lCurTs = na
+    float lPrev = na
+    int lPrevTs = na
+    float blCur = na
+    int blCurTs = na
+    float blPrev = na
+    int blPrevTs = na
+    int qCur = na
+    if peerMicro.inWindow and peerMicro.curQuarterIndex == 1
+        hCur := peerMicro.q1.h
+        hCurTs := peerMicro.q1.hTs
+        bhCur := peerMicro.q1.bh
+        bhCurTs := peerMicro.q1.bhTs
+        lCur := peerMicro.q1.l
+        lCurTs := peerMicro.q1.lTs
+        blCur := peerMicro.q1.bl
+        blCurTs := peerMicro.q1.blTs
+        hPrev := peerSt.micro.prev1.h
+        hPrevTs := peerSt.micro.prev1.hTs
+        bhPrev := peerSt.micro.prev1.bh
+        bhPrevTs := peerSt.micro.prev1.bhTs
+        lPrev := peerSt.micro.prev1.l
+        lPrevTs := peerSt.micro.prev1.lTs
+        blPrev := peerSt.micro.prev1.bl
+        blPrevTs := peerSt.micro.prev1.blTs
+        qCur := peerMicro.q1.boundaryTs
+    else if peerMicro.inWindow and peerMicro.curQuarterIndex == 2
+        hCur := peerMicro.q2.h
+        hCurTs := peerMicro.q2.hTs
+        bhCur := peerMicro.q2.bh
+        bhCurTs := peerMicro.q2.bhTs
+        lCur := peerMicro.q2.l
+        lCurTs := peerMicro.q2.lTs
+        blCur := peerMicro.q2.bl
+        blCurTs := peerMicro.q2.blTs
+        hPrev := peerMicro.q1.h
+        hPrevTs := peerMicro.q1.hTs
+        bhPrev := peerMicro.q1.bh
+        bhPrevTs := peerMicro.q1.bhTs
+        lPrev := peerMicro.q1.l
+        lPrevTs := peerMicro.q1.lTs
+        blPrev := peerMicro.q1.bl
+        blPrevTs := peerMicro.q1.blTs
+        qCur := peerMicro.q2.boundaryTs
+    else if peerMicro.inWindow and peerMicro.curQuarterIndex == 3
+        hCur := peerMicro.q3.h
+        hCurTs := peerMicro.q3.hTs
+        bhCur := peerMicro.q3.bh
+        bhCurTs := peerMicro.q3.bhTs
+        lCur := peerMicro.q3.l
+        lCurTs := peerMicro.q3.lTs
+        blCur := peerMicro.q3.bl
+        blCurTs := peerMicro.q3.blTs
+        hPrev := peerMicro.q2.h
+        hPrevTs := peerMicro.q2.hTs
+        bhPrev := peerMicro.q2.bh
+        bhPrevTs := peerMicro.q2.bhTs
+        lPrev := peerMicro.q2.l
+        lPrevTs := peerMicro.q2.lTs
+        blPrev := peerMicro.q2.bl
+        blPrevTs := peerMicro.q2.blTs
+        qCur := peerMicro.q3.boundaryTs
+    else if peerMicro.inWindow and peerMicro.curQuarterIndex == 4
+        hCur := peerMicro.q4.h
+        hCurTs := peerMicro.q4.hTs
+        bhCur := peerMicro.q4.bh
+        bhCurTs := peerMicro.q4.bhTs
+        lCur := peerMicro.q4.l
+        lCurTs := peerMicro.q4.lTs
+        blCur := peerMicro.q4.bl
+        blCurTs := peerMicro.q4.blTs
+        hPrev := peerMicro.q3.h
+        hPrevTs := peerMicro.q3.hTs
+        bhPrev := peerMicro.q3.bh
+        bhPrevTs := peerMicro.q3.bhTs
+        lPrev := peerMicro.q3.l
+        lPrevTs := peerMicro.q3.lTs
+        blPrev := peerMicro.q3.bl
+        blPrevTs := peerMicro.q3.blTs
+        qCur := peerMicro.q4.boundaryTs
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
+
+f_ssmt_nano_highs_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+    [peerStNext, peerNano] = qt.qt_nano_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    float hCur = na
+    int hCurTs = na
+    float hPrev = na
+    int hPrevTs = na
+    float bhCur = na
+    int bhCurTs = na
+    float bhPrev = na
+    int bhPrevTs = na
+    float lCur = na
+    int lCurTs = na
+    float lPrev = na
+    int lPrevTs = na
+    float blCur = na
+    int blCurTs = na
+    float blPrev = na
+    int blPrevTs = na
+    int qCur = na
+    if peerNano.inWindow and peerNano.curQuarterIndex == 1
+        hCur := peerNano.q1.h
+        hCurTs := peerNano.q1.hTs
+        bhCur := peerNano.q1.bh
+        bhCurTs := peerNano.q1.bhTs
+        lCur := peerNano.q1.l
+        lCurTs := peerNano.q1.lTs
+        blCur := peerNano.q1.bl
+        blCurTs := peerNano.q1.blTs
+        hPrev := peerSt.nano.prev1.h
+        hPrevTs := peerSt.nano.prev1.hTs
+        bhPrev := peerSt.nano.prev1.bh
+        bhPrevTs := peerSt.nano.prev1.bhTs
+        lPrev := peerSt.nano.prev1.l
+        lPrevTs := peerSt.nano.prev1.lTs
+        blPrev := peerSt.nano.prev1.bl
+        blPrevTs := peerSt.nano.prev1.blTs
+        qCur := peerNano.q1.boundaryTs
+    else if peerNano.inWindow and peerNano.curQuarterIndex == 2
+        hCur := peerNano.q2.h
+        hCurTs := peerNano.q2.hTs
+        bhCur := peerNano.q2.bh
+        bhCurTs := peerNano.q2.bhTs
+        lCur := peerNano.q2.l
+        lCurTs := peerNano.q2.lTs
+        blCur := peerNano.q2.bl
+        blCurTs := peerNano.q2.blTs
+        hPrev := peerNano.q1.h
+        hPrevTs := peerNano.q1.hTs
+        bhPrev := peerNano.q1.bh
+        bhPrevTs := peerNano.q1.bhTs
+        lPrev := peerNano.q1.l
+        lPrevTs := peerNano.q1.lTs
+        blPrev := peerNano.q1.bl
+        blPrevTs := peerNano.q1.blTs
+        qCur := peerNano.q2.boundaryTs
+    else if peerNano.inWindow and peerNano.curQuarterIndex == 3
+        hCur := peerNano.q3.h
+        hCurTs := peerNano.q3.hTs
+        bhCur := peerNano.q3.bh
+        bhCurTs := peerNano.q3.bhTs
+        lCur := peerNano.q3.l
+        lCurTs := peerNano.q3.lTs
+        blCur := peerNano.q3.bl
+        blCurTs := peerNano.q3.blTs
+        hPrev := peerNano.q2.h
+        hPrevTs := peerNano.q2.hTs
+        bhPrev := peerNano.q2.bh
+        bhPrevTs := peerNano.q2.bhTs
+        lPrev := peerNano.q2.l
+        lPrevTs := peerNano.q2.lTs
+        blPrev := peerNano.q2.bl
+        blPrevTs := peerNano.q2.blTs
+        qCur := peerNano.q3.boundaryTs
+    else if peerNano.inWindow and peerNano.curQuarterIndex == 4
+        hCur := peerNano.q4.h
+        hCurTs := peerNano.q4.hTs
+        bhCur := peerNano.q4.bh
+        bhCurTs := peerNano.q4.bhTs
+        lCur := peerNano.q4.l
+        lCurTs := peerNano.q4.lTs
+        blCur := peerNano.q4.bl
+        blCurTs := peerNano.q4.blTs
+        hPrev := peerNano.q3.h
+        hPrevTs := peerNano.q3.hTs
+        bhPrev := peerNano.q3.bh
+        bhPrevTs := peerNano.q3.bhTs
+        lPrev := peerNano.q3.l
+        lPrevTs := peerNano.q3.lTs
+        blPrev := peerNano.q3.bl
+        blPrevTs := peerNano.q3.blTs
+        qCur := peerNano.q4.boundaryTs
+    [hCur, hCurTs, hPrev, hPrevTs, bhCur, bhCurTs, bhPrev, bhPrevTs, lCur, lCurTs, lPrev, lPrevTs, blCur, blCurTs, blPrev, blPrevTs, qCur]
+
+f_ssmt_peer_highs_expr(bool useNano, bool useM90, bool useMicro, bool useDaily, bool useMonthly) =>
+    if useNano
+        f_ssmt_nano_highs_expr()
+    else if useM90
+        f_ssmt_m90_highs_expr()
+    else if useMicro
+        f_ssmt_micro_highs_expr()
+    else if useDaily
+        f_ssmt_daily_highs_expr()
+    else if useMonthly
+        f_ssmt_monthly_highs_expr()
+    else
+        f_ssmt_weekly_highs_expr()
+
+f_set_or_make_line(line ln, int x1, float y1, int x2, float y2, color c, int w) =>
+    line out = ln
+    if na(out)
+        out := line.new(x1, y1, x2, y2, xloc=xloc.bar_time, extend=extend.none, style=line.style_solid, width=w, color=c)
+    else
+        line.set_xy1(out, x1, y1)
+        line.set_xy2(out, x2, y2)
+        line.set_extend(out, extend.none)
+        line.set_style(out, line.style_solid)
+        line.set_width(out, w)
+        line.set_color(out, c)
+    out
+
+f_ssmt_hist_push(line ln, label lb, line[] lines, label[] labels, int maxN) =>
+    if not na(ln) or not na(lb)
+        if maxN <= 0
+            if not na(ln)
+                line.delete(ln)
+            if not na(lb)
+                label.delete(lb)
+        else
+            array.push(lines, ln)
+            array.push(labels, lb)
+            while array.size(lines) > maxN
+                line oldLn = array.shift(lines)
+                if not na(oldLn)
+                    line.delete(oldLn)
+                label oldLb = array.shift(labels)
+                if not na(oldLb)
+                    label.delete(oldLb)
+    0
+
+f_ssmt_hist_trim(line[] lines, label[] labels, int maxN) =>
+    while array.size(lines) > maxN
+        line oldLn = array.shift(lines)
+        if not na(oldLn)
+            line.delete(oldLn)
+        label oldLb = array.shift(labels)
+        if not na(oldLb)
+            label.delete(oldLb)
+    while array.size(labels) > maxN
+        label oldLb = array.shift(labels)
+        if not na(oldLb)
+            label.delete(oldLb)
+    0
+
+f_ssmt_hist_clear(line[] lines, label[] labels) =>
+    while array.size(lines) > 0
+        line oldLn = array.shift(lines)
+        if not na(oldLn)
+            line.delete(oldLn)
+    while array.size(labels) > 0
+        label oldLb = array.shift(labels)
+        if not na(oldLb)
+            label.delete(oldLb)
+    0
+
+f_clear_all_ssmt_drawings() =>
+    while array.size(line.all) > 0
+        line.delete(array.get(line.all, array.size(line.all) - 1))
+    while array.size(label.all) > 0
+        label.delete(array.get(label.all, array.size(label.all) - 1))
+    0
+
+if barstate.isfirst
+    f_clear_all_ssmt_drawings()
+
+// ============================================================================
+// WEEKLY SCAN ENGINE (QTEngine-style shape: config + state + update result)
+// ============================================================================
+type WeeklyConfig
+    string tz
+    int    dayStartHour
+    int    dayStartMin
+    int    keepCycles
+
+type WeeklyState
+    int[]   starts
+    int[]   ends
+    float[] wo
+    float[] two
+    float[] three
+    float[] four
+    float[] five
+    int[]   woTs
+    int[]   twoTs
+    int[]   threeTs
+    int[]   fourTs
+    int[]   fiveTs
+    int     lastStartTs
+
+type WeeklyResult
+    int  startTs
+    int  endTs
+    bool startRealized
+    bool endRealized
+    int  q1Ts
+    int  q2Ts
+    int  q3Ts
+    int  q4Ts
+    int  q5Ts
+    bool q2Realized
+    bool q3Realized
+    bool q4Realized
+    bool q5Realized
+    float q1Open
+    float q2Open
+    float q3Open
+    float q4Open
+    float q5Open
+    int   q1OpenTs
+    int   q2OpenTs
+    int   q3OpenTs
+    int   q4OpenTs
+    int   q5OpenTs
+
+f_weekly_cfg_default() =>
+    WeeklyConfig.new(TZ, 18, 0, 400)
+
+f_weekly_state_new() =>
+    WeeklyState.new(
+        array.new_int(), array.new_int(),
+        array.new_float(), array.new_float(), array.new_float(), array.new_float(), array.new_float(),
+        array.new_int(), array.new_int(), array.new_int(), array.new_int(), array.new_int(),
+        int(na)
+    )
+
+f_weekly_result_empty() =>
+    WeeklyResult.new(
+        int(na), int(na),
+        false, false,
+        int(na), int(na), int(na), int(na), int(na),
+        false, false, false, false,
+        float(na), float(na), float(na), float(na), float(na),
+        int(na), int(na), int(na), int(na), int(na)
+    )
+
+f_qt_day_start_cfg(int t, WeeklyConfig cfg) =>
+    f_qt_day_start_raw(t, cfg.tz, cfg.dayStartHour, cfg.dayStartMin)
+
+f_next_ds_after_cfg(int t, WeeklyConfig cfg) =>
+    int ds0 = f_qt_day_start_cfg(t, cfg)
+    ds0 <= t ? ds0 + LEN_24H : ds0
+
+f_week_n(int[] startsIn, int[] endsIn, float[] woIn, float[] twoIn) =>
+    int nS = array.size(startsIn)
+    int nE = array.size(endsIn)
+    int nW = array.size(woIn)
+    int nT = array.size(twoIn)
+    int n0 = nS < nE ? nS : nE
+    int n1 = nW < nT ? nW : nT
+    n0 < n1 ? n0 : n1
+
+f_weekly_scan_update(
+    WeeklyState stIn,
+    WeeklyConfig cfg,
+    int t,
+    int tClose,
+    int wkStartTs,
+    int wkEndProjTs,
+    float wkOpen,
+    bool enabled
+) =>
+    int[] starts2 = array.copy(stIn.starts)
+    int[] ends2 = array.copy(stIn.ends)
+    float[] wo2 = array.copy(stIn.wo)
+    float[] two2 = array.copy(stIn.two)
+    float[] three2 = array.copy(stIn.three)
+    float[] four2 = array.copy(stIn.four)
+    float[] five2 = array.copy(stIn.five)
+    int[] woTs2 = array.copy(stIn.woTs)
+    int[] twoTs2 = array.copy(stIn.twoTs)
+    int[] threeTs2 = array.copy(stIn.threeTs)
+    int[] fourTs2 = array.copy(stIn.fourTs)
+    int[] fiveTs2 = array.copy(stIn.fiveTs)
+    int lastStart2 = stIn.lastStartTs
+
+    WeeklyResult res = f_weekly_result_empty()
+
+    if enabled and not na(wkStartTs)
+        bool cycleChanged = na(lastStart2) or wkStartTs != lastStart2
+
+        if cycleChanged
+            int nEnds = array.size(ends2)
+            if bar_index > 0 and nEnds > 0
+                array.set(ends2, nEnds - 1, time_close[1])
+
+            array.push(starts2, wkStartTs)
+            array.push(ends2, int(na))
+            array.push(wo2, wkOpen)
+            array.push(two2, float(na))
+            array.push(three2, float(na))
+            array.push(four2, float(na))
+            array.push(five2, float(na))
+            array.push(woTs2, wkStartTs)
+            array.push(twoTs2, int(na))
+            array.push(threeTs2, int(na))
+            array.push(fourTs2, int(na))
+            array.push(fiveTs2, int(na))
+            lastStart2 := wkStartTs
+
+            while array.size(starts2) > cfg.keepCycles
+                array.shift(starts2)
+                array.shift(ends2)
+                array.shift(wo2)
+                array.shift(two2)
+                array.shift(three2)
+                array.shift(four2)
+                array.shift(five2)
+                array.shift(woTs2)
+                array.shift(twoTs2)
+                array.shift(threeTs2)
+                array.shift(fourTs2)
+                array.shift(fiveTs2)
+        else
+            int nWo = array.size(wo2)
+            if nWo > 0
+                array.set(wo2, nWo - 1, wkOpen)
+                int woTsCur = array.get(woTs2, nWo - 1)
+                if na(woTsCur)
+                    array.set(woTs2, nWo - 1, wkStartTs)
+
+        int n = f_week_n(starts2, ends2, wo2, two2)
+        if n > 0
+            int curWs = array.get(starts2, n - 1)
+            int curQ2 = f_next_ds_after_cfg(curWs, cfg)
+
+            int curWeStored = array.get(ends2, n - 1)
+            int curWe = na(curWeStored) ? wkEndProjTs : curWeStored
+            int curQ3 = curQ2 + LEN_24H
+            int curQ4 = curQ3 + LEN_24H
+            int curQ5 = curQ4 + LEN_24H
+
+            [aOpen, aOpenTs, aBoundaryTs, aQi] = f_weekly_aligned_open_current(curWs, curQ2, curQ3, curQ4, curQ5, curWe)
+            if not na(aOpen) and not na(aBoundaryTs)
+                if aBoundaryTs == curWs
+                    array.set(wo2, n - 1, aOpen)
+                    array.set(woTs2, n - 1, na(aOpenTs) ? curWs : aOpenTs)
+                else if aBoundaryTs == curQ2
+                    float curTwoOpen = array.get(two2, n - 1)
+                    if na(curTwoOpen)
+                        array.set(two2, n - 1, aOpen)
+                        array.set(twoTs2, n - 1, na(aOpenTs) ? curQ2 : aOpenTs)
+                else if aBoundaryTs == curQ3
+                    float curThree = array.get(three2, n - 1)
+                    if na(curThree)
+                        array.set(three2, n - 1, aOpen)
+                        array.set(threeTs2, n - 1, na(aOpenTs) ? curQ3 : aOpenTs)
+                else if aBoundaryTs == curQ4
+                    float curFour = array.get(four2, n - 1)
+                    if na(curFour)
+                        array.set(four2, n - 1, aOpen)
+                        array.set(fourTs2, n - 1, na(aOpenTs) ? curQ4 : aOpenTs)
+                else if aBoundaryTs == curQ5
+                    float curFive = array.get(five2, n - 1)
+                    if na(curFive)
+                        array.set(five2, n - 1, aOpen)
+                        array.set(fiveTs2, n - 1, na(aOpenTs) ? curQ5 : aOpenTs)
+
+            float q1Open = array.get(wo2, n - 1)
+            float q2Open = array.get(two2, n - 1)
+            float q3Open = array.get(three2, n - 1)
+            float q4Open = array.get(four2, n - 1)
+            float q5Open = array.get(five2, n - 1)
+            int q1OpenTs = array.get(woTs2, n - 1)
+            int q2OpenTs = array.get(twoTs2, n - 1)
+            int q3OpenTs = array.get(threeTs2, n - 1)
+            int q4OpenTs = array.get(fourTs2, n - 1)
+            int q5OpenTs = array.get(fiveTs2, n - 1)
+
+            res := WeeklyResult.new(
+                curWs,
+                curWe,
+                tClose > curWs,
+                tClose > curWe,
+                curWs,
+                curQ2,
+                curQ3,
+                curQ4,
+                curQ5,
+                tClose > curQ2,
+                tClose > curQ3,
+                tClose > curQ4,
+                tClose > curQ5,
+                q1Open,
+                q2Open,
+                q3Open,
+                q4Open,
+                q5Open,
+                q1OpenTs,
+                q2OpenTs,
+                q3OpenTs,
+                q4OpenTs,
+                q5OpenTs
+            )
+
+    WeeklyState stOut = WeeklyState.new(starts2, ends2, wo2, two2, three2, four2, five2, woTs2, twoTs2, threeTs2, fourTs2, fiveTs2, lastStart2)
+    [stOut, res]
+
+// ============================================================================
+// STORAGE (vertical + horizontal sets)
+// ============================================================================
+type vset
+    line[] ln
+    int[]  ts
+
+vset_new() =>
+    vset.new(array.new_line(), array.new_int())
+
+vset_clear(vset s) =>
+    int i = s.ln.size() - 1
+    while i >= 0
+        line.delete(s.ln.get(i))
+        i -= 1
+    s.ln.clear()
+    s.ts.clear()
+    0
+
+vset_trim_since(vset s, int cutoff) =>
+    int i = s.ts.size() - 1
+    while i >= 0
+        if s.ts.get(i) < cutoff
+            line.delete(s.ln.get(i))
+            array.remove(s.ln, i)
+            array.remove(s.ts, i)
+        i -= 1
+    0
+
+vset_has(vset s, int ts) =>
+    bool found = false
+    int i = s.ts.size() - 1
+    while i >= 0 and not found
+        found := s.ts.get(i) == ts
+        i -= 1
+    found
+
+vset_add(vset s, int ts, color c) =>
+    if not vset_has(s, ts)
+        s.ln.push(line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c)))
+        s.ts.push(ts)
+    0
+
+type hset
+    line[] ln
+    int[]  st
+
+hset_new() =>
+    hset.new(array.new_line(), array.new_int())
+
+hset_clear(hset s) =>
+    int i = s.ln.size() - 1
+    while i >= 0
+        line.delete(s.ln.get(i))
+        i -= 1
+    s.ln.clear()
+    s.st.clear()
+    0
+
+hset_trim_since(hset s, int cutoff) =>
+    int i = s.st.size() - 1
+    while i >= 0
+        if s.st.get(i) < cutoff
+            line.delete(s.ln.get(i))
+            array.remove(s.ln, i)
+            array.remove(s.st, i)
+        i -= 1
+    0
+
+hset_has(hset s, int st) =>
+    bool found = false
+    int i = s.st.size() - 1
+    while i >= 0 and not found
+        found := s.st.get(i) == st
+        i -= 1
+    found
+
+hset_add(hset s, int st, int et, float y, color c, string styleStr) =>
+    if not hset_has(s, st)
+        s.ln.push(line.new(st, y, et, y, xloc=xloc.bar_time, extend=extend.none, style=lineStyleFrom(styleStr), width=1, color=c))
+        s.st.push(st)
+    0
+
+hset_sync(hset s, color c, string styleStr) =>
+    int i = s.ln.size() - 1
+    while i >= 0
+        line ln = s.ln.get(i)
+        if not na(ln)
+            line.set_color(ln, c)
+            line.set_style(ln, lineStyleFrom(styleStr))
+            line.set_width(ln, 1)
+        i -= 1
+    0
+
+// ============================================================================
+// PROJECTION HELPERS
+// ============================================================================
+f_set_or_make_vline(line ln, int ts, color c) =>
+    line out = ln
+    if na(out)
+        out := line.new(ts, low, ts, high, xloc=xloc.bar_time, extend=extend.both, style=line.style_solid, width=1, color=f_vcol(c))
+    else
+        line.set_xy1(out, ts, low)
+        line.set_xy2(out, ts, high)
+        line.set_style(out, line.style_solid)
+        line.set_width(out, 1)
+        line.set_color(out, f_vcol(c))
+    out
+
+
+f_set_or_make_hline_w_style(line ln, int x1, int x2, float y, color c, int w, string styleStr) =>
+    line out = ln
+    if na(out)
+        out := line.new(x1, y, x2, y, xloc=xloc.bar_time, extend=extend.none, style=lineStyleFrom(styleStr), width=w, color=c)
+    else
+        line.set_xy1(out, x1, y)
+        line.set_xy2(out, x2, y)
+        line.set_extend(out, extend.none)
+        line.set_style(out, lineStyleFrom(styleStr))
+        line.set_width(out, w)
+        line.set_color(out, c)
+    out
+
+f_kill(line ln) =>
+    line out = na
+    if not na(ln)
+        line.delete(ln)
+    out
+
+
+f_week_inputs_from_engine(int[] startsIn, int curEnd, float curQ1Open, float curQ2Open) =>
+    int[] starts = array.copy(startsIn)
+    int[] ends = array.new_int()
+    float[] wo = array.new_float()
+    float[] two = array.new_float()
+
+    int n = array.size(starts)
+    if n > 0
+        int i = 0
+        while i < n
+            int endTs = i < (n - 1) ? array.get(starts, i + 1) : curEnd
+            array.push(ends, endTs)
+            array.push(wo, float(na))
+            array.push(two, float(na))
+            i += 1
+        array.set(wo, n - 1, curQ1Open)
+        array.set(two, n - 1, curQ2Open)
+
+    [starts, ends, wo, two]
+
+// ============================================================================
+// FIXED CYCLE RUNNER (Daily / m90 / Micro / Nano)
+// ============================================================================
+run_fixed_cycle(
+    int[]   startsIn,
+    int[]   endsIn,
+    float[] woIn,
+    float[] twoIn,
+    int     endProj,
+    int     curQ2Ts,
+    int     curQ3Ts,
+    int     curQ4Ts,
+    bool    curQ2Realized,
+    bool    curQ3Realized,
+    bool    curQ4Realized,
+    float   curQ3Open,
+    float   curQ4Open,
+    int     keepN,
+    vset    v,
+    hset    hWO,
+    hset    hTWO,
+    hset    hQ3,
+    hset    hQ4,
+    line    projQ2,
+    line    projQ3,
+    line    projQ4,
+    line    projEnd
+) =>
+    line p2 = projQ2
+    line p3 = projQ3
+    line p4 = projQ4
+    line pE = projEnd
+
+    int nS = startsIn.size()
+    int nE = endsIn.size()
+    int nW = woIn.size()
+    int nT = twoIn.size()
+    int n0 = nS < nE ? nS : nE
+    int n1 = nW < nT ? nW : nT
+    int n  = n0 < n1 ? n0 : n1
+
+    if n <= 0
+        p2 := f_kill(p2)
+        p3 := f_kill(p3)
+        p4 := f_kill(p4)
+        pE := f_kill(pE)
+        line[] out0 = array.new_line()
+        array.push(out0, p2)
+        array.push(out0, p3)
+        array.push(out0, p4)
+        array.push(out0, pE)
+        out0
+    else
+        int first = math.max(0, n - keepN)
+        int cut   = startsIn.get(first)
+
+        vset_trim_since(v, cut)
+        if showOpens
+            hset_trim_since(hWO, cut)
+            hset_trim_since(hTWO, cut)
+            hset_trim_since(hQ3, cut)
+            hset_trim_since(hQ4, cut)
+
+        int i = first
+        while i < n
+            int s = startsIn.get(i)
+            int eStored = endsIn.get(i)
+            int e = na(eStored) ? endProj : eStored
+            bool isCur = i == (n - 1)
+
+            if s >= cut and time_close > s
+                vset_add(v, s, COL_Q1)
+
+            if isCur
+                if curQ2Realized and not na(curQ2Ts) and curQ2Ts >= cut and curQ2Ts < e
+                    vset_add(v, curQ2Ts, COL_Q2)
+                if curQ3Realized and not na(curQ3Ts) and curQ3Ts >= cut and curQ3Ts < e
+                    vset_add(v, curQ3Ts, COL_Q3)
+                if curQ4Realized and not na(curQ4Ts) and curQ4Ts >= cut and curQ4Ts < e
+                    vset_add(v, curQ4Ts, COL_Q4)
+
+            if not na(eStored) and eStored >= cut and time_close > eStored
+                vset_add(v, eStored, COL_Q1)
+
+            if showOpens
+                float wo = woIn.get(i)
+                if not na(wo) and time_close > s
+                    hset_add(hWO, s, e, wo, q1OpenCol, openStyleStr)
+
+                float twoO = twoIn.get(i)
+                if isCur and not na(twoO) and not na(curQ2Ts) and time_close > curQ2Ts
+                    hset_add(hTWO, curQ2Ts, e, twoO, trueOpenCol, openStyleStr)
+
+                if isCur and curQ3Realized and not na(curQ3Open) and not na(curQ3Ts) and not na(curQ4Ts) and curQ4Ts > curQ3Ts and time_close > curQ3Ts
+                    hset_add(hQ3, curQ3Ts, curQ4Ts, curQ3Open, q3OpenCol, openStyleStr)
+
+                if isCur and curQ4Realized and not na(curQ4Open) and not na(curQ4Ts) and e > curQ4Ts and time_close > curQ4Ts
+                    hset_add(hQ4, curQ4Ts, e, curQ4Open, q4OpenCol, openStyleStr)
+
+            i += 1
+
+        if showOpens
+            hset_sync(hWO, q1OpenCol, openStyleStr)
+            hset_sync(hTWO, trueOpenCol, openStyleStr)
+            hset_sync(hQ3, q3OpenCol, openStyleStr)
+            hset_sync(hQ4, q4OpenCol, openStyleStr)
+
+        if not na(curQ2Ts) and not curQ2Realized and time_close <= curQ2Ts
+            p2 := f_set_or_make_vline(p2, curQ2Ts, COL_Q2)
+        else
+            p2 := f_kill(p2)
+
+        if not na(curQ3Ts) and not curQ3Realized and time_close <= curQ3Ts
+            p3 := f_set_or_make_vline(p3, curQ3Ts, COL_Q3)
+        else
+            p3 := f_kill(p3)
+
+        if not na(curQ4Ts) and not curQ4Realized and time_close <= curQ4Ts
+            p4 := f_set_or_make_vline(p4, curQ4Ts, COL_Q4)
+        else
+            p4 := f_kill(p4)
+
+        pE := f_set_or_make_vline(pE, endProj, COL_Q1)
+
+        line[] out = array.new_line()
+        array.push(out, p2)
+        array.push(out, p3)
+        array.push(out, p4)
+        array.push(out, pE)
+        out
+
+// ============================================================================
+// WEEKLY CYCLE RUNNER
+// ============================================================================
+run_week_cycle(
+    int[]   wkStarts,
+    int[]   wkEnds,
+    float[] wkWo,
+    float[] wkTwo,
+    int     wEndProj,
+    int     curQ2Ts,
+    int     curQ3Ts,
+    int     curQ4Ts,
+    int     curQ5Ts,
+    bool    showWeekendDividers,
+    bool    curQ2Realized,
+    bool    curQ3Realized,
+    bool    curQ4Realized,
+    bool    curQ5Realized,
+    float   curQ3Open,
+    float   curQ4Open,
+    float   curQ5Open,
+    int     keepWeeks,
+    vset    v,
+    hset    hWO,
+    hset    hTWO,
+    hset    hQ3,
+    hset    hQ4,
+    hset    hQ5,
+    hset    hFri,
+    hset    hSat,
+    line    projQ2,
+    line    projQ3,
+    line    projQ4,
+    line    projQ5,
+    line    projFri,
+    line    projSat,
+    line    projEnd
+) =>
+    line p2  = projQ2
+    line p3  = projQ3
+    line p4  = projQ4
+    line p5  = projQ5
+    line pF  = projFri
+    line pSa = projSat
+    line pE  = projEnd
+
+    int curFriTs = showWeekendDividers and not na(curQ5Ts) ? curQ5Ts + LEN_24H : int(na)
+    int curSatTs = showWeekendDividers and not na(curQ5Ts) ? curQ5Ts + 2 * LEN_24H : int(na)
+    bool hitFriOpen = not na(curFriTs) and time >= curFriTs and (na(time[1]) or time[1] < curFriTs)
+    bool hitSatOpen = not na(curSatTs) and time >= curSatTs and (na(time[1]) or time[1] < curSatTs)
+    float curFriOpenRaw = ta.valuewhen(hitFriOpen, open, 0)
+    float curSatOpenRaw = ta.valuewhen(hitSatOpen, open, 0)
+    float curFriOpen = showWeekendDividers and not na(curFriTs) ? curFriOpenRaw : float(na)
+    float curSatOpen = showWeekendDividers and not na(curSatTs) ? curSatOpenRaw : float(na)
+
+    int nS = wkStarts.size()
+    int nE = wkEnds.size()
+    int nW = wkWo.size()
+    int nT = wkTwo.size()
+    int n0 = nS < nE ? nS : nE
+    int n1 = nW < nT ? nW : nT
+    int n  = n0 < n1 ? n0 : n1
+
+    if n <= 0
+        p2 := f_kill(p2)
+        p3 := f_kill(p3)
+        p4 := f_kill(p4)
+        p5 := f_kill(p5)
+        pF := f_kill(pF)
+        pSa := f_kill(pSa)
+        pE := f_kill(pE)
+        line[] out0 = array.new_line()
+        array.push(out0, p2)
+        array.push(out0, p3)
+        array.push(out0, p4)
+        array.push(out0, p5)
+        array.push(out0, pF)
+        array.push(out0, pSa)
+        array.push(out0, pE)
+        out0
+    else
+        int first = math.max(0, n - keepWeeks)
+        int cut   = wkStarts.get(first)
+
+        vset_trim_since(v, cut)
+        if showOpens
+            hset_trim_since(hWO, cut)
+            hset_trim_since(hTWO, cut)
+            hset_trim_since(hQ3, cut)
+            hset_trim_since(hQ4, cut)
+            hset_trim_since(hQ5, cut)
+            hset_trim_since(hFri, cut)
+            hset_trim_since(hSat, cut)
+
+        int i = first
+        while i < n
+            int wS = wkStarts.get(i)
+            int wEStored = wkEnds.get(i)
+            int wE = na(wEStored) ? wEndProj : wEStored
+            bool isCurWeek = i == (n - 1)
+
+            if wS >= cut and time_close > wS
+                vset_add(v, wS, COL_Q1)
+
+            if isCurWeek
+                if curQ2Realized and not na(curQ2Ts) and curQ2Ts >= cut and curQ2Ts < wE
+                    vset_add(v, curQ2Ts, COL_Q2)
+                if curQ3Realized and not na(curQ3Ts) and curQ3Ts >= cut and curQ3Ts < wE
+                    vset_add(v, curQ3Ts, COL_Q3)
+                if curQ4Realized and not na(curQ4Ts) and curQ4Ts >= cut and curQ4Ts < wE
+                    vset_add(v, curQ4Ts, COL_Q4)
+                if curQ5Realized and not na(curQ5Ts) and curQ5Ts >= cut and curQ5Ts < wE
+                    vset_add(v, curQ5Ts, COL_Q5)
+                if showWeekendDividers and not na(curFriTs) and curFriTs >= cut and curFriTs < wE and time_close > curFriTs
+                    vset_add(v, curFriTs, COL_Q1)
+                if showWeekendDividers and not na(curSatTs) and curSatTs >= cut and curSatTs < wE and time_close > curSatTs
+                    vset_add(v, curSatTs, COL_Q1)
+
+            if not na(wEStored) and wEStored >= cut and time_close > wEStored
+                vset_add(v, wEStored, COL_Q1)
+
+            if showOpens
+                float wo = wkWo.get(i)
+                if not na(wo) and time_close > wS
+                    hset_add(hWO, wS, wE, wo, q1OpenCol, openStyleStr)
+
+                float twoO = wkTwo.get(i)
+                if isCurWeek and not na(twoO) and not na(curQ2Ts) and time_close > curQ2Ts
+                    hset_add(hTWO, curQ2Ts, wE, twoO, trueOpenCol, openStyleStr)
+
+                if isCurWeek and curQ3Realized and not na(curQ3Open) and not na(curQ3Ts) and not na(curQ4Ts) and curQ4Ts > curQ3Ts and time_close > curQ3Ts
+                    hset_add(hQ3, curQ3Ts, curQ4Ts, curQ3Open, q3OpenCol, openStyleStr)
+
+                int q4End = not na(curQ5Ts) and not na(curQ4Ts) and curQ5Ts > curQ4Ts ? curQ5Ts : wE
+                if isCurWeek and curQ4Realized and not na(curQ4Open) and not na(curQ4Ts) and q4End > curQ4Ts and time_close > curQ4Ts
+                    hset_add(hQ4, curQ4Ts, q4End, curQ4Open, q4OpenCol, openStyleStr)
+
+                if isCurWeek and curQ5Realized and not na(curQ5Open) and not na(curQ5Ts) and wE > curQ5Ts and time_close > curQ5Ts
+                    hset_add(hQ5, curQ5Ts, wE, curQ5Open, q5OpenCol, openStyleStr)
+
+                if isCurWeek and showWeekendDividers and not na(curFriOpen) and not na(curFriTs) and not na(curSatTs) and curSatTs > curFriTs and time_close > curFriTs
+                    hset_add(hFri, curFriTs, curSatTs, curFriOpen, q5OpenCol, openStyleStr)
+
+                if isCurWeek and showWeekendDividers and not na(curSatOpen) and not na(curSatTs) and wE > curSatTs and time_close > curSatTs
+                    hset_add(hSat, curSatTs, wE, curSatOpen, q5OpenCol, openStyleStr)
+
+            i += 1
+
+        if showOpens
+            hset_sync(hWO, q1OpenCol, openStyleStr)
+            hset_sync(hTWO, trueOpenCol, openStyleStr)
+            hset_sync(hQ3, q3OpenCol, openStyleStr)
+            hset_sync(hQ4, q4OpenCol, openStyleStr)
+            hset_sync(hQ5, q5OpenCol, openStyleStr)
+            hset_sync(hFri, q5OpenCol, openStyleStr)
+            hset_sync(hSat, q5OpenCol, openStyleStr)
+
+        if not na(curQ2Ts) and not curQ2Realized and time_close <= curQ2Ts
+            p2 := f_set_or_make_vline(p2, curQ2Ts, COL_Q2)
+        else
+            p2 := f_kill(p2)
+
+        if not na(curQ3Ts) and not curQ3Realized and time_close <= curQ3Ts
+            p3 := f_set_or_make_vline(p3, curQ3Ts, COL_Q3)
+        else
+            p3 := f_kill(p3)
+
+        if not na(curQ4Ts) and not curQ4Realized and time_close <= curQ4Ts
+            p4 := f_set_or_make_vline(p4, curQ4Ts, COL_Q4)
+        else
+            p4 := f_kill(p4)
+
+        if not na(curQ5Ts) and not curQ5Realized and time_close <= curQ5Ts
+            p5 := f_set_or_make_vline(p5, curQ5Ts, COL_Q5)
+        else
+            p5 := f_kill(p5)
+
+        if showWeekendDividers and not na(curFriTs) and time_close <= curFriTs
+            pF := f_set_or_make_vline(pF, curFriTs, COL_Q1)
+        else
+            pF := f_kill(pF)
+
+        if showWeekendDividers and not na(curSatTs) and time_close <= curSatTs
+            pSa := f_set_or_make_vline(pSa, curSatTs, COL_Q1)
+        else
+            pSa := f_kill(pSa)
+
+        pE := f_set_or_make_vline(pE, wEndProj, COL_Q1)
+
+        line[] out = array.new_line()
+        array.push(out, p2)
+        array.push(out, p3)
+        array.push(out, p4)
+        array.push(out, p5)
+        array.push(out, pF)
+        array.push(out, pSa)
+        array.push(out, pE)
+        out
+
+// ============================================================================
+// TIMEFRAME GATING
+// ============================================================================
+bool tf_s5  = timeframe.isseconds and timeframe.multiplier == 5
+bool tf_s15 = timeframe.isseconds and timeframe.multiplier == 15
+bool tf_s30 = timeframe.isseconds and timeframe.multiplier == 30
+bool tf_m1  = timeframe.isminutes and timeframe.multiplier == 1
+bool tf_m5  = timeframe.isminutes and timeframe.multiplier == 5
+bool tf_m15 = timeframe.isminutes and timeframe.multiplier == 15
+bool tf_h4  = timeframe.isminutes and timeframe.multiplier == 240
+bool tf_h1  = timeframe.isminutes and timeframe.multiplier == 60
+
+// Aligned cycle TFs used for gating as fixed-cycle logic is integrated.
+bool nanoAlignedTf   = timeframe.isintraday and (tf_s5 or tf_s15)
+bool microAlignedTf  = timeframe.isintraday and (tf_s30 or tf_m1)
+bool m90AlignedTf    = timeframe.isintraday and tf_m5
+bool dailyAlignedTf  = timeframe.isintraday and tf_m15
+bool weeklyAlignedTf = timeframe.isintraday and tf_h1
+bool monthlyAlignedTf = timeframe.isintraday and tf_h4
+
+bool nanoLive   = useNano and nanoAlignedTf
+bool microLive  = useMicro and microAlignedTf
+bool m90Live    = useM90 and m90AlignedTf
+bool dailyLive  = useDaily and dailyAlignedTf
+bool weeklyLive = useWeekly and weeklyAlignedTf
+bool monthlyLive = useMonthly and monthlyAlignedTf
+
+
+// ============================================================================
+// WEEKLY CYCLE
+// ============================================================================
+var vset dayV      = vset_new()
+var hset dayHWO    = hset_new()
+var hset dayHTWO   = hset_new()
+var hset dayHQ3    = hset_new()
+var hset dayHQ4    = hset_new()
+var line dayProjQ2 = na
+var line dayProjQ3 = na
+var line dayProjQ4 = na
+var line dayProjEnd = na
+
+var vset m90V      = vset_new()
+var hset m90HWO    = hset_new()
+var hset m90HTWO   = hset_new()
+var hset m90HQ3    = hset_new()
+var hset m90HQ4    = hset_new()
+var line m90ProjQ2 = na
+var line m90ProjQ3 = na
+var line m90ProjQ4 = na
+var line m90ProjEnd = na
+
+var vset microV      = vset_new()
+var hset microHWO    = hset_new()
+var hset microHTWO   = hset_new()
+var hset microHQ3    = hset_new()
+var hset microHQ4    = hset_new()
+var line microProjQ2 = na
+var line microProjQ3 = na
+var line microProjQ4 = na
+var line microProjEnd = na
+
+var vset nanoV      = vset_new()
+var hset nanoHWO    = hset_new()
+var hset nanoHTWO   = hset_new()
+var hset nanoHQ3    = hset_new()
+var hset nanoHQ4    = hset_new()
+var line nanoProjQ2 = na
+var line nanoProjQ3 = na
+var line nanoProjQ4 = na
+var line nanoProjEnd = na
+
+var vset weekV     = vset_new()
+var hset weekHWO   = hset_new()
+var hset weekHTWO  = hset_new()
+var hset weekHQ3   = hset_new()
+var hset weekHQ4   = hset_new()
+var hset weekHQ5   = hset_new()
+var hset weekHFri  = hset_new()
+var hset weekHSat  = hset_new()
+
+var line weekProjQ2  = na
+var line weekProjQ3  = na
+var line weekProjQ4  = na
+var line weekProjQ5  = na
+var line weekProjFri = na
+var line weekProjSat = na
+var line weekProjEnd = na
+
+var vset monthV    = vset_new()
+var hset monthHWO  = hset_new()
+var hset monthHTWO = hset_new()
+var hset monthHQ3  = hset_new()
+var hset monthHQ4  = hset_new()
+var hset monthHQ5  = hset_new()
+var hset monthHFri = hset_new()
+var hset monthHSat = hset_new()
+
+var line monthProjQ2  = na
+var line monthProjQ3  = na
+var line monthProjQ4  = na
+var line monthProjQ5  = na
+var line monthProjFri = na
+var line monthProjSat = na
+var line monthProjEnd = na
+
+var qt.QTConfig   qtCfg = qt.qt_config_default()
+var qt.CycleState qtSt  = qt.qt_state_new()
+
+qt.CycleState stWork = qtSt
+qt.CycleResult dayCycle = na
+qt.CycleResult m90Cycle = na
+qt.CycleResult microCycle = na
+qt.CycleResult nanoCycle = na
+qt.CycleResult wkCycle = na
+qt.CycleResult moCycle = na
+
+if dailyLive
+    [stD, dRes] = qt.qt_daily_update(stWork, qtCfg, time, time_close)
+    stWork := stD
+    dayCycle := dRes
+if m90Live
+    [stM, mRes] = qt.qt_m90_update(stWork, qtCfg, time, time_close)
+    stWork := stM
+    m90Cycle := mRes
+if microLive
+    [stU, uRes] = qt.qt_micro_update(stWork, qtCfg, time, time_close)
+    stWork := stU
+    microCycle := uRes
+if nanoLive
+    [stN, nRes] = qt.qt_nano_update(stWork, qtCfg, time, time_close)
+    stWork := stN
+    nanoCycle := nRes
+if weeklyLive
+    [stW, wRes] = qt.qt_weekly_update(stWork, qtCfg, time, time_close)
+    stWork := stW
+    wkCycle := wRes
+if monthlyLive
+    [stMo, moRes] = qt.qt_monthly_update(stWork, qtCfg, time, time_close)
+    stWork := stMo
+    moCycle := moRes
+
+qtSt := stWork
+
+int dayEndPrj = int(na)
+int m90EndPrj = int(na)
+int microEndPrj = int(na)
+int nanoEndPrj = int(na)
+int wkEndPrj = int(na)
+int moEndPrj = int(na)
+if dailyLive
+    dayEndPrj := dayCycle.endTs
+if m90Live
+    m90EndPrj := m90Cycle.endTs
+if microLive
+    microEndPrj := microCycle.endTs
+if nanoLive
+    nanoEndPrj := nanoCycle.endTs
+if weeklyLive
+    wkEndPrj := wkCycle.endTs
+if monthlyLive
+    moEndPrj := moCycle.endTs
+
+
+if not dailyLive
+    if dayV.ln.size() > 0
+        vset_clear(dayV)
+    if dayHWO.ln.size() > 0
+        hset_clear(dayHWO)
+    if dayHTWO.ln.size() > 0
+        hset_clear(dayHTWO)
+    if dayHQ3.ln.size() > 0
+        hset_clear(dayHQ3)
+    if dayHQ4.ln.size() > 0
+        hset_clear(dayHQ4)
+    dayProjQ2  := f_kill(dayProjQ2)
+    dayProjQ3  := f_kill(dayProjQ3)
+    dayProjQ4  := f_kill(dayProjQ4)
+    dayProjEnd := f_kill(dayProjEnd)
+else
+    [dStartsRun, dEndsRun, dWoRun, dTwoRun] = f_week_inputs_from_engine(qtSt.daily.starts, dayCycle.endTs, dayCycle.q1.o, dayCycle.q2.o)
+    line[] dProjs = run_fixed_cycle(
+        dStartsRun,
+        dEndsRun,
+        dWoRun,
+        dTwoRun,
+        dayEndPrj,
+        dayCycle.q2.boundaryTs,
+        dayCycle.q3.boundaryTs,
+        dayCycle.q4.boundaryTs,
+        dayCycle.q2Realized,
+        dayCycle.q3Realized,
+        dayCycle.q4Realized,
+        dayCycle.q3.o,
+        dayCycle.q4.o,
+        keepCycles,
+        dayV,
+        dayHWO,
+        dayHTWO,
+        dayHQ3,
+        dayHQ4,
+        dayProjQ2,
+        dayProjQ3,
+        dayProjQ4,
+        dayProjEnd
+    )
+    dayProjQ2  := array.get(dProjs, 0)
+    dayProjQ3  := array.get(dProjs, 1)
+    dayProjQ4  := array.get(dProjs, 2)
+    dayProjEnd := array.get(dProjs, 3)
+
+if not m90Live
+    if m90V.ln.size() > 0
+        vset_clear(m90V)
+    if m90HWO.ln.size() > 0
+        hset_clear(m90HWO)
+    if m90HTWO.ln.size() > 0
+        hset_clear(m90HTWO)
+    if m90HQ3.ln.size() > 0
+        hset_clear(m90HQ3)
+    if m90HQ4.ln.size() > 0
+        hset_clear(m90HQ4)
+    m90ProjQ2  := f_kill(m90ProjQ2)
+    m90ProjQ3  := f_kill(m90ProjQ3)
+    m90ProjQ4  := f_kill(m90ProjQ4)
+    m90ProjEnd := f_kill(m90ProjEnd)
+else
+    [m90StartsRun, m90EndsRun, m90WoRun, m90TwoRun] = f_week_inputs_from_engine(qtSt.m90.starts, m90Cycle.endTs, m90Cycle.q1.o, m90Cycle.q2.o)
+    line[] m90Projs = run_fixed_cycle(
+        m90StartsRun,
+        m90EndsRun,
+        m90WoRun,
+        m90TwoRun,
+        m90EndPrj,
+        m90Cycle.q2.boundaryTs,
+        m90Cycle.q3.boundaryTs,
+        m90Cycle.q4.boundaryTs,
+        m90Cycle.q2Realized,
+        m90Cycle.q3Realized,
+        m90Cycle.q4Realized,
+        m90Cycle.q3.o,
+        m90Cycle.q4.o,
+        keepCycles,
+        m90V,
+        m90HWO,
+        m90HTWO,
+        m90HQ3,
+        m90HQ4,
+        m90ProjQ2,
+        m90ProjQ3,
+        m90ProjQ4,
+        m90ProjEnd
+    )
+    m90ProjQ2  := array.get(m90Projs, 0)
+    m90ProjQ3  := array.get(m90Projs, 1)
+    m90ProjQ4  := array.get(m90Projs, 2)
+    m90ProjEnd := array.get(m90Projs, 3)
+
+if not microLive
+    if microV.ln.size() > 0
+        vset_clear(microV)
+    if microHWO.ln.size() > 0
+        hset_clear(microHWO)
+    if microHTWO.ln.size() > 0
+        hset_clear(microHTWO)
+    if microHQ3.ln.size() > 0
+        hset_clear(microHQ3)
+    if microHQ4.ln.size() > 0
+        hset_clear(microHQ4)
+    microProjQ2  := f_kill(microProjQ2)
+    microProjQ3  := f_kill(microProjQ3)
+    microProjQ4  := f_kill(microProjQ4)
+    microProjEnd := f_kill(microProjEnd)
+else
+    [microStartsRun, microEndsRun, microWoRun, microTwoRun] = f_week_inputs_from_engine(qtSt.micro.starts, microCycle.endTs, microCycle.q1.o, microCycle.q2.o)
+    line[] microProjs = run_fixed_cycle(
+        microStartsRun,
+        microEndsRun,
+        microWoRun,
+        microTwoRun,
+        microEndPrj,
+        microCycle.q2.boundaryTs,
+        microCycle.q3.boundaryTs,
+        microCycle.q4.boundaryTs,
+        microCycle.q2Realized,
+        microCycle.q3Realized,
+        microCycle.q4Realized,
+        microCycle.q3.o,
+        microCycle.q4.o,
+        keepCycles,
+        microV,
+        microHWO,
+        microHTWO,
+        microHQ3,
+        microHQ4,
+        microProjQ2,
+        microProjQ3,
+        microProjQ4,
+        microProjEnd
+    )
+    microProjQ2  := array.get(microProjs, 0)
+    microProjQ3  := array.get(microProjs, 1)
+    microProjQ4  := array.get(microProjs, 2)
+    microProjEnd := array.get(microProjs, 3)
+
+if not nanoLive
+    if nanoV.ln.size() > 0
+        vset_clear(nanoV)
+    if nanoHWO.ln.size() > 0
+        hset_clear(nanoHWO)
+    if nanoHTWO.ln.size() > 0
+        hset_clear(nanoHTWO)
+    if nanoHQ3.ln.size() > 0
+        hset_clear(nanoHQ3)
+    if nanoHQ4.ln.size() > 0
+        hset_clear(nanoHQ4)
+    nanoProjQ2  := f_kill(nanoProjQ2)
+    nanoProjQ3  := f_kill(nanoProjQ3)
+    nanoProjQ4  := f_kill(nanoProjQ4)
+    nanoProjEnd := f_kill(nanoProjEnd)
+else
+    [nanoStartsRun, nanoEndsRun, nanoWoRun, nanoTwoRun] = f_week_inputs_from_engine(qtSt.nano.starts, nanoCycle.endTs, nanoCycle.q1.o, nanoCycle.q2.o)
+    line[] nanoProjs = run_fixed_cycle(
+        nanoStartsRun,
+        nanoEndsRun,
+        nanoWoRun,
+        nanoTwoRun,
+        nanoEndPrj,
+        nanoCycle.q2.boundaryTs,
+        nanoCycle.q3.boundaryTs,
+        nanoCycle.q4.boundaryTs,
+        nanoCycle.q2Realized,
+        nanoCycle.q3Realized,
+        nanoCycle.q4Realized,
+        nanoCycle.q3.o,
+        nanoCycle.q4.o,
+        keepCycles,
+        nanoV,
+        nanoHWO,
+        nanoHTWO,
+        nanoHQ3,
+        nanoHQ4,
+        nanoProjQ2,
+        nanoProjQ3,
+        nanoProjQ4,
+        nanoProjEnd
+    )
+    nanoProjQ2  := array.get(nanoProjs, 0)
+    nanoProjQ3  := array.get(nanoProjs, 1)
+    nanoProjQ4  := array.get(nanoProjs, 2)
+    nanoProjEnd := array.get(nanoProjs, 3)
+
+if not weeklyLive
+    if weekV.ln.size() > 0
+        vset_clear(weekV)
+    if weekHWO.ln.size() > 0
+        hset_clear(weekHWO)
+    if weekHTWO.ln.size() > 0
+        hset_clear(weekHTWO)
+    if weekHQ3.ln.size() > 0
+        hset_clear(weekHQ3)
+    if weekHQ4.ln.size() > 0
+        hset_clear(weekHQ4)
+    if weekHQ5.ln.size() > 0
+        hset_clear(weekHQ5)
+    if weekHFri.ln.size() > 0
+        hset_clear(weekHFri)
+    if weekHSat.ln.size() > 0
+        hset_clear(weekHSat)
+
+    weekProjQ2  := f_kill(weekProjQ2)
+    weekProjQ3  := f_kill(weekProjQ3)
+    weekProjQ4  := f_kill(weekProjQ4)
+    weekProjQ5  := f_kill(weekProjQ5)
+    weekProjFri := f_kill(weekProjFri)
+    weekProjSat := f_kill(weekProjSat)
+    weekProjEnd := f_kill(weekProjEnd)
+else
+    [wkStartsRun, wkEndsRun, wkWoRun, wkTwoRun] = f_week_inputs_from_engine(qtSt.weekly.starts, wkCycle.endTs, wkCycle.q1.o, wkCycle.q2.o)
+    line[] wprojs = run_week_cycle(
+        wkStartsRun,
+        wkEndsRun,
+        wkWoRun,
+        wkTwoRun,
+        wkEndPrj,
+        wkCycle.q2.boundaryTs,
+        wkCycle.q3.boundaryTs,
+        wkCycle.q4.boundaryTs,
+        wkCycle.q5.boundaryTs,
+        true,
+        wkCycle.q2Realized,
+        wkCycle.q3Realized,
+        wkCycle.q4Realized,
+        wkCycle.q5Realized,
+        wkCycle.q3.o,
+        wkCycle.q4.o,
+        wkCycle.q5.o,
+        keepCycles,
+        weekV,
+        weekHWO,
+        weekHTWO,
+        weekHQ3,
+        weekHQ4,
+        weekHQ5,
+        weekHFri,
+        weekHSat,
+        weekProjQ2,
+        weekProjQ3,
+        weekProjQ4,
+        weekProjQ5,
+        weekProjFri,
+        weekProjSat,
+        weekProjEnd
+    )
+
+    weekProjQ2  := array.get(wprojs, 0)
+    weekProjQ3  := array.get(wprojs, 1)
+    weekProjQ4  := array.get(wprojs, 2)
+    weekProjQ5  := array.get(wprojs, 3)
+    weekProjFri := array.get(wprojs, 4)
+    weekProjSat := array.get(wprojs, 5)
+    weekProjEnd := array.get(wprojs, 6)
+
+if not monthlyLive
+    if monthV.ln.size() > 0
+        vset_clear(monthV)
+    if monthHWO.ln.size() > 0
+        hset_clear(monthHWO)
+    if monthHTWO.ln.size() > 0
+        hset_clear(monthHTWO)
+    if monthHQ3.ln.size() > 0
+        hset_clear(monthHQ3)
+    if monthHQ4.ln.size() > 0
+        hset_clear(monthHQ4)
+    if monthHQ5.ln.size() > 0
+        hset_clear(monthHQ5)
+    if monthHFri.ln.size() > 0
+        hset_clear(monthHFri)
+    if monthHSat.ln.size() > 0
+        hset_clear(monthHSat)
+
+    monthProjQ2  := f_kill(monthProjQ2)
+    monthProjQ3  := f_kill(monthProjQ3)
+    monthProjQ4  := f_kill(monthProjQ4)
+    monthProjQ5  := f_kill(monthProjQ5)
+    monthProjFri := f_kill(monthProjFri)
+    monthProjSat := f_kill(monthProjSat)
+    monthProjEnd := f_kill(monthProjEnd)
+else
+    [moStartsRun, moEndsRun, moWoRun, moTwoRun] = f_week_inputs_from_engine(qtSt.monthly.starts, moCycle.endTs, moCycle.q1.o, moCycle.q2.o)
+    line[] mprojs = run_week_cycle(
+        moStartsRun,
+        moEndsRun,
+        moWoRun,
+        moTwoRun,
+        moEndPrj,
+        moCycle.q2.boundaryTs,
+        moCycle.q3.boundaryTs,
+        moCycle.q4.boundaryTs,
+        moCycle.q5.boundaryTs,
+        false,
+        moCycle.q2Realized,
+        moCycle.q3Realized,
+        moCycle.q4Realized,
+        moCycle.q5Realized,
+        moCycle.q3.o,
+        moCycle.q4.o,
+        moCycle.q5.o,
+        keepCycles,
+        monthV,
+        monthHWO,
+        monthHTWO,
+        monthHQ3,
+        monthHQ4,
+        monthHQ5,
+        monthHFri,
+        monthHSat,
+        monthProjQ2,
+        monthProjQ3,
+        monthProjQ4,
+        monthProjQ5,
+        monthProjFri,
+        monthProjSat,
+        monthProjEnd
+    )
+
+    monthProjQ2  := array.get(mprojs, 0)
+    monthProjQ3  := array.get(mprojs, 1)
+    monthProjQ4  := array.get(mprojs, 2)
+    monthProjQ5  := array.get(mprojs, 3)
+    monthProjFri := array.get(mprojs, 4)
+    monthProjSat := array.get(mprojs, 5)
+    monthProjEnd := array.get(mprojs, 6)
+
+// ============================================================================
+// SSMT OVERLAY
+// ============================================================================
+string cryptoTriadSym1 = "BINANCE:BTCUSDT.P"
+string cryptoTriadSym2 = "BINANCE:ETHUSDT.P"
+string cryptoTriadSym3 = "CRYPTOCAP:TOTAL3"
+
+bool weeklySsmtAnyMode = showBearBoth or showBullBoth
+bool nanoSsmtLive = f_ssmt_cycle_gate(enableNanoSSMT, nanoAlignedTf, weeklySsmtAnyMode)
+bool microSsmtLive = f_ssmt_cycle_gate(enableMicroSSMT, microAlignedTf, weeklySsmtAnyMode)
+bool m90SsmtLive = f_ssmt_cycle_gate(enableM90SSMT, m90AlignedTf, weeklySsmtAnyMode)
+bool dailySsmtLive = f_ssmt_cycle_gate(enableDailySSMT, dailyAlignedTf, weeklySsmtAnyMode)
+bool weeklySsmtLive = f_ssmt_cycle_gate(enableWeeklySSMT, weeklyAlignedTf, weeklySsmtAnyMode)
+bool monthlySsmtLive = f_ssmt_cycle_gate(enableMonthlySSMT, monthlyAlignedTf, weeklySsmtAnyMode)
+
+var qt.CycleState qtSsmtSt = qt.qt_state_new()
+qt.CycleState ssmtStWork = qtSsmtSt
+qt.CycleResult ssmtDayCycle = na
+qt.CycleResult ssmtM90Cycle = na
+qt.CycleResult ssmtMicroCycle = na
+qt.CycleResult ssmtNanoCycle = na
+qt.CycleResult ssmtWkCycle = na
+qt.CycleResult ssmtMoCycle = na
+
+if dailySsmtLive
+    [ssmtStD, ssmtDRes] = qt.qt_daily_update(ssmtStWork, qtCfg, time, time_close)
+    ssmtStWork := ssmtStD
+    ssmtDayCycle := ssmtDRes
+if m90SsmtLive
+    [ssmtStM, ssmtMRes] = qt.qt_m90_update(ssmtStWork, qtCfg, time, time_close)
+    ssmtStWork := ssmtStM
+    ssmtM90Cycle := ssmtMRes
+if microSsmtLive
+    [ssmtStU, ssmtURes] = qt.qt_micro_update(ssmtStWork, qtCfg, time, time_close)
+    ssmtStWork := ssmtStU
+    ssmtMicroCycle := ssmtURes
+if nanoSsmtLive
+    [ssmtStN, ssmtNRes] = qt.qt_nano_update(ssmtStWork, qtCfg, time, time_close)
+    ssmtStWork := ssmtStN
+    ssmtNanoCycle := ssmtNRes
+if weeklySsmtLive
+    [ssmtStW, ssmtWRes] = qt.qt_weekly_update(ssmtStWork, qtCfg, time, time_close)
+    ssmtStWork := ssmtStW
+    ssmtWkCycle := ssmtWRes
+if monthlySsmtLive
+    [ssmtStMo, ssmtMoRes] = qt.qt_monthly_update(ssmtStWork, qtCfg, time, time_close)
+    ssmtStWork := ssmtStMo
+    ssmtMoCycle := ssmtMoRes
+qtSsmtSt := ssmtStWork
+
+var table wkOpenTbl = table.new(position.top_right, 2, 8, border_width=1)
+var line[] wSsmtHistLines = array.new_line()
+var label[] wSsmtHistLbls = array.new_label()
+var line wSsmtLine = na
+var line wSsmtLine2 = na
+var label wSsmtLbl = na
+var int wSsmtEventKey = na
+var int wSsmtPurgeTs = na
+
+var line[] wBSsmtHistLines = array.new_line()
+var label[] wBSsmtHistLbls = array.new_label()
+var line wBSsmtLine = na
+var line wBSsmtLine2 = na
+var label wBSsmtLbl = na
+var int wBSsmtEventKey = na
+var int wBSsmtPurgeTs = na
+
+var line[] wHBSsmtHistLines = array.new_line()
+var label[] wHBSsmtHistLbls = array.new_label()
+var line wHBSsmtLine = na
+var line wHBSsmtLine2 = na
+var label wHBSsmtLbl = na
+var int wHBSsmtEventKey = na
+var int wHBSsmtPurgeTs = na
+
+var line[] wHSsmtHistLines = array.new_line()
+var label[] wHSsmtHistLbls = array.new_label()
+var line wHSsmtLine = na
+var line wHSsmtLine2 = na
+var label wHSsmtLbl = na
+var int wHSsmtEventKey = na
+var int wHSsmtPurgeTs = na
+
+string sym = syminfo.tickerid
+string symTicker = str.upper(f_ssmt_sym_ticker(sym))
+string chartTicker = str.upper(syminfo.ticker)
+string chartRoot = str.upper(syminfo.root)
+bool triadModeActive = selection_mode == "Triad"
+bool inCryptoTriad = f_check_match(cryptoTriadSym1) or f_check_match(cryptoTriadSym2) or f_check_match(cryptoTriadSym3)
+string triadBranch = inCryptoTriad ? "Crypto Triad (BTC/ETH/TOTAL3)" : "none"
+bool match1 = f_check_match(cryptoTriadSym1)
+bool match2 = f_check_match(cryptoTriadSym2)
+bool match3 = f_check_match(cryptoTriadSym3)
+bool triad_ok = triadModeActive and inCryptoTriad and (match1 or match2 or match3)
+[tsym2, tsym3] = qta.resolve_pair_symbols(selection_mode, badj, sym, symTicker, chartTicker, chartRoot)
+bool chartInverse = false
+bool peer2Inverse = false
+bool peer3Inverse = false
+string dbgChartAsset = str.upper(syminfo.ticker)
+string dbgChartShort = f_ssmt_label_sym(syminfo.ticker)
+string dbgSsmtAsset2 = str.length(tsym2) > 0 ? tsym2 : ""
+string dbgSsmtAsset3 = str.length(tsym3) > 0 ? tsym3 : ""
+string dbgSsmtAsset2Short = str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : ""
+string dbgSsmtAsset3Short = str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : ""
+
+if (weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSsmtLive or nanoSsmtLive) and (str.length(tsym2) > 0 or str.length(tsym3) > 0)
+    bool runWeeklyBearSSMT = showBearBoth
+    bool runWeeklyBullSSMT = showBullBoth
+    bool runWeeklyBearHSSMT = showBearBoth
+    bool runWeeklyBullHSSMT = showBullBoth
+    bool hssmtEvalConfirmed = barstate.isconfirmed
+    int ssmtQuarterLen = nanoSsmtLive ? (90 * MS_MIN / 16) : m90SsmtLive ? (90 * MS_MIN) : microSsmtLive ? (90 * MS_MIN / 4) : dailySsmtLive ? LEN_24H / 4 : monthlySsmtLive ? (7 * LEN_24H) : LEN_24H
+    string ssmtLabelPrefix = nanoSsmtLive ? "Nano " : m90SsmtLive ? "m90 " : microSsmtLive ? "Micro " : dailySsmtLive ? "D " : monthlySsmtLive ? "M " : "W "
+    string ssmtHiddenLabelPrefix = nanoSsmtLive ? "(H) Nano " : m90SsmtLive ? "(H) m90 " : microSsmtLive ? "(H) Micro " : dailySsmtLive ? "(H) D " : monthlySsmtLive ? "(H) M " : "(H) W "
+
+    float chHcur = na
+    int chHcurTs = na
+    float chHprev = na
+    int chHprevTs = na
+    float chBHcur = na
+    int chBHcurTs = na
+    float chBHprev = na
+    int chBHprevTs = na
+    float chLcur = na
+    int chLcurTs = na
+    float chLprev = na
+    int chLprevTs = na
+    float chBLcur = na
+    int chBLcurTs = na
+    float chBLprev = na
+    int chBLprevTs = na
+    int chQts = na
+
+    if weeklySsmtLive
+        if ssmtWkCycle.inWindow and ssmtWkCycle.curQuarterIndex == 1
+            chHcur := ssmtWkCycle.q1.h
+            chHcurTs := ssmtWkCycle.q1.hTs
+            chBHcur := ssmtWkCycle.q1.bh
+            chBHcurTs := ssmtWkCycle.q1.bhTs
+            chLcur := ssmtWkCycle.q1.l
+            chLcurTs := ssmtWkCycle.q1.lTs
+            chBLcur := ssmtWkCycle.q1.bl
+            chBLcurTs := ssmtWkCycle.q1.blTs
+            chHprev := qtSsmtSt.weekly.prev1.h
+            chHprevTs := qtSsmtSt.weekly.prev1.hTs
+            chBHprev := qtSsmtSt.weekly.prev1.bh
+            chBHprevTs := qtSsmtSt.weekly.prev1.bhTs
+            chLprev := qtSsmtSt.weekly.prev1.l
+            chLprevTs := qtSsmtSt.weekly.prev1.lTs
+            chBLprev := qtSsmtSt.weekly.prev1.bl
+            chBLprevTs := qtSsmtSt.weekly.prev1.blTs
+            chQts := ssmtWkCycle.q1.boundaryTs
+        else if ssmtWkCycle.inWindow and ssmtWkCycle.curQuarterIndex == 2
+            chHcur := ssmtWkCycle.q2.h
+            chHcurTs := ssmtWkCycle.q2.hTs
+            chBHcur := ssmtWkCycle.q2.bh
+            chBHcurTs := ssmtWkCycle.q2.bhTs
+            chLcur := ssmtWkCycle.q2.l
+            chLcurTs := ssmtWkCycle.q2.lTs
+            chBLcur := ssmtWkCycle.q2.bl
+            chBLcurTs := ssmtWkCycle.q2.blTs
+            chHprev := ssmtWkCycle.q1.h
+            chHprevTs := ssmtWkCycle.q1.hTs
+            chBHprev := ssmtWkCycle.q1.bh
+            chBHprevTs := ssmtWkCycle.q1.bhTs
+            chLprev := ssmtWkCycle.q1.l
+            chLprevTs := ssmtWkCycle.q1.lTs
+            chBLprev := ssmtWkCycle.q1.bl
+            chBLprevTs := ssmtWkCycle.q1.blTs
+            chQts := ssmtWkCycle.q2.boundaryTs
+        else if ssmtWkCycle.inWindow and ssmtWkCycle.curQuarterIndex == 3
+            chHcur := ssmtWkCycle.q3.h
+            chHcurTs := ssmtWkCycle.q3.hTs
+            chBHcur := ssmtWkCycle.q3.bh
+            chBHcurTs := ssmtWkCycle.q3.bhTs
+            chLcur := ssmtWkCycle.q3.l
+            chLcurTs := ssmtWkCycle.q3.lTs
+            chBLcur := ssmtWkCycle.q3.bl
+            chBLcurTs := ssmtWkCycle.q3.blTs
+            chHprev := ssmtWkCycle.q2.h
+            chHprevTs := ssmtWkCycle.q2.hTs
+            chBHprev := ssmtWkCycle.q2.bh
+            chBHprevTs := ssmtWkCycle.q2.bhTs
+            chLprev := ssmtWkCycle.q2.l
+            chLprevTs := ssmtWkCycle.q2.lTs
+            chBLprev := ssmtWkCycle.q2.bl
+            chBLprevTs := ssmtWkCycle.q2.blTs
+            chQts := ssmtWkCycle.q3.boundaryTs
+        else if ssmtWkCycle.inWindow and ssmtWkCycle.curQuarterIndex == 4
+            chHcur := ssmtWkCycle.q4.h
+            chHcurTs := ssmtWkCycle.q4.hTs
+            chBHcur := ssmtWkCycle.q4.bh
+            chBHcurTs := ssmtWkCycle.q4.bhTs
+            chLcur := ssmtWkCycle.q4.l
+            chLcurTs := ssmtWkCycle.q4.lTs
+            chBLcur := ssmtWkCycle.q4.bl
+            chBLcurTs := ssmtWkCycle.q4.blTs
+            chHprev := ssmtWkCycle.q3.h
+            chHprevTs := ssmtWkCycle.q3.hTs
+            chBHprev := ssmtWkCycle.q3.bh
+            chBHprevTs := ssmtWkCycle.q3.bhTs
+            chLprev := ssmtWkCycle.q3.l
+            chLprevTs := ssmtWkCycle.q3.lTs
+            chBLprev := ssmtWkCycle.q3.bl
+            chBLprevTs := ssmtWkCycle.q3.blTs
+            chQts := ssmtWkCycle.q4.boundaryTs
+        else if ssmtWkCycle.inWindow and ssmtWkCycle.curQuarterIndex == 5
+            chHcur := ssmtWkCycle.q5.h
+            chHcurTs := ssmtWkCycle.q5.hTs
+            chBHcur := ssmtWkCycle.q5.bh
+            chBHcurTs := ssmtWkCycle.q5.bhTs
+            chLcur := ssmtWkCycle.q5.l
+            chLcurTs := ssmtWkCycle.q5.lTs
+            chBLcur := ssmtWkCycle.q5.bl
+            chBLcurTs := ssmtWkCycle.q5.blTs
+            chHprev := ssmtWkCycle.q4.h
+            chHprevTs := ssmtWkCycle.q4.hTs
+            chBHprev := ssmtWkCycle.q4.bh
+            chBHprevTs := ssmtWkCycle.q4.bhTs
+            chLprev := ssmtWkCycle.q4.l
+            chLprevTs := ssmtWkCycle.q4.lTs
+            chBLprev := ssmtWkCycle.q4.bl
+            chBLprevTs := ssmtWkCycle.q4.blTs
+            chQts := ssmtWkCycle.q5.boundaryTs
+    else if monthlySsmtLive
+        if ssmtMoCycle.inWindow and ssmtMoCycle.curQuarterIndex == 1
+            chHcur := ssmtMoCycle.q1.h
+            chHcurTs := ssmtMoCycle.q1.hTs
+            chBHcur := ssmtMoCycle.q1.bh
+            chBHcurTs := ssmtMoCycle.q1.bhTs
+            chLcur := ssmtMoCycle.q1.l
+            chLcurTs := ssmtMoCycle.q1.lTs
+            chBLcur := ssmtMoCycle.q1.bl
+            chBLcurTs := ssmtMoCycle.q1.blTs
+            chHprev := qtSsmtSt.monthly.prev1.h
+            chHprevTs := qtSsmtSt.monthly.prev1.hTs
+            chBHprev := qtSsmtSt.monthly.prev1.bh
+            chBHprevTs := qtSsmtSt.monthly.prev1.bhTs
+            chLprev := qtSsmtSt.monthly.prev1.l
+            chLprevTs := qtSsmtSt.monthly.prev1.lTs
+            chBLprev := qtSsmtSt.monthly.prev1.bl
+            chBLprevTs := qtSsmtSt.monthly.prev1.blTs
+            chQts := ssmtMoCycle.q1.boundaryTs
+        else if ssmtMoCycle.inWindow and ssmtMoCycle.curQuarterIndex == 2
+            chHcur := ssmtMoCycle.q2.h
+            chHcurTs := ssmtMoCycle.q2.hTs
+            chBHcur := ssmtMoCycle.q2.bh
+            chBHcurTs := ssmtMoCycle.q2.bhTs
+            chLcur := ssmtMoCycle.q2.l
+            chLcurTs := ssmtMoCycle.q2.lTs
+            chBLcur := ssmtMoCycle.q2.bl
+            chBLcurTs := ssmtMoCycle.q2.blTs
+            chHprev := ssmtMoCycle.q1.h
+            chHprevTs := ssmtMoCycle.q1.hTs
+            chBHprev := ssmtMoCycle.q1.bh
+            chBHprevTs := ssmtMoCycle.q1.bhTs
+            chLprev := ssmtMoCycle.q1.l
+            chLprevTs := ssmtMoCycle.q1.lTs
+            chBLprev := ssmtMoCycle.q1.bl
+            chBLprevTs := ssmtMoCycle.q1.blTs
+            chQts := ssmtMoCycle.q2.boundaryTs
+        else if ssmtMoCycle.inWindow and ssmtMoCycle.curQuarterIndex == 3
+            chHcur := ssmtMoCycle.q3.h
+            chHcurTs := ssmtMoCycle.q3.hTs
+            chBHcur := ssmtMoCycle.q3.bh
+            chBHcurTs := ssmtMoCycle.q3.bhTs
+            chLcur := ssmtMoCycle.q3.l
+            chLcurTs := ssmtMoCycle.q3.lTs
+            chBLcur := ssmtMoCycle.q3.bl
+            chBLcurTs := ssmtMoCycle.q3.blTs
+            chHprev := ssmtMoCycle.q2.h
+            chHprevTs := ssmtMoCycle.q2.hTs
+            chBHprev := ssmtMoCycle.q2.bh
+            chBHprevTs := ssmtMoCycle.q2.bhTs
+            chLprev := ssmtMoCycle.q2.l
+            chLprevTs := ssmtMoCycle.q2.lTs
+            chBLprev := ssmtMoCycle.q2.bl
+            chBLprevTs := ssmtMoCycle.q2.blTs
+            chQts := ssmtMoCycle.q3.boundaryTs
+        else if ssmtMoCycle.inWindow and ssmtMoCycle.curQuarterIndex == 4
+            chHcur := ssmtMoCycle.q4.h
+            chHcurTs := ssmtMoCycle.q4.hTs
+            chBHcur := ssmtMoCycle.q4.bh
+            chBHcurTs := ssmtMoCycle.q4.bhTs
+            chLcur := ssmtMoCycle.q4.l
+            chLcurTs := ssmtMoCycle.q4.lTs
+            chBLcur := ssmtMoCycle.q4.bl
+            chBLcurTs := ssmtMoCycle.q4.blTs
+            chHprev := ssmtMoCycle.q3.h
+            chHprevTs := ssmtMoCycle.q3.hTs
+            chBHprev := ssmtMoCycle.q3.bh
+            chBHprevTs := ssmtMoCycle.q3.bhTs
+            chLprev := ssmtMoCycle.q3.l
+            chLprevTs := ssmtMoCycle.q3.lTs
+            chBLprev := ssmtMoCycle.q3.bl
+            chBLprevTs := ssmtMoCycle.q3.blTs
+            chQts := ssmtMoCycle.q4.boundaryTs
+        else if ssmtMoCycle.inWindow and ssmtMoCycle.curQuarterIndex == 5
+            chHcur := ssmtMoCycle.q5.h
+            chHcurTs := ssmtMoCycle.q5.hTs
+            chBHcur := ssmtMoCycle.q5.bh
+            chBHcurTs := ssmtMoCycle.q5.bhTs
+            chLcur := ssmtMoCycle.q5.l
+            chLcurTs := ssmtMoCycle.q5.lTs
+            chBLcur := ssmtMoCycle.q5.bl
+            chBLcurTs := ssmtMoCycle.q5.blTs
+            chHprev := ssmtMoCycle.q4.h
+            chHprevTs := ssmtMoCycle.q4.hTs
+            chBHprev := ssmtMoCycle.q4.bh
+            chBHprevTs := ssmtMoCycle.q4.bhTs
+            chLprev := ssmtMoCycle.q4.l
+            chLprevTs := ssmtMoCycle.q4.lTs
+            chBLprev := ssmtMoCycle.q4.bl
+            chBLprevTs := ssmtMoCycle.q4.blTs
+            chQts := ssmtMoCycle.q5.boundaryTs
+    else if dailySsmtLive
+        chHcur := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.h : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.h : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.h : ssmtDayCycle.q4.h
+        chHcurTs := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.hTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.hTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.hTs : ssmtDayCycle.q4.hTs
+        chBHcur := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.bh : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.bh : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.bh : ssmtDayCycle.q4.bh
+        chBHcurTs := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.bhTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.bhTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.bhTs : ssmtDayCycle.q4.bhTs
+        chLcur := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.l : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.l : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.l : ssmtDayCycle.q4.l
+        chLcurTs := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.lTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.lTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.lTs : ssmtDayCycle.q4.lTs
+        chBLcur := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.bl : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.bl : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.bl : ssmtDayCycle.q4.bl
+        chBLcurTs := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.blTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.blTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.blTs : ssmtDayCycle.q4.blTs
+        chHprev := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.h : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.h : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.h : ssmtDayCycle.q3.h
+        chHprevTs := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.hTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.hTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.hTs : ssmtDayCycle.q3.hTs
+        chBHprev := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.bh : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.bh : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.bh : ssmtDayCycle.q3.bh
+        chBHprevTs := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.bhTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.bhTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.bhTs : ssmtDayCycle.q3.bhTs
+        chLprev := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.l : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.l : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.l : ssmtDayCycle.q3.l
+        chLprevTs := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.lTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.lTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.lTs : ssmtDayCycle.q3.lTs
+        chBLprev := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.bl : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.bl : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.bl : ssmtDayCycle.q3.bl
+        chBLprevTs := ssmtDayCycle.curQuarterIndex == 1 ? qtSsmtSt.daily.prev1.blTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q1.blTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q2.blTs : ssmtDayCycle.q3.blTs
+        chQts := ssmtDayCycle.curQuarterIndex == 1 ? ssmtDayCycle.q1.boundaryTs : ssmtDayCycle.curQuarterIndex == 2 ? ssmtDayCycle.q2.boundaryTs : ssmtDayCycle.curQuarterIndex == 3 ? ssmtDayCycle.q3.boundaryTs : ssmtDayCycle.q4.boundaryTs
+    else if m90SsmtLive
+        chHcur := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.h : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.h : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.h : ssmtM90Cycle.q4.h
+        chHcurTs := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.hTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.hTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.hTs : ssmtM90Cycle.q4.hTs
+        chBHcur := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.bh : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.bh : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.bh : ssmtM90Cycle.q4.bh
+        chBHcurTs := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.bhTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.bhTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.bhTs : ssmtM90Cycle.q4.bhTs
+        chLcur := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.l : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.l : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.l : ssmtM90Cycle.q4.l
+        chLcurTs := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.lTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.lTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.lTs : ssmtM90Cycle.q4.lTs
+        chBLcur := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.bl : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.bl : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.bl : ssmtM90Cycle.q4.bl
+        chBLcurTs := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.blTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.blTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.blTs : ssmtM90Cycle.q4.blTs
+        chHprev := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.h : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.h : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.h : ssmtM90Cycle.q3.h
+        chHprevTs := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.hTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.hTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.hTs : ssmtM90Cycle.q3.hTs
+        chBHprev := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.bh : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.bh : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.bh : ssmtM90Cycle.q3.bh
+        chBHprevTs := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.bhTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.bhTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.bhTs : ssmtM90Cycle.q3.bhTs
+        chLprev := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.l : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.l : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.l : ssmtM90Cycle.q3.l
+        chLprevTs := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.lTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.lTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.lTs : ssmtM90Cycle.q3.lTs
+        chBLprev := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.bl : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.bl : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.bl : ssmtM90Cycle.q3.bl
+        chBLprevTs := ssmtM90Cycle.curQuarterIndex == 1 ? qtSsmtSt.m90.prev1.blTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q1.blTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q2.blTs : ssmtM90Cycle.q3.blTs
+        chQts := ssmtM90Cycle.curQuarterIndex == 1 ? ssmtM90Cycle.q1.boundaryTs : ssmtM90Cycle.curQuarterIndex == 2 ? ssmtM90Cycle.q2.boundaryTs : ssmtM90Cycle.curQuarterIndex == 3 ? ssmtM90Cycle.q3.boundaryTs : ssmtM90Cycle.q4.boundaryTs
+    else if microSsmtLive
+        chHcur := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.h : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.h : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.h : ssmtMicroCycle.q4.h
+        chHcurTs := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.hTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.hTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.hTs : ssmtMicroCycle.q4.hTs
+        chBHcur := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.bh : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.bh : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.bh : ssmtMicroCycle.q4.bh
+        chBHcurTs := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.bhTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.bhTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.bhTs : ssmtMicroCycle.q4.bhTs
+        chLcur := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.l : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.l : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.l : ssmtMicroCycle.q4.l
+        chLcurTs := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.lTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.lTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.lTs : ssmtMicroCycle.q4.lTs
+        chBLcur := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.bl : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.bl : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.bl : ssmtMicroCycle.q4.bl
+        chBLcurTs := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.blTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.blTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.blTs : ssmtMicroCycle.q4.blTs
+        chHprev := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.h : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.h : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.h : ssmtMicroCycle.q3.h
+        chHprevTs := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.hTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.hTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.hTs : ssmtMicroCycle.q3.hTs
+        chBHprev := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.bh : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.bh : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.bh : ssmtMicroCycle.q3.bh
+        chBHprevTs := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.bhTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.bhTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.bhTs : ssmtMicroCycle.q3.bhTs
+        chLprev := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.l : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.l : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.l : ssmtMicroCycle.q3.l
+        chLprevTs := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.lTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.lTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.lTs : ssmtMicroCycle.q3.lTs
+        chBLprev := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.bl : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.bl : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.bl : ssmtMicroCycle.q3.bl
+        chBLprevTs := ssmtMicroCycle.curQuarterIndex == 1 ? qtSsmtSt.micro.prev1.blTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q1.blTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q2.blTs : ssmtMicroCycle.q3.blTs
+        chQts := ssmtMicroCycle.curQuarterIndex == 1 ? ssmtMicroCycle.q1.boundaryTs : ssmtMicroCycle.curQuarterIndex == 2 ? ssmtMicroCycle.q2.boundaryTs : ssmtMicroCycle.curQuarterIndex == 3 ? ssmtMicroCycle.q3.boundaryTs : ssmtMicroCycle.q4.boundaryTs
+    else if nanoSsmtLive
+        chHcur := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.h : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.h : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.h : ssmtNanoCycle.q4.h
+        chHcurTs := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.hTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.hTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.hTs : ssmtNanoCycle.q4.hTs
+        chBHcur := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.bh : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.bh : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.bh : ssmtNanoCycle.q4.bh
+        chBHcurTs := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.bhTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.bhTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.bhTs : ssmtNanoCycle.q4.bhTs
+        chLcur := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.l : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.l : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.l : ssmtNanoCycle.q4.l
+        chLcurTs := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.lTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.lTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.lTs : ssmtNanoCycle.q4.lTs
+        chBLcur := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.bl : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.bl : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.bl : ssmtNanoCycle.q4.bl
+        chBLcurTs := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.blTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.blTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.blTs : ssmtNanoCycle.q4.blTs
+        chHprev := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.h : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.h : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.h : ssmtNanoCycle.q3.h
+        chHprevTs := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.hTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.hTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.hTs : ssmtNanoCycle.q3.hTs
+        chBHprev := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.bh : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.bh : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.bh : ssmtNanoCycle.q3.bh
+        chBHprevTs := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.bhTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.bhTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.bhTs : ssmtNanoCycle.q3.bhTs
+        chLprev := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.l : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.l : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.l : ssmtNanoCycle.q3.l
+        chLprevTs := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.lTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.lTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.lTs : ssmtNanoCycle.q3.lTs
+        chBLprev := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.bl : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.bl : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.bl : ssmtNanoCycle.q3.bl
+        chBLprevTs := ssmtNanoCycle.curQuarterIndex == 1 ? qtSsmtSt.nano.prev1.blTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q1.blTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q2.blTs : ssmtNanoCycle.q3.blTs
+        chQts := ssmtNanoCycle.curQuarterIndex == 1 ? ssmtNanoCycle.q1.boundaryTs : ssmtNanoCycle.curQuarterIndex == 2 ? ssmtNanoCycle.q2.boundaryTs : ssmtNanoCycle.curQuarterIndex == 3 ? ssmtNanoCycle.q3.boundaryTs : ssmtNanoCycle.q4.boundaryTs
+
+    bool isPairChart = triad_ok and (str.length(tsym2) > 0 or str.length(tsym3) > 0)
+    string peerTf = nanoSsmtLive ? timeframe.period : m90SsmtLive ? "5" : microSsmtLive ? timeframe.period : dailySsmtLive ? "15" : monthlySsmtLive ? "240" : "60"
+    float peer2Hcur = na
+    int peer2HcurTs = na
+    float peer2Hprev = na
+    int peer2HprevTs = na
+    float peer2BHcur = na
+    int peer2BHcurTs = na
+    float peer2BHprev = na
+    int peer2BHprevTs = na
+    float peer2Lcur = na
+    int peer2LcurTs = na
+    float peer2Lprev = na
+    int peer2LprevTs = na
+    float peer2BLcur = na
+    int peer2BLcurTs = na
+    float peer2BLprev = na
+    int peer2BLprevTs = na
+    int peer2Qts = na
+    if isPairChart and str.length(tsym2) > 0
+        [peer2Hcur, peer2HcurTs, peer2Hprev, peer2HprevTs, peer2BHcur, peer2BHcurTs, peer2BHprev, peer2BHprevTs, peer2Lcur, peer2LcurTs, peer2Lprev, peer2LprevTs, peer2BLcur, peer2BLcurTs, peer2BLprev, peer2BLprevTs, peer2Qts] := request.security(tsym2, peerTf, f_ssmt_peer_highs_expr(nanoSsmtLive, m90SsmtLive, microSsmtLive, dailySsmtLive, monthlySsmtLive), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    float peer3Hcur = na
+    int peer3HcurTs = na
+    float peer3Hprev = na
+    int peer3HprevTs = na
+    float peer3BHcur = na
+    int peer3BHcurTs = na
+    float peer3BHprev = na
+    int peer3BHprevTs = na
+    float peer3Lcur = na
+    int peer3LcurTs = na
+    float peer3Lprev = na
+    int peer3LprevTs = na
+    float peer3BLcur = na
+    int peer3BLcurTs = na
+    float peer3BLprev = na
+    int peer3BLprevTs = na
+    int peer3Qts = na
+    if isPairChart and str.length(tsym3) > 0
+        [peer3Hcur, peer3HcurTs, peer3Hprev, peer3HprevTs, peer3BHcur, peer3BHcurTs, peer3BHprev, peer3BHprevTs, peer3Lcur, peer3LcurTs, peer3Lprev, peer3LprevTs, peer3BLcur, peer3BLcurTs, peer3BLprev, peer3BLprevTs, peer3Qts] := request.security(tsym3, peerTf, f_ssmt_peer_highs_expr(nanoSsmtLive, m90SsmtLive, microSsmtLive, dailySsmtLive, monthlySsmtLive), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+    string chartAsset = f_ssmt_label_sym(syminfo.tickerid)
+    bool hasPeer2 = str.length(tsym2) > 0
+    bool hasPeer3 = str.length(tsym3) > 0
+
+    // Bearish
+    bool regularVisualCandidate = false
+    int regularVisualQuarterTs = na
+    bool ssmtReady = isPairChart and not na(chHcur) and not na(chHprev) and not na(chHcurTs) and not na(chHprevTs) and not na(chLcur) and not na(chLprev) and ((hasPeer2 and not na(peer2Hcur) and not na(peer2Hprev) and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2Qts)) or (hasPeer3 and not na(peer3Hcur) and not na(peer3Hprev) and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3Qts)))
+    if runWeeklyBearSSMT and ssmtReady
+        bool chartSweep = f_ssmt_sweep_high(chHcur, chHprev, chLcur, chLprev, chartInverse)
+        bool peer2Sweep = hasPeer2 and not na(peer2Hcur) ? f_ssmt_sweep_high(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse) : false
+        bool peer3Sweep = hasPeer3 and not na(peer3Hcur) ? f_ssmt_sweep_high(peer3Hcur, peer3Hprev, peer3Lcur, peer3Lprev, peer3Inverse) : false
+        bool split = (hasPeer2 and chartSweep != peer2Sweep) or (hasPeer3 and chartSweep != peer3Sweep)
+        regularVisualCandidate := split and not na(chQts)
+        regularVisualQuarterTs := regularVisualCandidate ? chQts : na
+        string cracked = split ? (hasPeer2 and hasPeer3 ? (peer2Sweep == peer3Sweep ? (chartSweep != peer2Sweep ? chartAsset : "") : chartSweep == peer2Sweep ? f_ssmt_label_sym(tsym3) : chartSweep == peer3Sweep ? f_ssmt_label_sym(tsym2) : chartAsset) : not chartSweep ? chartAsset : "") : ""
+        int eventKey = chHprevTs
+        if not na(eventKey) and (na(wSsmtEventKey) or eventKey != wSsmtEventKey)
+            f_ssmt_hist_push(wSsmtLine, wSsmtLbl, wSsmtHistLines, wSsmtHistLbls, ssmtKeep)
+            f_ssmt_hist_push(wSsmtLine2, na, wSsmtHistLines, wSsmtHistLbls, ssmtKeep)
+            wSsmtLine := na
+            wSsmtLine2 := na
+            wSsmtLbl := na
+            wSsmtEventKey := eventKey
+            wSsmtPurgeTs := na
+        if split and not na(chHprev) and not na(chHprevTs) and not na(chQts)
+            if chartSweep
+                int qEnd = chQts + ssmtQuarterLen
+                if na(wSsmtPurgeTs) and time >= chQts and time < qEnd and high > chHprev
+                    wSsmtPurgeTs := time
+                wSsmtLine2 := f_kill(wSsmtLine2)
+                wSsmtLine := f_set_or_make_hline_w_style(wSsmtLine, chHprevTs, qEnd, chHprev, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Solid")
+            else
+                wSsmtPurgeTs := na
+                wSsmtLine2 := f_kill(wSsmtLine2)
+                wSsmtLine := f_set_or_make_line(wSsmtLine, chHprevTs, chHprev, chHcurTs, chHcur, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+            bool showLabel = cracked != "" and not chartSweep and na(wSsmtPurgeTs)
+            if showLabel
+                string lblText = ssmtLabelPrefix + cracked
+                if na(wSsmtLbl)
+                    wSsmtLbl := label.new(chHprevTs, chHprev, lblText, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                else
+                    label.set_xy(wSsmtLbl, chHprevTs, chHprev)
+                    label.set_text(wSsmtLbl, lblText)
+            else if not na(wSsmtLbl)
+                label.delete(wSsmtLbl)
+                wSsmtLbl := na
+        else
+            wSsmtLine := f_kill(wSsmtLine)
+            wSsmtLine2 := f_kill(wSsmtLine2)
+            if not na(wSsmtLbl)
+                label.delete(wSsmtLbl)
+                wSsmtLbl := na
+            wSsmtPurgeTs := na
+        f_ssmt_hist_trim(wSsmtHistLines, wSsmtHistLbls, ssmtKeep)
+    else
+        wSsmtLine := f_kill(wSsmtLine)
+        wSsmtLine2 := f_kill(wSsmtLine2)
+        if not na(wSsmtLbl)
+            label.delete(wSsmtLbl)
+            wSsmtLbl := na
+        f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
+        wSsmtEventKey := na
+        wSsmtPurgeTs := na
+
+    // Bullish
+    bool ssmtReadyB = isPairChart and not na(chLcur) and not na(chLprev) and not na(chLcurTs) and not na(chLprevTs) and not na(chHcur) and not na(chHprev) and ((hasPeer2 and not na(peer2Lcur) and not na(peer2Lprev) and not na(peer2Qts)) or (hasPeer3 and not na(peer3Lcur) and not na(peer3Lprev) and not na(peer3Qts)))
+    bool regularVisualCandidateBull = false
+    int regularVisualQuarterTsBull = na
+    if runWeeklyBullSSMT and ssmtReadyB
+        bool chartSweepB = f_ssmt_sweep_low(chHcur, chHprev, chLcur, chLprev, chartInverse)
+        bool peer2SweepB = hasPeer2 and not na(peer2Lcur) ? f_ssmt_sweep_low(peer2Hcur, peer2Hprev, peer2Lcur, peer2Lprev, peer2Inverse) : false
+        bool peer3SweepB = hasPeer3 and not na(peer3Lcur) ? f_ssmt_sweep_low(peer3Hcur, peer3Hprev, peer3Lcur, peer3Lprev, peer3Inverse) : false
+        bool splitB = (hasPeer2 and chartSweepB != peer2SweepB) or (hasPeer3 and chartSweepB != peer3SweepB)
+        regularVisualCandidateBull := splitB and not na(chQts)
+        regularVisualQuarterTsBull := regularVisualCandidateBull ? chQts : na
+        string crackedB = splitB ? (hasPeer2 and hasPeer3 ? (peer2SweepB == peer3SweepB ? (chartSweepB != peer2SweepB ? chartAsset : "") : chartSweepB == peer2SweepB ? f_ssmt_label_sym(tsym3) : chartSweepB == peer3SweepB ? f_ssmt_label_sym(tsym2) : chartAsset) : not chartSweepB ? chartAsset : "") : ""
+        int eventKeyB = chLprevTs
+        if not na(eventKeyB) and (na(wBSsmtEventKey) or eventKeyB != wBSsmtEventKey)
+            f_ssmt_hist_push(wBSsmtLine, wBSsmtLbl, wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
+            f_ssmt_hist_push(wBSsmtLine2, na, wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
+            wBSsmtLine := na
+            wBSsmtLine2 := na
+            wBSsmtLbl := na
+            wBSsmtEventKey := eventKeyB
+            wBSsmtPurgeTs := na
+        if splitB and not na(chLprev) and not na(chLprevTs) and not na(chQts)
+            if chartSweepB
+                int qEndB = chQts + ssmtQuarterLen
+                if na(wBSsmtPurgeTs) and time >= chQts and time < qEndB and low < chLprev
+                    wBSsmtPurgeTs := time
+                wBSsmtLine2 := f_kill(wBSsmtLine2)
+                wBSsmtLine := f_set_or_make_hline_w_style(wBSsmtLine, chLprevTs, qEndB, chLprev, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
+            else
+                wBSsmtPurgeTs := na
+                wBSsmtLine2 := f_kill(wBSsmtLine2)
+                wBSsmtLine := f_set_or_make_line(wBSsmtLine, chLprevTs, chLprev, chLcurTs, chLcur, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+            bool showLabelB = not chartSweepB and na(wBSsmtPurgeTs) and not na(chLcurTs)
+            if showLabelB
+                string crackedLabelB = crackedB != "" ? crackedB : (str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : chartAsset)
+                string lblTextB = ssmtLabelPrefix + crackedLabelB
+                int lblTsB = chLprevTs + int(math.floor((chLcurTs - chLprevTs) / 2))
+                float lblYB = (chLprev + chLcur) * 0.5
+                if na(wBSsmtLbl)
+                    wBSsmtLbl := label.new(lblTsB, lblYB, lblTextB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                else
+                    label.set_xy(wBSsmtLbl, lblTsB, lblYB)
+                    label.set_text(wBSsmtLbl, lblTextB)
+            else if not na(wBSsmtLbl)
+                label.delete(wBSsmtLbl)
+                wBSsmtLbl := na
+        else
+            wBSsmtLine := f_kill(wBSsmtLine)
+            wBSsmtLine2 := f_kill(wBSsmtLine2)
+            if not na(wBSsmtLbl)
+                label.delete(wBSsmtLbl)
+                wBSsmtLbl := na
+            wBSsmtPurgeTs := na
+        f_ssmt_hist_trim(wBSsmtHistLines, wBSsmtHistLbls, ssmtKeep)
+    else
+        wBSsmtLine := f_kill(wBSsmtLine)
+        wBSsmtLine2 := f_kill(wBSsmtLine2)
+        if not na(wBSsmtLbl)
+            label.delete(wBSsmtLbl)
+            wBSsmtLbl := na
+        f_ssmt_hist_clear(wBSsmtHistLines, wBSsmtHistLbls)
+        wBSsmtEventKey := na
+        wBSsmtPurgeTs := na
+
+    // Hidden bullish
+    bool suppressHiddenByRegularBull = regularVisualCandidateBull and not na(regularVisualQuarterTsBull) and regularVisualQuarterTsBull == chQts
+    bool hssmtReadyB = isPairChart and not na(chBLcur) and not na(chBLprev) and not na(chBLcurTs) and not na(chBLprevTs) and not na(chBHcur) and not na(chBHprev) and ((hasPeer2 and not na(peer2BLcur) and not na(peer2BLprev) and not na(peer2Qts)) or (hasPeer3 and not na(peer3BLcur) and not na(peer3BLprev) and not na(peer3Qts)))
+    if runWeeklyBullHSSMT and not suppressHiddenByRegularBull and hssmtEvalConfirmed and hssmtReadyB
+        bool chartSweepHB = f_ssmt_sweep_body_low(chBHcur, chBHprev, chBLcur, chBLprev, chartInverse)
+        bool peer2SweepHB = hasPeer2 and not na(peer2BLcur) ? f_ssmt_sweep_body_low(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse) : false
+        bool peer3SweepHB = hasPeer3 and not na(peer3BLcur) ? f_ssmt_sweep_body_low(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse) : false
+        bool splitHB = (hasPeer2 and chartSweepHB != peer2SweepHB) or (hasPeer3 and chartSweepHB != peer3SweepHB)
+        string crackedHB = splitHB ? (hasPeer2 and hasPeer3 ? (peer2SweepHB == peer3SweepHB ? (chartSweepHB != peer2SweepHB ? chartAsset : "") : chartSweepHB == peer2SweepHB ? f_ssmt_label_sym(tsym3) : chartSweepHB == peer3SweepHB ? f_ssmt_label_sym(tsym2) : chartAsset) : not chartSweepHB ? chartAsset : "") : ""
+        int eventKeyHB = chBLprevTs
+        if not na(eventKeyHB) and (na(wHBSsmtEventKey) or eventKeyHB != wHBSsmtEventKey)
+            f_ssmt_hist_push(wHBSsmtLine, wHBSsmtLbl, wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
+            f_ssmt_hist_push(wHBSsmtLine2, na, wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
+            wHBSsmtLine := na
+            wHBSsmtLine2 := na
+            wHBSsmtLbl := na
+            wHBSsmtEventKey := eventKeyHB
+            wHBSsmtPurgeTs := na
+        if splitHB and not na(chBLprev) and not na(chBLprevTs) and not na(chQts)
+            if chartSweepHB
+                int qEndHB = chQts + ssmtQuarterLen
+                if na(wHBSsmtPurgeTs) and time >= chQts and time < qEndHB and close < chBLprev
+                    wHBSsmtPurgeTs := time
+                wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+                wHBSsmtLine := f_set_or_make_hline_w_style(wHBSsmtLine, chBLprevTs, qEndHB, chBLprev, color.new(ssmtBullLineCol, 50), ssmtLineWidth, "Solid")
+            else
+                wHBSsmtPurgeTs := na
+                wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+                wHBSsmtLine := f_set_or_make_line(wHBSsmtLine, chBLprevTs, chBLprev, chBLcurTs, chBLcur, color.new(ssmtBullLineCol, 50), ssmtLineWidth)
+            bool showLabelHB = not chartSweepHB and na(wHBSsmtPurgeTs) and not na(chBLcurTs)
+            if showLabelHB
+                string crackedLabelHB = crackedHB != "" ? crackedHB : (str.length(tsym2) > 0 ? f_ssmt_label_sym(tsym2) : str.length(tsym3) > 0 ? f_ssmt_label_sym(tsym3) : chartAsset)
+                string lblTextHB = ssmtHiddenLabelPrefix + crackedLabelHB
+                int lblTsHB = chBLprevTs + int(math.floor((chBLcurTs - chBLprevTs) / 2))
+                float lblYHB = (chBLprev + chBLcur) * 0.5
+                if na(wHBSsmtLbl)
+                    wHBSsmtLbl := label.new(lblTsHB, lblYHB, lblTextHB, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                else
+                    label.set_xy(wHBSsmtLbl, lblTsHB, lblYHB)
+                    label.set_text(wHBSsmtLbl, lblTextHB)
+            else if not na(wHBSsmtLbl)
+                label.delete(wHBSsmtLbl)
+                wHBSsmtLbl := na
+        else
+            wHBSsmtLine := f_kill(wHBSsmtLine)
+            wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+            if not na(wHBSsmtLbl)
+                label.delete(wHBSsmtLbl)
+                wHBSsmtLbl := na
+            wHBSsmtPurgeTs := na
+        f_ssmt_hist_trim(wHBSsmtHistLines, wHBSsmtHistLbls, ssmtKeep)
+    else
+        wHBSsmtLine := f_kill(wHBSsmtLine)
+        wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+        if not na(wHBSsmtLbl)
+            label.delete(wHBSsmtLbl)
+            wHBSsmtLbl := na
+        f_ssmt_hist_clear(wHBSsmtHistLines, wHBSsmtHistLbls)
+        wHBSsmtEventKey := na
+        wHBSsmtPurgeTs := na
+
+    // Hidden bearish
+    bool suppressHiddenByRegular = regularVisualCandidate and not na(regularVisualQuarterTs) and regularVisualQuarterTs == chQts
+    bool hssmtReady = isPairChart and not na(chBHcur) and not na(chBHprev) and not na(chBHcurTs) and not na(chBHprevTs) and not na(chBLcur) and not na(chBLprev) and ((hasPeer2 and not na(peer2BHcur) and not na(peer2BHprev) and not na(peer2Qts)) or (hasPeer3 and not na(peer3BHcur) and not na(peer3BHprev) and not na(peer3Qts)))
+    if runWeeklyBearHSSMT and not suppressHiddenByRegular and hssmtEvalConfirmed and hssmtReady
+        bool chartSweepH = f_ssmt_sweep_body_high(chBHcur, chBHprev, chBLcur, chBLprev, chartInverse)
+        bool peer2SweepH = hasPeer2 and not na(peer2BHcur) ? f_ssmt_sweep_body_high(peer2BHcur, peer2BHprev, peer2BLcur, peer2BLprev, peer2Inverse) : false
+        bool peer3SweepH = hasPeer3 and not na(peer3BHcur) ? f_ssmt_sweep_body_high(peer3BHcur, peer3BHprev, peer3BLcur, peer3BLprev, peer3Inverse) : false
+        bool splitH = (hasPeer2 and chartSweepH != peer2SweepH) or (hasPeer3 and chartSweepH != peer3SweepH)
+        string crackedH = splitH ? (hasPeer2 and hasPeer3 ? (peer2SweepH == peer3SweepH ? (chartSweepH != peer2SweepH ? chartAsset : "") : chartSweepH == peer2SweepH ? f_ssmt_label_sym(tsym3) : chartSweepH == peer3SweepH ? f_ssmt_label_sym(tsym2) : chartAsset) : not chartSweepH ? chartAsset : "") : ""
+        int eventKeyH = chBHprevTs
+        if not na(eventKeyH) and (na(wHSsmtEventKey) or eventKeyH != wHSsmtEventKey)
+            f_ssmt_hist_push(wHSsmtLine, wHSsmtLbl, wHSsmtHistLines, wHSsmtHistLbls, ssmtKeep)
+            f_ssmt_hist_push(wHSsmtLine2, na, wHSsmtHistLines, wHSsmtHistLbls, ssmtKeep)
+            wHSsmtLine := na
+            wHSsmtLine2 := na
+            wHSsmtLbl := na
+            wHSsmtEventKey := eventKeyH
+            wHSsmtPurgeTs := na
+        if splitH and not na(chBHprev) and not na(chBHprevTs) and not na(chQts)
+            if chartSweepH
+                int qEndH = chQts + ssmtQuarterLen
+                if na(wHSsmtPurgeTs) and time >= chQts and time < qEndH and close > chBHprev
+                    wHSsmtPurgeTs := time
+                wHSsmtLine2 := f_kill(wHSsmtLine2)
+                wHSsmtLine := f_set_or_make_hline_w_style(wHSsmtLine, chBHprevTs, qEndH, chBHprev, color.new(ssmtBearLineCol, 50), ssmtLineWidth, "Solid")
+            else
+                wHSsmtPurgeTs := na
+                wHSsmtLine2 := f_kill(wHSsmtLine2)
+                wHSsmtLine := f_set_or_make_line(wHSsmtLine, chBHprevTs, chBHprev, chBHcurTs, chBHcur, color.new(ssmtBearLineCol, 50), ssmtLineWidth)
+            bool showLabelH = crackedH != "" and not chartSweepH and na(wHSsmtPurgeTs)
+            if showLabelH
+                string lblTextH = ssmtHiddenLabelPrefix + crackedH
+                if na(wHSsmtLbl)
+                    wHSsmtLbl := label.new(chBHprevTs, chBHprev, lblTextH, xloc=xloc.bar_time, style=label.style_label_left, textcolor=color.black, color=color.new(color.black, 100), size=size.tiny)
+                else
+                    label.set_xy(wHSsmtLbl, chBHprevTs, chBHprev)
+                    label.set_text(wHSsmtLbl, lblTextH)
+            else if not na(wHSsmtLbl)
+                label.delete(wHSsmtLbl)
+                wHSsmtLbl := na
+        else
+            wHSsmtLine := f_kill(wHSsmtLine)
+            wHSsmtLine2 := f_kill(wHSsmtLine2)
+            if not na(wHSsmtLbl)
+                label.delete(wHSsmtLbl)
+                wHSsmtLbl := na
+            wHSsmtPurgeTs := na
+        f_ssmt_hist_trim(wHSsmtHistLines, wHSsmtHistLbls, ssmtKeep)
+    else
+        wHSsmtLine := f_kill(wHSsmtLine)
+        wHSsmtLine2 := f_kill(wHSsmtLine2)
+        if not na(wHSsmtLbl)
+            label.delete(wHSsmtLbl)
+            wHSsmtLbl := na
+        f_ssmt_hist_clear(wHSsmtHistLines, wHSsmtHistLbls)
+        wHSsmtEventKey := na
+        wHSsmtPurgeTs := na
+else
+    wSsmtLine := f_kill(wSsmtLine)
+    wSsmtLine2 := f_kill(wSsmtLine2)
+    wBSsmtLine := f_kill(wBSsmtLine)
+    wBSsmtLine2 := f_kill(wBSsmtLine2)
+    wHBSsmtLine := f_kill(wHBSsmtLine)
+    wHBSsmtLine2 := f_kill(wHBSsmtLine2)
+    wHSsmtLine := f_kill(wHSsmtLine)
+    wHSsmtLine2 := f_kill(wHSsmtLine2)
+    if not na(wSsmtLbl)
+        label.delete(wSsmtLbl)
+        wSsmtLbl := na
+    if not na(wBSsmtLbl)
+        label.delete(wBSsmtLbl)
+        wBSsmtLbl := na
+    if not na(wHBSsmtLbl)
+        label.delete(wHBSsmtLbl)
+        wHBSsmtLbl := na
+    if not na(wHSsmtLbl)
+        label.delete(wHSsmtLbl)
+        wHSsmtLbl := na
+    f_ssmt_hist_clear(wSsmtHistLines, wSsmtHistLbls)
+    f_ssmt_hist_clear(wBSsmtHistLines, wBSsmtHistLbls)
+    f_ssmt_hist_clear(wHBSsmtHistLines, wHBSsmtHistLbls)
+    f_ssmt_hist_clear(wHSsmtHistLines, wHSsmtHistLbls)
+    wSsmtEventKey := na
+    wBSsmtEventKey := na
+    wHBSsmtEventKey := na
+    wHSsmtEventKey := na
+    wSsmtPurgeTs := na
+    wBSsmtPurgeTs := na
+    wHBSsmtPurgeTs := na
+    wHSsmtPurgeTs := na
+
+if barstate.islast
+    if showWeeklyQOpenTable
+        [exp2, exp3] = qta.resolve_pair_symbols(selection_mode, badj, sym, symTicker, chartTicker, chartRoot)
+        string actual2Txt = str.length(tsym2) > 0 ? f_ssmt_debug_symbol_text(tsym2) : ""
+        string actual3Txt = str.length(tsym3) > 0 ? f_ssmt_debug_symbol_text(tsym3) : ""
+        string expected2Txt = str.length(exp2) > 0 ? f_ssmt_debug_symbol_text(exp2) : ""
+        string expected3Txt = str.length(exp3) > 0 ? f_ssmt_debug_symbol_text(exp3) : ""
+        string actualTxt = str.length(actual2Txt) > 0 and str.length(actual3Txt) > 0 ? actual2Txt + " | " + actual3Txt : str.length(actual2Txt) > 0 ? actual2Txt : "none"
+        string expectedTxt = str.length(expected2Txt) > 0 and str.length(expected3Txt) > 0 ? expected2Txt + " | " + expected3Txt : str.length(expected2Txt) > 0 ? expected2Txt : "none"
+        bool passSel = triadModeActive and triad_ok and ((str.upper(tsym2) == str.upper(exp2) and str.upper(tsym3) == str.upper(exp3)) or (str.upper(tsym2) == str.upper(exp3) and str.upper(tsym3) == str.upper(exp2)))
+        color headBg = color.new(color.gray, 85)
+        color bodyBg = color.white
+        color passBg = passSel ? color.new(color.green, 80) : color.new(color.red, 80)
+        table.cell(wkOpenTbl, 0, 0, "Field", text_color=color.black, bgcolor=headBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 0, "Value", text_color=color.black, bgcolor=headBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 1, "Chart", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 1, dbgChartAsset + " (" + dbgChartShort + ")", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 2, "Mode", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 2, triadModeActive ? "Triad" : "Off", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 3, "Branch", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 3, triadBranch, text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 4, "Actual", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 4, actualTxt, text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 5, "Expected", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 5, expectedTxt, text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 6, "Result", text_color=color.black, bgcolor=passBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 6, passSel ? "PASS" : "FAIL", text_color=color.black, bgcolor=passBg, text_size=size.small)
+        table.cell(wkOpenTbl, 0, 7, "Peer Tags", text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+        table.cell(wkOpenTbl, 1, 7, (str.length(dbgSsmtAsset2Short) > 0 ? dbgSsmtAsset2Short : "na") + (str.length(dbgSsmtAsset3Short) > 0 ? " | " + dbgSsmtAsset3Short : ""), text_color=color.black, bgcolor=bodyBg, text_size=size.small)
+    else
+        table.clear(wkOpenTbl, 0, 0, 1, 7)

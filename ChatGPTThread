@@ -1,0 +1,748 @@
+
+
+
+
+Based on your memory, what do you know about my trading model?
+
+
+Thought for 27s
+From memory, your model is basically a Quarterly Theory–driven timing model with SMT/SSMT, True Opens, PDArray reactions, and intermarket confirmation layered on top.
+Core framework
+You follow TraderDaye-style Quarterly Theory.
+You treat time as fractal, broken into 4 quarters on each cycle:
+Year = 4 quarters
+Month = 4 quarters
+Week = 4 quarters
+Day = 4 quarters
+Sessions = 4 quarters
+Your stored daily cycle is:
+Q1: 6 PM–12 AM
+Q2: 12 AM–6 AM
+Q3: 6 AM–12 PM
+Q4: 12 PM–6 PM
+True Open concept
+Q2 open is the True Open of the cycle.
+You use True Opens across multiple timeframes as major reference points.
+Your notes include:
+True Year Open: April / first Monday of April open
+True Month Open: second Monday / second full week open
+True Week Open: Tuesday open, with a variant of Monday 18:00
+True Day Open: 12:00 AM
+Session True Opens: London 1:30 AM, NY AM 7:30 AM, NY PM 1:30 PM
+Bias idea:
+Bullish: price below the cycle True Open, or manipulates below it before confirming higher
+Bearish: inverse
+Phase logic
+You use the two main cycle orderings:
+AMDX
+Q1 Accumulation / consolidation
+Q2 Manipulation / Judas Swing
+Q3 Distribution
+Q4 Continuation or reversal
+XAMD
+Q1 Continuation / reversal
+Q2 Accumulation
+Q3 Manipulation
+Q4 Distribution
+You also use this rule:
+If Q1 expands, Q2 likely consolidates
+If Q1 consolidates, Q2 likely expands
+Entry logic / confirmations
+Your model looks for:
+Reaction to a Key PDArray after interaction with a True Open
+SMT as the spark for the move
+Sequential SMT (SSMT) between quarters, especially around Q3–Q4
+Manipulation confirmed by SSMT
+Preference for closes over wicks
+PSP logic, including that a PSP does not need to be a swing on all assets
+Defining range concepts can apply to any quarter, not just Q1
+Q4 reversal logic
+A major model in your notes is:
+For a Q4 reversal, expect:
+swing point in the second half of Q3
+SSMT in the first half of Q4
+price above the Revolving True Open
+“Revolving True Open” in your notes = Q4 open when SSMT is present between Q3→Q4 or Q4→Q1
+You prefer trading the asset that failed to make the confirming high/low because it often gives the better expansion
+Intermarket logic
+Your broader model includes intermarket sequencing:
+Bonds / rates → Dollar → FX → indices
+Stored triads:
+Rates/Bonds: ZB, ZF, TN
+FX: DXY, 6E, 6B
+Indices: ES, NQ, YM
+But in recent discussion, you said for your testing you want to focus on a commodity triad:
+CL, RB, HO
+with CL and RB being the strongest correlation pair
+Gap and imbalance preferences
+You prefer BPRs over FVGs
+NWOG + FVG after SSMT is a valid reaction framework
+You also track SMT-Fill:
+same-time FVGs on correlated assets
+one asset fills or partially fills while the other does not
+used as a crack in correlation / relative strength signal
+News / timing overlays
+You also track news as part of the model:
+Prefer trading on HIN days
+The day with the most high-impact news often forms HOTW/LOTW
+Expect LTF SSMT in the quarter where the news event occurs
+If manipulation happens before 9:30, expect 9:30 distribution
+If no manipulation before 9:30, expect 9:30 manipulation
+If 9:30 manipulates, expect about 10:00 expansion
+Pre-FOMC:
+if manipulation is already done, FOMC often becomes distribution
+Execution mapping
+Stored mapping includes:
+Weekly → H1
+Daily → M15
+90m → M5
+Micro → M1
+And PDArray pairing notes:
+1M trade → 15M PDArray
+5M trade → 1H PDArray
+15M trade → 4H PDArray
+1H trade → Daily PDArray
+4H trade → Weekly PDArray
+Misc. preferences I remember
+You prefer the word “consolidates” instead of “coils.”
+You want your rules doc maintained as “QT Core Rules.”
+For Pine work tied to this model:
+Pine v6
+QTEngine v19
+no calc_on_every_tick=true
+use state-trigger early mode for QT boundary realization
+If you want, I can turn this into a clean one-page spec of your trading model with sections for Bias, Setup, Confirmation, Entry, and Invalidation.
+
+Yes please do that
+
+Trading Model Spec — QT Core
+1) Core Premise
+This is a Quarterly Theory timing model built around:
+Fractal time cycles
+True Opens
+SMT / Sequential SMT
+PDArray reactions
+Intermarket relative strength / weakness
+News-timed manipulation and distribution
+The model assumes that time organizes price delivery, and that the highest-probability trades come when price reaches a meaningful opening price or PDArray during the correct quarter of the cycle, with SSMT confirming the narrative.
+2) Time Framework
+Fractal cycle structure
+Year = 4 quarters
+Month = 4 quarters
+Week = 4 quarters
+Day = 4 quarters
+Session = 4 quarters
+Daily cycle used
+Q1: 6:00 PM – 12:00 AM
+Q2: 12:00 AM – 6:00 AM
+Q3: 6:00 AM – 12:00 PM
+Q4: 12:00 PM – 6:00 PM
+Core rule
+Q2 open is the True Open of the cycle.
+3) True Open Framework
+Main idea
+True Opens are the backbone of the model. Price is judged by how it behaves around, through, and back around these opens.
+True Open bias logic
+Bullish condition: price is below the cycle’s True Open, or raids below it, then confirms higher
+Bearish condition: inverse
+Stored True Open references
+True Year Open: April open / first Monday of April open
+True Month Open: second Monday / second full week open
+True Week Open: Tuesday open, with variant reference of Monday 6:00 PM
+True Day Open: 12:00 AM
+Session True Opens: London 1:30 AM, NY AM 7:30 AM, NY PM 1:30 PM
+Revolving True Open
+Defined as the Q4 open of a cycle when SSMT is present between Q3→Q4 or Q4→Q1
+Important for reversal models, especially Q4 reversals
+4) Phase Logic
+Two core cycle orderings are used:
+AMDX
+Q1: Accumulation / consolidation
+Q2: Manipulation / Judas Swing
+Q3: Distribution
+Q4: Continuation or reversal
+XAMD
+Q1: Continuation or reversal
+Q2: Accumulation / consolidation
+Q3: Manipulation
+Q4: Distribution
+Barometer rule
+If Q1 expands, then Q2 likely consolidates
+If Q1 consolidates, then Q2 likely expands
+5) Bias Model
+Bias is not taken from raw direction alone. It is built from the stack below:
+Bias checklist
+Where is price relative to the relevant True Open?
+What quarter of the cycle is active?
+Is the cycle behaving like AMDX or XAMD?
+Has price interacted with a key PDArray?
+Has SMT / SSMT confirmed manipulation or relative weakness?
+Is there intermarket confirmation?
+Is there a news-timing reason for manipulation or distribution?
+A trade is strongest when multiple layers line up instead of relying on one isolated signal.
+6) Setup Conditions
+Base setup
+A valid setup usually needs:
+Price interaction with a True Open
+Price reaching a key PDArray
+Proper quarter timing
+SMT or SSMT
+Clear relative strength / weakness across correlated assets
+Preferred environment
+Price manipulates around a True Open
+Then reacts from a PDArray
+Then confirms with SSMT
+Then expands during the expected distribution phase
+PDArray preference
+Prefer BPRs over FVGs
+NWOG aligned with FVG after SSMT strengthens the reaction case
+7) Confirmation Rules
+SMT / SSMT
+SMT kicks off the move
+Sequential SMT confirms manipulation
+SSMT is especially important across quarter transitions, especially Q3–Q4
+Close-based confirmation
+Closes matter more than wicks
+Wicks are treated more like gaps or probing behavior
+Stronger confirmation comes from one asset closing through a key level while the correlated asset does not
+PSP logic
+A PSP does not need to be a swing point on all assets
+If it is a swing point on at least one asset, it can still qualify
+A non-hidden SSMT that only wicks past prior-quarter levels matters when that candle closes as a PSP
+8) Primary Trade Models
+A) True Open manipulation model
+Price trades below/above the relevant True Open
+It fails to continue cleanly
+It reclaims or rejects around the True Open
+SSMT confirms relative weakness/strength
+Entry is taken toward the expected distribution leg
+B) Q4 reversal model
+Requirements:
+Swing point forms in the second half of Q3
+SSMT appears in the first half of Q4
+Price is above the Revolving True Open for bearish reversal logic, or inverse for bullish logic
+Favor the asset that failed to make the confirming high/low
+C) News-driven manipulation/distribution model
+Manipulation often occurs before the major news release
+If manipulation already happened, the news event often becomes distribution
+LTF SSMT should appear in the quarter where the news occurs
+If price runs without the LTF SSMT, probability drops and the trade is often skipped
+9) News Timing Rules
+9:30 rule
+If manipulation occurs before 9:30, expect 9:30 distribution
+If no manipulation occurs before 9:30, expect 9:30 manipulation
+If 9:30 manipulates, expect roughly 10:00 expansion
+If 9:30 distributes, expect 10:00 retracement or reversal
+HIN rule
+Prefer trading on High Impact News days
+The day with the most HIN often forms HOTW/LOTW
+LTF SSMT should show up in the quarter where the news happens
+Pre-FOMC rule
+HTF SSMT + LTF SSMT before FOMC often signals that manipulation is already complete
+In that case, FOMC is more likely to be distribution
+10) Intermarket Logic
+Macro order of control
+Bonds / interest rates → Dollar → FX → Index futures
+Stored triads
+Rates/Bonds
+ZB
+ZF
+TN
+FX
+DXY
+6E
+6B
+Indices
+ES
+NQ
+YM
+Commodity triad you wanted to focus on
+CL
+RB
+HO
+With CL and RB treated as the strongest correlation pair.
+Relative strength rule
+A major signal is when:
+one asset trades to a True Open and another does not, or
+one asset fills a gap / rebalances an imbalance and the other fails
+That is treated as a crack in correlation and often exposes the stronger or weaker vehicle.
+11) SMT-Fill Logic
+SMT-Fill requires a same-time FVG on at least two correlated assets.
+Variants
+One asset retraces into its gap, the other does not
+One asset trades below the 50% gap midpoint, the other does not
+One asset fully fills the gap, the other fails to fill
+Use
+Confirms relative weakness/strength
+Helps validate whether the first post-SSMT FVG is likely to hold
+Useful both as a direct signal and as added confirmation inside a HTF imbalance
+12) Execution Mapping
+Cycle to execution timeframe
+Weekly → H1
+Daily → M15
+90m → M5
+Micro → M1
+PDArray pairing
+1M trade → 15M PDArray
+5M trade → 1H PDArray
+15M trade → 4H PDArray
+1H trade → Daily PDArray
+4H trade → Weekly PDArray
+13) Entry Model
+Long
+Price is below a relevant True Open or manipulates below it
+Price reacts from a valid PDArray
+SSMT confirms strength
+Correlated asset fails to confirm downside
+Entry is taken toward expected distribution
+Short
+Price is above a relevant True Open or manipulates above it
+Price reacts from a valid PDArray
+SSMT confirms weakness
+Correlated asset fails to confirm upside
+Entry is taken toward expected distribution
+14) Invalidation
+A setup weakens or fails when:
+No meaningful interaction with a True Open
+No SSMT
+Price runs without creating the expected LTF confirmation
+Multiple correlated assets confirm through the same level in the same direction
+The first post-SSMT FVG fails badly
+Quarter timing no longer supports the model
+News timing contradicts the expected manipulation/distribution sequence
+15) Plain-English Summary
+Your model is basically this:
+Wait for time to matter, let price reach an important opening price or imbalance, look for SMT/SSMT to expose manipulation, confirm relative strength across correlated assets, and only then press for the distribution leg.
+
+If you want, I can convert this into a tighter checklist version titled:
+
+“QT Core Rules — Bias / Setup / Confirmation / Entry / Invalidation”
+
+I just don’t understand how why I can’t code this into a strategy? Is it because there are different market conditions?
+
+
+Thought for 14s
+Yes, but “different market conditions” is only half the problem.
+The real issue
+A strategy can only trade rules that are explicit, binary, and testable.
+Your model still contains a lot of discretionary language, which humans handle well and code handles badly.
+
+Examples:
+
+“key PDArray”
+“proper quarter timing”
+“manipulation”
+“good SSMT”
+“crack in correlation”
+“best asset to trade”
+“news likely becomes distribution”
+That sounds clean in your head, but to a strategy it means: define the exact formula or I do nothing.
+What code needs that your model does not yet fully have
+1. Precise definitions
+You need exact answers to questions like:
+What is a swing high/low?
+What qualifies as PSP?
+What exact candle behavior counts as SSMT?
+How many bars apart can the two assets be?
+Does wick count, close count, or both?
+Which PDArray has priority if two are present?
+If those are not mathematically fixed, the backtest is garbage.
+2. Regime handling
+Yes, market conditions matter.
+But the real coding problem is not “markets change.”
+
+It is that your setup likely behaves differently in different regimes, and the code does not yet know when to switch gears.
+
+Examples:
+
+trend day vs range day
+news day vs non-news day
+expansion already done vs expansion pending
+correlated assets in sync vs cracked correlation
+clean delivery vs sloppy chop
+A human can say, “this is not the right environment.”
+A dumb strategy says, “signal fired, boss.”
+
+3. Multi-layer context
+Your model is not a single trigger.
+It is a stacked narrative model:
+
+quarter of cycle
+relative location to True Open
+PDArray interaction
+SMT/SSMT
+intermarket confirmation
+news timing
+expected distribution window
+That is codeable, but it becomes a state machine, not a simple entry condition.
+4. Ambiguous sequencing
+A lot of your edge is about order of events, not just presence of events.
+Example:
+
+manipulate first
+then SSMT
+then reclaim/reject True Open
+then distribute in the correct quarter
+That is much harder than coding “buy when A and B are true.”
+So can it be coded?
+Yes — parts of it can absolutely be coded.
+What usually cannot be coded well is the full discretionary version of the model all at once.
+
+That is why most traders fail here: they try to code the whole philosophy instead of one narrow executable play.
+
+The correct way to code it
+Start with one tiny model, not the whole QT universe.
+Example:
+
+Asset set: CL / RB / HO
+Day: Wednesday only
+Cycle: Daily cycle only
+Setup: Q4 reversal only
+PDArray: BPR only
+Confirmation: close-based SSMT only
+Entry: first reclaim/reject after SSMT
+Exit: fixed target or opposite quarter objective
+Now you are coding a strategy.
+Before that, you are coding a religion.
+
+What is probably stopping you right now
+Not “market conditions.”
+It is these 3 things:
+
+Your rules are not fully atomic yet
+Your model is too broad
+Too much of the edge lives in contextual filtering
+The honest answer
+Your model is probably semi-systematic, not fully systematic right now.
+That is normal.
+
+A discretionary model can still be real, but a strategy needs every important judgment converted into:
+
+exact inputs
+exact conditions
+exact sequence
+exact invalidation
+No vibes allowed.
+Best next move
+Take one setup only and force yourself to answer this:
+What exact condition starts the setup?
+What exact condition confirms it?
+What exact bar triggers entry?
+What exact condition kills it?
+In what exact regime is it banned?
+Once you can answer those without hand-waving, then it stops being “market conditions” and starts being code.
+Pick one, and I’ll help you turn it into a truly testable rule set.
+
+I think I like the example you gave. Please give me a list of questions about that model that I need to answer before coding it
+
+Questions to Answer Before Coding That Model
+Model scope assumed:
+Assets: CL / RB / HO
+Day filter: Wednesday only
+Cycle: Daily cycle
+Setup: Q4 reversal
+PDArray: BPR only
+Confirmation: close-based SSMT only
+Entry: first reclaim/reject after SSMT
+Exit: fixed target or opposite quarter objective
+1) Market and data definitions
+Which exact symbols will the strategy use for CL, RB, and HO?
+Which data feed/provider will you treat as the source of truth?
+Which contract logic will you use:
+front month
+continuous contract
+custom rollover
+If continuous, how will you handle rollover distortions?
+What chart timeframe will execute the strategy:
+1m
+5m
+15m
+Will all three assets be read on the same timeframe?
+What timezone will define your cycle boundaries?
+Will daylight savings shift anything, or will you force a fixed timezone?
+What session hours count as valid for these markets?
+Will overnight bars be included fully, or only regular liquid hours?
+2) Day and cycle filters
+What exactly counts as Wednesday:
+calendar Wednesday in exchange time
+Wednesday in your local time
+Does the strategy begin looking for setups at the start of the daily cycle or only during Q4?
+What are the exact quarter boundaries for this version of the model?
+Are you using your stored daily quarters:
+Q1 = 6 PM–12 AM
+Q2 = 12 AM–6 AM
+Q3 = 6 AM–12 PM
+Q4 = 12 PM–6 PM
+Does the setup require the Q3 swing to form on the same Wednesday cycle?
+Can the Q3 anchor form earlier and still qualify?
+Must the reversal complete inside Q4 only?
+If the signal starts late in Q4 and entry would occur after Q4 ends, is it invalid?
+3) Setup intent
+What is the exact narrative of this setup in one sentence?
+Is this model trying to catch:
+a reversal from a Q3 extreme
+a failure swing in Q4
+a mean reversion back through a True Open
+a full opposite-side distribution move
+Is the model long-only, short-only, or both?
+Do longs and shorts use perfectly symmetrical rules?
+Is the setup intended only after an expanded Q3, or also after consolidated Q3s?
+4) Q3 swing definition
+What exactly is the Q3 swing point?
+Is it the absolute high/low of Q3?
+Is it a fractal swing using left/right bars?
+How many bars on each side define that swing?
+Can there be multiple Q3 swings, and if so which one matters?
+Does the swing need to occur in the second half of Q3?
+What exact timestamp marks the second half of Q3?
+If price makes a new high/low again near the end of Q3, which swing is the anchor?
+Does the swing need displacement away from it to be valid?
+Must that swing interact with a BPR or a True Open first?
+5) Q4 reversal definition
+What exactly qualifies as a Q4 reversal?
+Is it defined by:
+failure to continue past Q3 swing
+SSMT against a correlated asset
+reclaim/reject of a level
+market structure shift
+Must price first raid the Q3 swing in Q4?
+How far beyond the Q3 swing must price go to count as a raid?
+Is one tick enough, or do you require a minimum excursion?
+If price never takes the Q3 swing but still reverses, does it count?
+Does the reversal require a close back inside Q3 range?
+Does it require reclaim of the Q4 open, True Open, or BPR midpoint?
+What is the exact invalidation condition for saying “this is not a reversal”?
+6) SSMT definition
+What is your exact mathematical definition of SSMT here?
+Which assets are compared:
+CL vs RB only
+CL vs HO only
+RB vs HO only
+all three
+Is CL the anchor asset?
+Must SSMT occur between only two assets, or can the third be ignored?
+Is the signal based on:
+wick breach
+close breach
+body midpoint
+full candle body close
+Since you said close-based SSMT, what exact close condition qualifies?
+Must one asset close beyond the prior quarter swing while the other does not?
+Does “does not” mean:
+no wick breach
+no close breach
+no 50% body close through
+Which prior level is being compared:
+previous Q3 high/low
+previous quarter high/low
+current session swing
+How close in time must the divergence occur between assets?
+Must both bars close on the same timestamp?
+If one asset confirms one bar later, is it still valid?
+What is the maximum lag allowed?
+Can multiple SSMTs occur, and if so which one is used?
+Does the first SSMT always have priority?
+Does the SSMT have to occur in the first half of Q4?
+What exact timestamp marks the first half of Q4?
+If SSMT occurs late in Q4, is it automatically disqualified?
+7) BPR definition
+What exact BPR formula will you use?
+Are you using the standard overlapping opposite-direction FVG definition?
+On what timeframe is the BPR detected?
+Must the BPR form during Q4 only?
+Can the BPR originate in Q3 and remain valid in Q4?
+Does the BPR need to be fresh, untapped, partially tapped, or any state?
+How do you define a BPR as “mitigated” or no longer tradable?
+If multiple BPRs exist, which one has priority?
+Is the chosen BPR the nearest one, the largest one, or the first post-SSMT one?
+Does the BPR need to align with the reversal direction?
+Does the BPR need to overlap a True Open or another key level?
+Do you require price to touch:
+BPR edge
+midpoint
+full span
+Is a wick into BPR enough, or must price close into it?
+Does the BPR serve as entry zone, confirmation zone, or target?
+8) Reclaim / reject trigger
+What exactly is the “first reclaim/reject after SSMT”?
+Which level is being reclaimed or rejected:
+BPR boundary
+Q4 open
+True Open
+Q3 swing
+another level
+What defines a reclaim?
+What defines a reject?
+Is reclaim/reject based on wick or close?
+Must reclaim/reject happen immediately after SSMT, or can bars pass first?
+What is the maximum number of bars allowed after SSMT before the trigger expires?
+If price touches the level multiple times, do you take only the first signal?
+Does the entry happen:
+at bar close
+stop order above/below trigger bar
+limit order on retrace
+Must the trigger candle have minimum displacement?
+Must the trigger candle close beyond its own midpoint/body threshold?
+Can a doji qualify as reclaim/reject?
+Do you require volume expansion or ignore volume entirely?
+9) True Open usage
+Is the daily True Open part of this setup or excluded for simplicity?
+If included, what exact role does it play:
+directional filter
+confirmation
+target
+invalidation
+Must bullish reversals begin below the True Open and bearish reversals above it?
+Must price cross back through the True Open before entry?
+If the True Open conflicts with the BPR direction, which rule wins?
+10) Asset selection logic
+Which asset does the strategy actually trade:
+always CL
+always RB
+always HO
+the weaker/stronger diverging asset
+If the model says “trade the one that failed to confirm,” how is that coded exactly?
+How do you define “failed to confirm” in exact terms?
+If two assets fail differently, which one gets priority?
+Will the backtest trade one instrument only, or place parallel trades on multiple assets?
+If multiple assets qualify, do you:
+pick one
+trade all
+choose by volatility
+choose by ATR distance
+If CL and RB disagree but HO is noisy, is HO ignored?
+11) Regime filters
+What market conditions make this setup tradable?
+What conditions ban the setup?
+Do you want a trend filter?
+Do you want a volatility filter?
+Do you want an ADR/ATR expansion filter?
+Must Q3 have minimum range size?
+Must Q3 not be too large already?
+Should the setup be skipped on inventory, CPI, FOMC, or other major news days?
+Or is the setup specifically meant to exploit those days?
+Should low-volume holiday sessions be excluded?
+Should contract rollover dates be excluded?
+Should you skip days when one of the correlated assets has abnormal data or thin trading?
+12) News handling
+Will the code include news filters at all?
+If yes, which events matter?
+Are you hardcoding times or importing a calendar manually?
+If there is major news inside Q4, is that required, optional, or disqualifying?
+If there is news before Q4 and manipulation already occurred, do you want a separate rule?
+If no news data is available in code, will you ignore news entirely for version 1?
+13) Entry price and order model
+At what exact price is entry executed?
+Do you assume perfect fills at bar close?
+Do you use stop orders above/below trigger candle?
+Do you use limit entries into the BPR?
+Will you allow intrabar fills, or only confirmed-bar fills?
+One entry per day or multiple?
+One entry per asset or one total entry across the model?
+Can the model re-enter after stopout?
+If yes, under what exact condition?
+What is the latest allowed entry time in Q4?
+14) Stop loss
+Where exactly is the stop placed?
+Is it beyond:
+Q4 swing
+SSMT extreme
+BPR boundary
+trigger candle
+Is one tick beyond enough?
+Or do you require ATR padding?
+Does stop placement differ for CL, RB, and HO due to volatility?
+Is stop fixed at entry or trailed?
+If trailed, by what rule exactly?
+If the stop is too large in dollars, is the trade skipped?
+15) Targets and exits
+What is the primary exit logic?
+Fixed R multiple?
+Opposite quarter objective?
+True Open?
+Opposing BPR/FVG?
+Prior range midpoint?
+Session close?
+End of Q4 no matter what?
+Are partials taken?
+If yes, at what exact level?
+Does the remaining position trail?
+What exact trailing rule applies?
+If target is not hit by end of Q4, do you flatten?
+If price reaches target before full confirmation bar closes, do you count it?
+16) Position sizing and risk
+Will the strategy use fixed contracts or percent risk?
+Same size across CL, RB, and HO?
+Or normalize size by dollar volatility?
+What is max risk per trade?
+What is max daily loss?
+What is max number of trades per Wednesday?
+Can the model pyramid?
+If slippage turns the stop distance too large, is the trade skipped?
+17) Backtest assumptions
+What commissions will you assume?
+What slippage will you assume?
+Will slippage differ by product?
+Are fills based on bar close only?
+Are you comfortable with Pine’s intrabar limitations for this setup?
+Do you need lower-timeframe confirmation pulled in with request.security()?
+If so, which lower timeframe will be the execution truth?
+How many years of data will you test?
+Will you segment by regime:
+trending years
+volatile years
+low-vol years
+Will you test only Wednesdays, or compare Wednesdays versus other days too?
+18) Performance evaluation
+What metric makes the model “good enough”?
+Win rate?
+Profit factor?
+Average R?
+Max drawdown?
+Trade frequency?
+Consistency year to year?
+Does a low win rate but high R multiple still fit your psychology?
+How many trades are enough before you trust the sample?
+Are you testing for:
+profitability
+narrative validity
+or both
+19) Versioning and simplification
+What must be in version 1 and what can wait?
+Should version 1 ignore news completely?
+Should version 1 ignore True Open and use only Q3 swing + SSMT + BPR?
+Should version 1 trade only CL while using RB/HO only for confirmation?
+Should version 1 allow only one specific direction?
+Should version 1 use one fixed target and one fixed stop just to test signal quality?
+What discretionary elements are you willing to temporarily remove so the thing can actually be coded?
+20) Final forcing questions
+These are the ones that matter most.
+What exact event starts the setup?
+What exact event confirms the setup?
+What exact bar triggers the trade?
+What exact level invalidates the setup?
+What exact level takes profit?
+What exact asset gets traded?
+What exact time window allows the trade?
+What exact conditions ban the trade?
+What exact definitions turn your narrative words into numbers?
+What exact parts of your edge are real, and what exact parts are still intuition?
+Best way to do this
+Do not answer all 194 at once.
+Start with these 12:
+
+Which asset is traded?
+What timeframe executes?
+What are the exact Q3 and Q4 boundaries?
+How is the Q3 swing defined?
+How is SSMT defined?
+Which two assets are compared for SSMT?
+How is BPR defined?
+What level is reclaimed/rejected?
+What exact bar triggers entry?
+Where is stop placed?
+Where is target placed?
+What conditions cancel the setup?
+Once those are locked, the strategy stops being theory and starts becoming code.
+
+

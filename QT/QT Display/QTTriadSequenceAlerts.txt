@@ -1,0 +1,783 @@
+//@version=6
+indicator("QT Triad Sequence Alerts", overlay=false, max_labels_count=50)
+import Jaw1312/QTEngineElastic/11 as qt
+import Jaw1312/QTAssets/4 as qta
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+const int MS_SEC = 1000
+const int MS_MIN = 60 * MS_SEC
+const int MS_HR  = 60 * MS_MIN
+const int LEN_24H = 24 * MS_HR
+
+const int STATE_IDLE = 0
+const int STATE_W_SSMT_ARMED = 1
+const int STATE_H4_TPD_CONFIRMED = 2
+const int STATE_FULL_BEARISH_CONFIRMED = 3
+
+const int PAIR_NONE = 0
+const int PAIR_ES_NQ = 12
+const int PAIR_ES_YM = 13
+const int PAIR_NQ_YM = 23
+
+const int REGULAR_SSMT = 1
+const int HIDDEN_SSMT = 2
+
+const string TRIAD_ES = "CME_MINI:ES1!"
+const string TRIAD_NQ = "CME_MINI:NQ1!"
+const string TRIAD_YM = "CBOT_MINI:YM1!"
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+groupTriad = "TRIAD"
+selectedTriad = input.string("ES / NQ / YM", "Selected Triad", options=["ES / NQ / YM"], group=groupTriad)
+
+groupSSMT = "SSMT"
+includeWeeklyHidden = input.bool(true, "Include Weekly HSSMT", group=groupSSMT)
+includeDailyHidden = input.bool(true, "Include Daily HSSMT", group=groupSSMT)
+
+groupState = "STATE"
+resetAfterDays = input.int(14, "Ignore Sequence State After N Days", minval=0, maxval=365, group=groupState)
+disableAlertsOnUnsafeTF = input.bool(true, "Disable Alerts Above 15m Chart TF", group=groupState)
+
+groupDebug = "DEBUG"
+showDebugTable = input.bool(true, "Show Debug Table", group=groupDebug)
+
+bool chartTfSafe = timeframe.in_seconds(timeframe.period) <= timeframe.in_seconds("15")
+bool alertsAllowed = not disableAlertsOnUnsafeTF or chartTfSafe
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+f_ssmt_sym_ticker(string sym) =>
+    string s = str.upper(sym)
+    if str.contains(s, "\"SYMBOL\":\"")
+        string[] partsSym = str.split(s, "\"SYMBOL\":\"")
+        if array.size(partsSym) > 1
+            string right = array.get(partsSym, 1)
+            string[] partsEnd = str.split(right, "\"")
+            s := array.get(partsEnd, 0)
+    if str.contains(s, "{")
+        string[] partsBrace = str.split(s, "{")
+        s := array.get(partsBrace, 0)
+    if str.contains(s, "|")
+        string[] partsPipe = str.split(s, "|")
+        s := array.get(partsPipe, 0)
+    string[] parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+f_ssmt_match_tag(string sym) =>
+    string tk = str.upper(f_ssmt_sym_ticker(sym))
+    string tag = ""
+    if str.contains(tk, "MNQ") or str.contains(tk, "NQ")
+        tag := "NQ"
+    else if str.contains(tk, "MES") or str.contains(tk, "ES")
+        tag := "ES"
+    else if str.contains(tk, "MYM") or str.contains(tk, "YM")
+        tag := "YM"
+    tag
+
+f_check_match(string input_sym) =>
+    bool valid = str.length(input_sym) > 0 and str.contains(input_sym, ":")
+    if not valid
+        false
+    else
+        string inputUp = str.upper(input_sym)
+        string[] parts = str.split(inputUp, ":")
+        string tSym = array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : inputUp
+        string curTicker = str.upper(syminfo.ticker)
+        string curId = str.upper(syminfo.tickerid)
+        bool directMatch = (curTicker == tSym) or str.contains(curId, tSym) or str.contains(inputUp, curTicker)
+        if directMatch
+            true
+        else
+            string inTag = f_ssmt_match_tag(input_sym)
+            string curTag = f_ssmt_match_tag(syminfo.tickerid)
+            str.length(inTag) > 0 and str.length(curTag) > 0 and inTag == curTag
+
+f_ssmt_label_sym(string sym) =>
+    string allUp = str.upper(f_ssmt_sym_ticker(sym))
+    string out = ""
+    if str.contains(allUp, "MNQ")
+        out := "MNQ"
+    else if str.contains(allUp, "MES")
+        out := "MES"
+    else if str.contains(allUp, "MYM")
+        out := "MYM"
+    else if str.contains(allUp, "NQ")
+        out := "NQ"
+    else if str.contains(allUp, "ES")
+        out := "ES"
+    else if str.contains(allUp, "YM")
+        out := "YM"
+    if out == ""
+        out := allUp
+    out
+
+f_state_name(int st) =>
+    switch st
+        0 => "Idle"
+        1 => "W_SSMT_ARMED"
+        2 => "H4_TPD_CONFIRMED"
+        3 => "FULL_BEARISH_CONFIRMED"
+        => "Unknown"
+
+f_debug_state_name(int st) =>
+    "Bearish - " + f_state_name(st)
+
+f_ssmt_type_name(int typ) =>
+    switch typ
+        1 => "Regular"
+        2 => "Hidden"
+        => "na"
+
+f_fmt_time(int ts) =>
+    na(ts) ? "na" : str.format_time(ts, "yyyy-MM-dd HH:mm", "America/New_York")
+
+f_fmt_float(float v) =>
+    na(v) ? "na" : str.tostring(v, "#.#####")
+
+f_pair_label(string a, string b) =>
+    f_ssmt_label_sym(a) + "/" + f_ssmt_label_sym(b)
+
+f_candle_state(float o, float c) =>
+    int st = 0
+    if c > o
+        st := 1
+    else if c < o
+        st := -1
+    st
+
+f_tpd_pair_valid(float aC3Open, float aC1Close, float aC2Open, float aC2Close, float bC3Open, float bC1Close, float bC2Open, float bC2Close) =>
+    bool ready = not na(aC3Open) and not na(aC1Close) and not na(aC2Open) and not na(aC2Close) and not na(bC3Open) and not na(bC1Close) and not na(bC2Open) and not na(bC2Close)
+    int dirA = ready ? (aC3Open > aC1Close ? 1 : aC3Open < aC1Close ? -1 : 0) : 0
+    int dirB = ready ? (bC3Open > bC1Close ? 1 : bC3Open < bC1Close ? -1 : 0) : 0
+    int c2A = ready ? f_candle_state(aC2Open, aC2Close) : 0
+    int c2B = ready ? f_candle_state(bC2Open, bC2Close) : 0
+    ready and dirA != 0 and dirB != 0 and dirA != dirB and c2A != c2B
+
+f_bear_cycle_pack(qt.CycleResult cycle, qt.QuarterRecord prev1) =>
+    float hCur = float(na)
+    int hCurTs = int(na)
+    float hPrev = float(na)
+    float bhCur = float(na)
+    int bhCurTs = int(na)
+    float bhPrev = float(na)
+    int qCur = int(na)
+    if cycle.inWindow and cycle.curQuarterIndex == 1
+        hCur := cycle.q1.h
+        hCurTs := cycle.q1.hTs
+        hPrev := prev1.h
+        bhCur := cycle.q1.bh
+        bhCurTs := cycle.q1.bhTs
+        bhPrev := prev1.bh
+        qCur := cycle.q1.boundaryTs
+    else if cycle.inWindow and cycle.curQuarterIndex == 2
+        hCur := cycle.q2.h
+        hCurTs := cycle.q2.hTs
+        hPrev := cycle.q1.h
+        bhCur := cycle.q2.bh
+        bhCurTs := cycle.q2.bhTs
+        bhPrev := cycle.q1.bh
+        qCur := cycle.q2.boundaryTs
+    else if cycle.inWindow and cycle.curQuarterIndex == 3
+        hCur := cycle.q3.h
+        hCurTs := cycle.q3.hTs
+        hPrev := cycle.q2.h
+        bhCur := cycle.q3.bh
+        bhCurTs := cycle.q3.bhTs
+        bhPrev := cycle.q2.bh
+        qCur := cycle.q3.boundaryTs
+    else if cycle.inWindow and cycle.curQuarterIndex == 4
+        hCur := cycle.q4.h
+        hCurTs := cycle.q4.hTs
+        hPrev := cycle.q3.h
+        bhCur := cycle.q4.bh
+        bhCurTs := cycle.q4.bhTs
+        bhPrev := cycle.q3.bh
+        qCur := cycle.q4.boundaryTs
+    else if cycle.inWindow and cycle.curQuarterIndex == 5
+        hCur := cycle.q5.h
+        hCurTs := cycle.q5.hTs
+        hPrev := cycle.q4.h
+        bhCur := cycle.q5.bh
+        bhCurTs := cycle.q5.bhTs
+        bhPrev := cycle.q4.bh
+        qCur := cycle.q5.boundaryTs
+    [hCur, hCurTs, hPrev, bhCur, bhCurTs, bhPrev, qCur]
+
+f_weekly_bear_pack_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+    var int seenCycleStart = int(na)
+    var float currentCycleTwo = float(na)
+    var float previousCycleTwo = float(na)
+
+    [peerStNext, peerWk] = qt.qt_weekly_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    [_, _, _, _, _, pwprev1, _] = qt.qt_weekly_qr_debug(peerSt)
+
+    if not na(peerWk.startTs) and (na(seenCycleStart) or peerWk.startTs != seenCycleStart)
+        if not na(currentCycleTwo)
+            previousCycleTwo := currentCycleTwo
+        currentCycleTwo := float(na)
+        seenCycleStart := peerWk.startTs
+    if not na(peerWk.q2.o)
+        currentCycleTwo := peerWk.q2.o
+
+    float activeTwo = peerWk.curQuarterIndex == 1 ? previousCycleTwo : currentCycleTwo
+    [hCur, hCurTs, hPrev, bhCur, bhCurTs, bhPrev, qCur] = f_bear_cycle_pack(peerWk, pwprev1)
+    [hCur, hCurTs, hPrev, bhCur, bhCurTs, bhPrev, qCur, peerWk.startTs, peerWk.curQuarterIndex, activeTwo]
+
+f_daily_bear_pack_expr() =>
+    var qt.QTConfig peerCfg = qt.qt_config_default()
+    var qt.CycleState peerSt = qt.qt_state_new()
+
+    [peerStNext, peerDay] = qt.qt_daily_update(peerSt, peerCfg, time, time_close)
+    peerSt := peerStNext
+    [_, _, _, _, _, pdprev1, _] = qt.qt_daily_qr_debug(peerSt)
+    [hCur, hCurTs, hPrev, bhCur, bhCurTs, bhPrev, qCur] = f_bear_cycle_pack(peerDay, pdprev1)
+    [hCur, hCurTs, hPrev, bhCur, bhCurTs, bhPrev, qCur]
+
+f_h4_tpd_pack_expr() =>
+    [open, close[2], open[1], close[1], time, time_close]
+
+f_bear_ssmt_pair(bool hasA, float aHCur, int aHCurTs, float aHPrev, bool hasB, float bHCur, int bHCurTs, float bHPrev) =>
+    bool sweepA = hasA ? (aHCur > aHPrev) : false
+    bool sweepB = hasB ? (bHCur > bHPrev) : false
+    bool split = hasA and hasB and sweepA != sweepB
+    int eventTs = split ? (sweepA ? aHCurTs : bHCurTs) : int(na)
+    [split, eventTs]
+
+f_pick_event(bool isValid, int eventTs, string pairName, int pairCode, int eventType, bool currentValid, int currentTs, string currentPair, int currentPairCode, int currentType) =>
+    bool outValid = currentValid
+    int outTs = currentTs
+    string outPair = currentPair
+    int outCode = currentPairCode
+    int outType = currentType
+    if isValid and not na(eventTs) and (not outValid or na(outTs) or eventTs > outTs)
+        outValid := true
+        outTs := eventTs
+        outPair := pairName
+        outCode := pairCode
+        outType := eventType
+    [outValid, outTs, outPair, outCode, outType]
+
+f_tbl_row(table t, int row, string labelText, string valueText) =>
+    table.cell(t, 0, row, labelText, text_color=color.white, bgcolor=color.new(color.black, 0), text_size=size.tiny)
+    table.cell(t, 1, row, valueText, text_color=color.black, bgcolor=color.new(color.white, 0), text_size=size.tiny)
+
+// ============================================================================
+// TRIAD DATA
+// ============================================================================
+string sym = syminfo.tickerid
+string symTicker = str.upper(f_ssmt_sym_ticker(sym))
+string chartTicker = str.upper(syminfo.ticker)
+string chartRoot = str.upper(syminfo.root)
+[assetPeer1, assetPeer2] = qta.resolve_pair_symbols("Triad", false, sym, symTicker, chartTicker, chartRoot)
+bool chartInSelectedTriad = f_check_match(TRIAD_ES) or f_check_match(TRIAD_NQ) or f_check_match(TRIAD_YM)
+bool chartHasAssetPeers = str.length(assetPeer1) > 0 or str.length(assetPeer2) > 0
+
+string triadName = selectedTriad
+string sym1 = TRIAD_ES
+string sym2 = TRIAD_NQ
+string sym3 = TRIAD_YM
+string sym1Name = f_ssmt_label_sym(sym1)
+string sym2Name = f_ssmt_label_sym(sym2)
+string sym3Name = f_ssmt_label_sym(sym3)
+string pair12Name = f_pair_label(sym1, sym2)
+string pair13Name = f_pair_label(sym1, sym3)
+string pair23Name = f_pair_label(sym2, sym3)
+
+[w1HCur, w1HCurTs, w1HPrev, w1BHCur, w1BHCurTs, w1BHPrev, w1QCur, w1CycleStart, w1Qi, w1Two] = request.security(sym1, "60", f_weekly_bear_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[w2HCur, w2HCurTs, w2HPrev, w2BHCur, w2BHCurTs, w2BHPrev, w2QCur, w2CycleStart, w2Qi, w2Two] = request.security(sym2, "60", f_weekly_bear_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[w3HCur, w3HCurTs, w3HPrev, w3BHCur, w3BHCurTs, w3BHPrev, w3QCur, w3CycleStart, w3Qi, w3Two] = request.security(sym3, "60", f_weekly_bear_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+[d1HCur, d1HCurTs, d1HPrev, d1BHCur, d1BHCurTs, d1BHPrev, d1QCur] = request.security(sym1, "15", f_daily_bear_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[d2HCur, d2HCurTs, d2HPrev, d2BHCur, d2BHCurTs, d2BHPrev, d2QCur] = request.security(sym2, "15", f_daily_bear_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[d3HCur, d3HCurTs, d3HPrev, d3BHCur, d3BHCurTs, d3BHPrev, d3QCur] = request.security(sym3, "15", f_daily_bear_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+[h41C3Open, h41C1Close, h41C2Open, h41C2Close, h41Time, h41TimeClose] = request.security(sym1, "240", f_h4_tpd_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[h42C3Open, h42C1Close, h42C2Open, h42C2Close, h42Time, h42TimeClose] = request.security(sym2, "240", f_h4_tpd_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+[h43C3Open, h43C1Close, h43C2Open, h43C2Close, h43Time, h43TimeClose] = request.security(sym3, "240", f_h4_tpd_pack_expr(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+
+bool w1Ready = not na(w1HCur) and not na(w1HPrev) and not na(w1HCurTs) and not na(w1Two)
+bool w2Ready = not na(w2HCur) and not na(w2HPrev) and not na(w2HCurTs) and not na(w2Two)
+bool w3Ready = not na(w3HCur) and not na(w3HPrev) and not na(w3HCurTs) and not na(w3Two)
+bool w1HReady = not na(w1BHCur) and not na(w1BHPrev) and not na(w1BHCurTs) and not na(w1Two)
+bool w2HReady = not na(w2BHCur) and not na(w2BHPrev) and not na(w2BHCurTs) and not na(w2Two)
+bool w3HReady = not na(w3BHCur) and not na(w3BHPrev) and not na(w3BHCurTs) and not na(w3Two)
+
+bool d1Ready = not na(d1HCur) and not na(d1HPrev) and not na(d1HCurTs)
+bool d2Ready = not na(d2HCur) and not na(d2HPrev) and not na(d2HCurTs)
+bool d3Ready = not na(d3HCur) and not na(d3HPrev) and not na(d3HCurTs)
+bool d1HReady = not na(d1BHCur) and not na(d1BHPrev) and not na(d1BHCurTs)
+bool d2HReady = not na(d2BHCur) and not na(d2BHPrev) and not na(d2BHCurTs)
+bool d3HReady = not na(d3BHCur) and not na(d3BHPrev) and not na(d3BHCurTs)
+
+bool wAnyAboveTwo = (w1Ready and w1HCur > w1Two) or (w2Ready and w2HCur > w2Two) or (w3Ready and w3HCur > w3Two)
+int weeklySourceQuarterStart = w1QCur
+int weeklySourceCycleStart = w1CycleStart
+int weeklySourceQuarterIndex = w1Qi
+int dailySourceQuarterStart = d1QCur
+
+[w12Split, w12Ts] = f_bear_ssmt_pair(w1Ready, w1HCur, w1HCurTs, w1HPrev, w2Ready, w2HCur, w2HCurTs, w2HPrev)
+[w13Split, w13Ts] = f_bear_ssmt_pair(w1Ready, w1HCur, w1HCurTs, w1HPrev, w3Ready, w3HCur, w3HCurTs, w3HPrev)
+[w23Split, w23Ts] = f_bear_ssmt_pair(w2Ready, w2HCur, w2HCurTs, w2HPrev, w3Ready, w3HCur, w3HCurTs, w3HPrev)
+[wh12Split, wh12Ts] = f_bear_ssmt_pair(w1HReady, w1BHCur, w1BHCurTs, w1BHPrev, w2HReady, w2BHCur, w2BHCurTs, w2BHPrev)
+[wh13Split, wh13Ts] = f_bear_ssmt_pair(w1HReady, w1BHCur, w1BHCurTs, w1BHPrev, w3HReady, w3BHCur, w3BHCurTs, w3BHPrev)
+[wh23Split, wh23Ts] = f_bear_ssmt_pair(w2HReady, w2BHCur, w2BHCurTs, w2BHPrev, w3HReady, w3BHCur, w3BHCurTs, w3BHPrev)
+
+bool wTriadValid = false
+int wTriadTs = int(na)
+string wTriadPair = ""
+int wTriadPairCode = PAIR_NONE
+int wTriadType = int(na)
+[wPick1Valid, wPick1Ts, wPick1Pair, wPick1Code, wPick1Type] = f_pick_event(wAnyAboveTwo and w12Split, w12Ts, pair12Name, PAIR_ES_NQ, REGULAR_SSMT, wTriadValid, wTriadTs, wTriadPair, wTriadPairCode, wTriadType)
+wTriadValid := wPick1Valid
+wTriadTs := wPick1Ts
+wTriadPair := wPick1Pair
+wTriadPairCode := wPick1Code
+wTriadType := wPick1Type
+[wPick2Valid, wPick2Ts, wPick2Pair, wPick2Code, wPick2Type] = f_pick_event(wAnyAboveTwo and w13Split, w13Ts, pair13Name, PAIR_ES_YM, REGULAR_SSMT, wTriadValid, wTriadTs, wTriadPair, wTriadPairCode, wTriadType)
+wTriadValid := wPick2Valid
+wTriadTs := wPick2Ts
+wTriadPair := wPick2Pair
+wTriadPairCode := wPick2Code
+wTriadType := wPick2Type
+[wPick3Valid, wPick3Ts, wPick3Pair, wPick3Code, wPick3Type] = f_pick_event(wAnyAboveTwo and w23Split, w23Ts, pair23Name, PAIR_NQ_YM, REGULAR_SSMT, wTriadValid, wTriadTs, wTriadPair, wTriadPairCode, wTriadType)
+wTriadValid := wPick3Valid
+wTriadTs := wPick3Ts
+wTriadPair := wPick3Pair
+wTriadPairCode := wPick3Code
+wTriadType := wPick3Type
+var int wRegularQuarterSeen = int(na)
+if not na(weeklySourceQuarterStart) and not na(wRegularQuarterSeen) and weeklySourceQuarterStart != wRegularQuarterSeen
+    wRegularQuarterSeen := int(na)
+bool wRegularTriadPresent = wTriadValid
+if wRegularTriadPresent and not na(weeklySourceQuarterStart)
+    wRegularQuarterSeen := weeklySourceQuarterStart
+bool wSuppressHiddenByRegular = wRegularTriadPresent or (not na(weeklySourceQuarterStart) and not na(wRegularQuarterSeen) and wRegularQuarterSeen == weeklySourceQuarterStart)
+[wPick4Valid, wPick4Ts, wPick4Pair, wPick4Code, wPick4Type] = f_pick_event(includeWeeklyHidden and not wSuppressHiddenByRegular and wAnyAboveTwo and wh12Split, wh12Ts, "(H) " + pair12Name, PAIR_ES_NQ, HIDDEN_SSMT, wTriadValid, wTriadTs, wTriadPair, wTriadPairCode, wTriadType)
+wTriadValid := wPick4Valid
+wTriadTs := wPick4Ts
+wTriadPair := wPick4Pair
+wTriadPairCode := wPick4Code
+wTriadType := wPick4Type
+[wPick5Valid, wPick5Ts, wPick5Pair, wPick5Code, wPick5Type] = f_pick_event(includeWeeklyHidden and not wSuppressHiddenByRegular and wAnyAboveTwo and wh13Split, wh13Ts, "(H) " + pair13Name, PAIR_ES_YM, HIDDEN_SSMT, wTriadValid, wTriadTs, wTriadPair, wTriadPairCode, wTriadType)
+wTriadValid := wPick5Valid
+wTriadTs := wPick5Ts
+wTriadPair := wPick5Pair
+wTriadPairCode := wPick5Code
+wTriadType := wPick5Type
+[wPick6Valid, wPick6Ts, wPick6Pair, wPick6Code, wPick6Type] = f_pick_event(includeWeeklyHidden and not wSuppressHiddenByRegular and wAnyAboveTwo and wh23Split, wh23Ts, "(H) " + pair23Name, PAIR_NQ_YM, HIDDEN_SSMT, wTriadValid, wTriadTs, wTriadPair, wTriadPairCode, wTriadType)
+wTriadValid := wPick6Valid
+wTriadTs := wPick6Ts
+wTriadPair := wPick6Pair
+wTriadPairCode := wPick6Code
+wTriadType := wPick6Type
+int wTriadEventKey = (wTriadValid and not na(wTriadTs) and not na(wTriadType)) ? wTriadTs + (wTriadPairCode * 10) + wTriadType : int(na)
+
+[d12Split, d12Ts] = f_bear_ssmt_pair(d1Ready, d1HCur, d1HCurTs, d1HPrev, d2Ready, d2HCur, d2HCurTs, d2HPrev)
+[d13Split, d13Ts] = f_bear_ssmt_pair(d1Ready, d1HCur, d1HCurTs, d1HPrev, d3Ready, d3HCur, d3HCurTs, d3HPrev)
+[d23Split, d23Ts] = f_bear_ssmt_pair(d2Ready, d2HCur, d2HCurTs, d2HPrev, d3Ready, d3HCur, d3HCurTs, d3HPrev)
+[dh12Split, dh12Ts] = f_bear_ssmt_pair(d1HReady, d1BHCur, d1BHCurTs, d1BHPrev, d2HReady, d2BHCur, d2BHCurTs, d2BHPrev)
+[dh13Split, dh13Ts] = f_bear_ssmt_pair(d1HReady, d1BHCur, d1BHCurTs, d1BHPrev, d3HReady, d3BHCur, d3BHCurTs, d3BHPrev)
+[dh23Split, dh23Ts] = f_bear_ssmt_pair(d2HReady, d2BHCur, d2BHCurTs, d2BHPrev, d3HReady, d3BHCur, d3BHCurTs, d3BHPrev)
+
+bool dTriadValid = false
+int dTriadTs = int(na)
+string dTriadPair = ""
+int dTriadPairCode = PAIR_NONE
+int dTriadType = int(na)
+[dPick1Valid, dPick1Ts, dPick1Pair, dPick1Code, dPick1Type] = f_pick_event(d12Split, d12Ts, pair12Name, PAIR_ES_NQ, REGULAR_SSMT, dTriadValid, dTriadTs, dTriadPair, dTriadPairCode, dTriadType)
+dTriadValid := dPick1Valid
+dTriadTs := dPick1Ts
+dTriadPair := dPick1Pair
+dTriadPairCode := dPick1Code
+dTriadType := dPick1Type
+[dPick2Valid, dPick2Ts, dPick2Pair, dPick2Code, dPick2Type] = f_pick_event(d13Split, d13Ts, pair13Name, PAIR_ES_YM, REGULAR_SSMT, dTriadValid, dTriadTs, dTriadPair, dTriadPairCode, dTriadType)
+dTriadValid := dPick2Valid
+dTriadTs := dPick2Ts
+dTriadPair := dPick2Pair
+dTriadPairCode := dPick2Code
+dTriadType := dPick2Type
+[dPick3Valid, dPick3Ts, dPick3Pair, dPick3Code, dPick3Type] = f_pick_event(d23Split, d23Ts, pair23Name, PAIR_NQ_YM, REGULAR_SSMT, dTriadValid, dTriadTs, dTriadPair, dTriadPairCode, dTriadType)
+dTriadValid := dPick3Valid
+dTriadTs := dPick3Ts
+dTriadPair := dPick3Pair
+dTriadPairCode := dPick3Code
+dTriadType := dPick3Type
+var int dRegularQuarterSeen = int(na)
+if not na(dailySourceQuarterStart) and not na(dRegularQuarterSeen) and dailySourceQuarterStart != dRegularQuarterSeen
+    dRegularQuarterSeen := int(na)
+bool dRegularTriadPresent = dTriadValid
+if dRegularTriadPresent and not na(dailySourceQuarterStart)
+    dRegularQuarterSeen := dailySourceQuarterStart
+bool dSuppressHiddenByRegular = dRegularTriadPresent or (not na(dailySourceQuarterStart) and not na(dRegularQuarterSeen) and dRegularQuarterSeen == dailySourceQuarterStart)
+[dPick4Valid, dPick4Ts, dPick4Pair, dPick4Code, dPick4Type] = f_pick_event(includeDailyHidden and not dSuppressHiddenByRegular and dh12Split, dh12Ts, "(H) " + pair12Name, PAIR_ES_NQ, HIDDEN_SSMT, dTriadValid, dTriadTs, dTriadPair, dTriadPairCode, dTriadType)
+dTriadValid := dPick4Valid
+dTriadTs := dPick4Ts
+dTriadPair := dPick4Pair
+dTriadPairCode := dPick4Code
+dTriadType := dPick4Type
+[dPick5Valid, dPick5Ts, dPick5Pair, dPick5Code, dPick5Type] = f_pick_event(includeDailyHidden and not dSuppressHiddenByRegular and dh13Split, dh13Ts, "(H) " + pair13Name, PAIR_ES_YM, HIDDEN_SSMT, dTriadValid, dTriadTs, dTriadPair, dTriadPairCode, dTriadType)
+dTriadValid := dPick5Valid
+dTriadTs := dPick5Ts
+dTriadPair := dPick5Pair
+dTriadPairCode := dPick5Code
+dTriadType := dPick5Type
+[dPick6Valid, dPick6Ts, dPick6Pair, dPick6Code, dPick6Type] = f_pick_event(includeDailyHidden and not dSuppressHiddenByRegular and dh23Split, dh23Ts, "(H) " + pair23Name, PAIR_NQ_YM, HIDDEN_SSMT, dTriadValid, dTriadTs, dTriadPair, dTriadPairCode, dTriadType)
+dTriadValid := dPick6Valid
+dTriadTs := dPick6Ts
+dTriadPair := dPick6Pair
+dTriadPairCode := dPick6Code
+dTriadType := dPick6Type
+int dTriadEventKey = (dTriadValid and not na(dTriadTs) and not na(dTriadType)) ? dTriadTs + (dTriadPairCode * 10) + dTriadType : int(na)
+
+bool tpd12Valid = f_tpd_pair_valid(h41C3Open, h41C1Close, h41C2Open, h41C2Close, h42C3Open, h42C1Close, h42C2Open, h42C2Close)
+bool tpd13Valid = f_tpd_pair_valid(h41C3Open, h41C1Close, h41C2Open, h41C2Close, h43C3Open, h43C1Close, h43C2Open, h43C2Close)
+bool tpd23Valid = f_tpd_pair_valid(h42C3Open, h42C1Close, h42C2Open, h42C2Close, h43C3Open, h43C1Close, h43C2Open, h43C2Close)
+int h4TpdC3OpenTimeCurrent = h41Time
+int h4TpdConfirmTimeCurrent = h41TimeClose
+bool h4TimesReady = not na(h41Time) and not na(h42Time) and not na(h43Time) and not na(h41TimeClose) and not na(h42TimeClose) and not na(h43TimeClose)
+bool h4TimesAligned = h4TimesReady and h41Time == h42Time and h41Time == h43Time and h41TimeClose == h42TimeClose and h41TimeClose == h43TimeClose
+
+bool h4TpdValid = false
+string h4TpdPair = ""
+int h4TpdPairCode = PAIR_NONE
+string h4TPDAboveAsset = ""
+string h4TPDBelowAsset = ""
+if h4TimesAligned and tpd12Valid
+    h4TpdValid := true
+    h4TpdPair := pair12Name
+    h4TpdPairCode := PAIR_ES_NQ
+    if h41C3Open > h41C1Close
+        h4TPDAboveAsset := sym1Name
+        h4TPDBelowAsset := sym2Name
+    else
+        h4TPDAboveAsset := sym2Name
+        h4TPDBelowAsset := sym1Name
+else if h4TimesAligned and tpd13Valid
+    h4TpdValid := true
+    h4TpdPair := pair13Name
+    h4TpdPairCode := PAIR_ES_YM
+    if h41C3Open > h41C1Close
+        h4TPDAboveAsset := sym1Name
+        h4TPDBelowAsset := sym3Name
+    else
+        h4TPDAboveAsset := sym3Name
+        h4TPDBelowAsset := sym1Name
+else if h4TimesAligned and tpd23Valid
+    h4TpdValid := true
+    h4TpdPair := pair23Name
+    h4TpdPairCode := PAIR_NQ_YM
+    if h42C3Open > h42C1Close
+        h4TPDAboveAsset := sym2Name
+        h4TPDBelowAsset := sym3Name
+    else
+        h4TPDAboveAsset := sym3Name
+        h4TPDBelowAsset := sym2Name
+int h4TPDEventKey = (h4TpdValid and not na(h4TpdC3OpenTimeCurrent)) ? h4TpdC3OpenTimeCurrent + h4TpdPairCode : int(na)
+
+// ============================================================================
+// QT WEEKLY STATE AND SEQUENCE ENGINE
+// ============================================================================
+var int sequenceState = STATE_IDLE
+var int trackedWeeklyStart = int(na)
+var int lastWSSMTTime = int(na)
+var string lastWSSMTPair = ""
+var int lastWSSMTPairCode = int(na)
+var int lastWSSMTType = int(na)
+var int lastH4TPDTime = int(na)
+var string lastH4TPDPair = ""
+var int lastH4TPDPairCode = int(na)
+var string lastH4TPDAboveAsset = ""
+var string lastH4TPDBelowAsset = ""
+var int h4TpdC3OpenTime = int(na)
+var int h4TpdConfirmTime = int(na)
+var int lastDSSMTTime = int(na)
+var string lastDSSMTPair = ""
+var int lastDSSMTPairCode = int(na)
+var int lastDSSMTType = int(na)
+var int lastSeenH4Time = int(na)
+var int fullAlertedForDTime = int(na)
+var string lastResetReason = "Initial load"
+var int wSSMTFormedQuarter = int(na)
+var int wSSMTValidThroughQuarter = int(na)
+var bool wSSMTTracksPrevHigh = false
+var float storedESWPrevHigh = float(na)
+var float storedNQWPrevHigh = float(na)
+var float storedYMWPrevHigh = float(na)
+var bool wSSMTInvalidated = false
+var int lastSeenWEventKey = int(na)
+var int lastSeenH4TPDEventKey = int(na)
+var int lastSeenDEventKey = int(na)
+
+bool wArmedSignal = false
+bool h4TpdSignal = false
+bool fullBearishSignal = false
+bool wInvalidatedSignal = false
+bool wExpiredSignal = false
+bool sequenceResetSignal = false
+
+bool newWeeklyCycle = not na(weeklySourceCycleStart) and (na(trackedWeeklyStart) or weeklySourceCycleStart != trackedWeeklyStart)
+if newWeeklyCycle
+    sequenceResetSignal := sequenceState != STATE_IDLE
+    trackedWeeklyStart := weeklySourceCycleStart
+    sequenceState := STATE_IDLE
+    lastWSSMTTime := int(na)
+    lastWSSMTPair := ""
+    lastWSSMTPairCode := int(na)
+    lastWSSMTType := int(na)
+    lastH4TPDTime := int(na)
+    lastH4TPDPair := ""
+    lastH4TPDPairCode := int(na)
+    lastH4TPDAboveAsset := ""
+    lastH4TPDBelowAsset := ""
+    h4TpdC3OpenTime := int(na)
+    h4TpdConfirmTime := int(na)
+    lastDSSMTTime := int(na)
+    lastDSSMTPair := ""
+    lastDSSMTPairCode := int(na)
+    lastDSSMTType := int(na)
+    fullAlertedForDTime := int(na)
+    wSSMTFormedQuarter := int(na)
+    wSSMTValidThroughQuarter := int(na)
+    wSSMTTracksPrevHigh := false
+    storedESWPrevHigh := float(na)
+    storedNQWPrevHigh := float(na)
+    storedYMWPrevHigh := float(na)
+    wSSMTInvalidated := false
+    lastResetReason := "New weekly cycle"
+
+bool stateExpired = resetAfterDays > 0 and sequenceState != STATE_IDLE and not na(lastWSSMTTime) and (time - lastWSSMTTime > resetAfterDays * LEN_24H)
+if stateExpired
+    sequenceResetSignal := true
+    sequenceState := STATE_IDLE
+    lastWSSMTTime := int(na)
+    lastWSSMTPair := ""
+    lastWSSMTPairCode := int(na)
+    lastWSSMTType := int(na)
+    lastH4TPDTime := int(na)
+    lastH4TPDPair := ""
+    lastH4TPDPairCode := int(na)
+    lastH4TPDAboveAsset := ""
+    lastH4TPDBelowAsset := ""
+    h4TpdC3OpenTime := int(na)
+    h4TpdConfirmTime := int(na)
+    lastDSSMTTime := int(na)
+    lastDSSMTPair := ""
+    lastDSSMTPairCode := int(na)
+    lastDSSMTType := int(na)
+    fullAlertedForDTime := int(na)
+    wSSMTFormedQuarter := int(na)
+    wSSMTValidThroughQuarter := int(na)
+    wSSMTTracksPrevHigh := false
+    storedESWPrevHigh := float(na)
+    storedNQWPrevHigh := float(na)
+    storedYMWPrevHigh := float(na)
+    wSSMTInvalidated := false
+    lastResetReason := "State age exceeded N days"
+
+bool wPrevHighInvalidationReady = sequenceState != STATE_IDLE and sequenceState != STATE_FULL_BEARISH_CONFIRMED and wSSMTTracksPrevHigh and not na(wSSMTFormedQuarter) and not na(weeklySourceQuarterIndex) and weeklySourceQuarterIndex == wSSMTFormedQuarter and not na(w1HCur) and not na(w2HCur) and not na(w3HCur) and not na(storedESWPrevHigh) and not na(storedNQWPrevHigh) and not na(storedYMWPrevHigh)
+bool wSSMTInvalidationNow = wPrevHighInvalidationReady and w1HCur > storedESWPrevHigh and w2HCur > storedNQWPrevHigh and w3HCur > storedYMWPrevHigh
+if wSSMTInvalidationNow
+    wInvalidatedSignal := true
+    sequenceState := STATE_IDLE
+    lastWSSMTTime := int(na)
+    lastWSSMTPair := ""
+    lastWSSMTPairCode := int(na)
+    lastWSSMTType := int(na)
+    lastH4TPDTime := int(na)
+    lastH4TPDPair := ""
+    lastH4TPDPairCode := int(na)
+    lastH4TPDAboveAsset := ""
+    lastH4TPDBelowAsset := ""
+    h4TpdC3OpenTime := int(na)
+    h4TpdConfirmTime := int(na)
+    lastDSSMTTime := int(na)
+    lastDSSMTPair := ""
+    lastDSSMTPairCode := int(na)
+    lastDSSMTType := int(na)
+    fullAlertedForDTime := int(na)
+    wSSMTFormedQuarter := int(na)
+    wSSMTValidThroughQuarter := int(na)
+    wSSMTTracksPrevHigh := false
+    wSSMTInvalidated := true
+    lastResetReason := "W.SSMT invalidated: all assets traded above previous W.Q high"
+
+bool wSSMTQ4Expired = sequenceState != STATE_IDLE and sequenceState != STATE_FULL_BEARISH_CONFIRMED and not na(wSSMTFormedQuarter) and wSSMTFormedQuarter == 2 and not na(weeklySourceQuarterIndex) and weeklySourceQuarterIndex >= 4
+bool wSSMTValidThroughExpired = sequenceState != STATE_IDLE and sequenceState != STATE_FULL_BEARISH_CONFIRMED and not na(wSSMTValidThroughQuarter) and not na(weeklySourceQuarterIndex) and weeklySourceQuarterIndex > wSSMTValidThroughQuarter
+bool wSSMTQuarterExpired = wSSMTQ4Expired or wSSMTValidThroughExpired
+if wSSMTQuarterExpired
+    wExpiredSignal := true
+    sequenceState := STATE_IDLE
+    lastWSSMTTime := int(na)
+    lastWSSMTPair := ""
+    lastWSSMTPairCode := int(na)
+    lastWSSMTType := int(na)
+    lastH4TPDTime := int(na)
+    lastH4TPDPair := ""
+    lastH4TPDPairCode := int(na)
+    lastH4TPDAboveAsset := ""
+    lastH4TPDBelowAsset := ""
+    h4TpdC3OpenTime := int(na)
+    h4TpdConfirmTime := int(na)
+    lastDSSMTTime := int(na)
+    lastDSSMTPair := ""
+    lastDSSMTPairCode := int(na)
+    lastDSSMTType := int(na)
+    fullAlertedForDTime := int(na)
+    wSSMTFormedQuarter := int(na)
+    wSSMTValidThroughQuarter := int(na)
+    wSSMTTracksPrevHigh := false
+    storedESWPrevHigh := float(na)
+    storedNQWPrevHigh := float(na)
+    storedYMWPrevHigh := float(na)
+    wSSMTInvalidated := false
+    lastResetReason := wSSMTQ4Expired ? "W.SSMT expired: W.Q4 reached" : "W.SSMT expired: valid-through quarter passed"
+
+bool newH4Candle = h4TimesAligned and (na(lastSeenH4Time) or h4TpdC3OpenTimeCurrent != lastSeenH4Time)
+if newH4Candle
+    lastSeenH4Time := h4TpdC3OpenTimeCurrent
+
+bool wCandidateFresh = resetAfterDays <= 0 or (not na(wTriadTs) and time - wTriadTs <= resetAfterDays * LEN_24H)
+bool wEventFresh = not na(wTriadEventKey) and (na(lastSeenWEventKey) or wTriadEventKey != lastSeenWEventKey)
+bool wCanProcessCandidate = barstate.isconfirmed and sequenceState == STATE_IDLE and wTriadValid and wCandidateFresh and wEventFresh and not na(wTriadTs) and not na(weeklySourceQuarterIndex)
+bool wCandidatePrevHighsReady = not na(w1HCur) and not na(w2HCur) and not na(w3HCur) and not na(w1HPrev) and not na(w2HPrev) and not na(w3HPrev)
+bool wCandidateInvalidatedNow = wCandidatePrevHighsReady and w1HCur > w1HPrev and w2HCur > w2HPrev and w3HCur > w3HPrev
+if wCanProcessCandidate and wCandidateInvalidatedNow
+    wInvalidatedSignal := true
+    sequenceState := STATE_IDLE
+    lastWSSMTTime := int(na)
+    lastWSSMTPair := ""
+    lastWSSMTPairCode := int(na)
+    lastWSSMTType := int(na)
+    lastH4TPDTime := int(na)
+    lastH4TPDPair := ""
+    lastH4TPDPairCode := int(na)
+    lastH4TPDAboveAsset := ""
+    lastH4TPDBelowAsset := ""
+    h4TpdC3OpenTime := int(na)
+    h4TpdConfirmTime := int(na)
+    lastDSSMTTime := int(na)
+    lastDSSMTPair := ""
+    lastDSSMTPairCode := int(na)
+    lastDSSMTType := int(na)
+    fullAlertedForDTime := int(na)
+    wSSMTFormedQuarter := int(na)
+    wSSMTValidThroughQuarter := int(na)
+    wSSMTTracksPrevHigh := false
+    storedESWPrevHigh := w1HPrev
+    storedNQWPrevHigh := w2HPrev
+    storedYMWPrevHigh := w3HPrev
+    wSSMTInvalidated := true
+    lastSeenWEventKey := wTriadEventKey
+    lastResetReason := "W.SSMT invalidated: all assets traded above previous W.Q high"
+else if wCanProcessCandidate
+    sequenceState := STATE_W_SSMT_ARMED
+    lastWSSMTTime := wTriadTs
+    lastWSSMTPair := wTriadPair
+    lastWSSMTPairCode := wTriadPairCode
+    lastWSSMTType := wTriadType
+    wSSMTFormedQuarter := weeklySourceQuarterIndex
+    wSSMTValidThroughQuarter := weeklySourceQuarterIndex + 1
+    if wSSMTValidThroughQuarter > 5
+        wSSMTValidThroughQuarter := 5
+    wSSMTTracksPrevHigh := true
+    storedESWPrevHigh := w1HPrev
+    storedNQWPrevHigh := w2HPrev
+    storedYMWPrevHigh := w3HPrev
+    wSSMTInvalidated := false
+    lastSeenWEventKey := wTriadEventKey
+    wArmedSignal := true
+
+bool h4EventFresh = not na(h4TPDEventKey) and (na(lastSeenH4TPDEventKey) or h4TPDEventKey != lastSeenH4TPDEventKey)
+if barstate.isconfirmed and sequenceState == STATE_W_SSMT_ARMED and newH4Candle and h4TpdValid and h4EventFresh and not na(h4TpdC3OpenTimeCurrent) and h4TpdC3OpenTimeCurrent > lastWSSMTTime
+    sequenceState := STATE_H4_TPD_CONFIRMED
+    h4TpdC3OpenTime := h4TpdC3OpenTimeCurrent
+    h4TpdConfirmTime := h4TpdConfirmTimeCurrent
+    lastH4TPDTime := h4TpdC3OpenTimeCurrent
+    lastH4TPDPair := h4TpdPair
+    lastH4TPDPairCode := h4TpdPairCode
+    lastH4TPDAboveAsset := h4TPDAboveAsset
+    lastH4TPDBelowAsset := h4TPDBelowAsset
+    lastSeenH4TPDEventKey := h4TPDEventKey
+    h4TpdSignal := true
+
+bool dEventFresh = not na(dTriadEventKey) and (na(lastSeenDEventKey) or dTriadEventKey != lastSeenDEventKey)
+if barstate.isconfirmed and sequenceState == STATE_H4_TPD_CONFIRMED and dTriadValid and dEventFresh and not na(dTriadTs) and dTriadTs > lastH4TPDTime
+    sequenceState := STATE_FULL_BEARISH_CONFIRMED
+    lastDSSMTTime := dTriadTs
+    lastDSSMTPair := dTriadPair
+    lastDSSMTPairCode := dTriadPairCode
+    lastDSSMTType := dTriadType
+    lastSeenDEventKey := dTriadEventKey
+    if na(fullAlertedForDTime) or fullAlertedForDTime != dTriadTs
+        fullBearishSignal := true
+        fullAlertedForDTime := dTriadTs
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+float currentH4TPDPairPlot = h4TpdPairCode * 1.0
+float storedH4TPDPairPlot = na(lastH4TPDPairCode) ? float(na) : lastH4TPDPairCode * 1.0
+plot(sequenceState * 1.0, "Sequence State", display=display.none)
+plot(currentH4TPDPairPlot, "Current H4 TPD Pair Code", display=display.none)
+plot(storedH4TPDPairPlot, "Stored H4 TPD Pair Code", display=display.none)
+
+alertcondition(alertsAllowed and wArmedSignal, "Bearish W.SSMT/HSSMT Armed", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | TPD Pair: pending | State: W_SSMT_ARMED | Context: W")
+alertcondition(alertsAllowed and h4TpdSignal, "H4 TPD Confirmed", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | TPD Pair Code: {{plot(\"Current H4 TPD Pair Code\")}} | State: H4_TPD_CONFIRMED | Context: H4")
+alertcondition(alertsAllowed and fullBearishSignal, "Full Bearish Sequence Confirmed", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | TPD Pair Code: {{plot(\"Stored H4 TPD Pair Code\")}} | State: FULL_BEARISH_CONFIRMED | Context: W/H4/D")
+alertcondition(alertsAllowed and fullBearishSignal and lastH4TPDPairCode == PAIR_ES_NQ, "Full Bearish Sequence — ES/NQ H4 TPD", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | TPD Pair: ES/NQ | State: FULL_BEARISH_CONFIRMED | Context: W/H4/D")
+alertcondition(alertsAllowed and fullBearishSignal and lastH4TPDPairCode == PAIR_ES_YM, "Full Bearish Sequence — ES/YM H4 TPD", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | TPD Pair: ES/YM | State: FULL_BEARISH_CONFIRMED | Context: W/H4/D")
+alertcondition(alertsAllowed and fullBearishSignal and lastH4TPDPairCode == PAIR_NQ_YM, "Full Bearish Sequence — NQ/YM H4 TPD", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | TPD Pair: NQ/YM | State: FULL_BEARISH_CONFIRMED | Context: W/H4/D")
+alertcondition(alertsAllowed and wInvalidatedSignal, "Bearish W.SSMT Invalidated", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | Event: Bearish W.SSMT Invalidated | Reason: W.SSMT invalidated: all assets traded above previous W.Q high | Context: W")
+alertcondition(alertsAllowed and wExpiredSignal, "Bearish W.SSMT Expired", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | Event: Bearish W.SSMT Expired | Context: W")
+alertcondition(alertsAllowed and sequenceResetSignal, "Bearish Sequence Reset", "QT Triad Sequence Alerts | Sequence: Bearish W.SSMT/HSSMT -> H4 TPD -> Bearish D.SSMT/HSSMT | Triad: ES / NQ / YM | Event: Bearish Sequence Reset | Context: W/H4/D")
+
+// ============================================================================
+// DEBUG TABLE
+// ============================================================================
+var table dbgTbl = table.new(position.top_right, 2, 23, border_width=1)
+
+if showDebugTable and barstate.islast
+    string chartScope = chartInSelectedTriad ? "chart in triad" : chartHasAssetPeers ? "chart has QTAssets peers" : "fixed scan"
+    string recommendedTfText = chartTfSafe ? "15m" : "Warning: chart TF is above the lowest source TF. Lower-TF SSMT detection may be sampled/incomplete."
+    string twoText = sym1Name + " " + f_fmt_float(w1Two) + " | " + sym2Name + " " + f_fmt_float(w2Two) + " | " + sym3Name + " " + f_fmt_float(w3Two)
+    string prevHighText = sym1Name + " " + f_fmt_float(storedESWPrevHigh) + " | " + sym2Name + " " + f_fmt_float(storedNQWPrevHigh) + " | " + sym3Name + " " + f_fmt_float(storedYMWPrevHigh)
+    string weeklySourceQuarterText = na(weeklySourceQuarterIndex) ? "na" : str.tostring(weeklySourceQuarterIndex)
+    string wValidThroughText = na(wSSMTValidThroughQuarter) ? "na" : "W.Q" + str.tostring(wSSMTValidThroughQuarter)
+    int debugWSSMTTime = na(lastWSSMTTime) ? wTriadTs : lastWSSMTTime
+    int debugWSSMTType = na(lastWSSMTType) ? wTriadType : lastWSSMTType
+    int debugDSSMTTime = lastDSSMTTime
+    int debugDSSMTType = lastDSSMTType
+    string debugH4TPDAboveAsset = lastH4TPDAboveAsset == "" ? h4TPDAboveAsset : lastH4TPDAboveAsset
+    string debugH4TPDBelowAsset = lastH4TPDBelowAsset == "" ? h4TPDBelowAsset : lastH4TPDBelowAsset
+    string debugH4TPDPolarity = debugH4TPDAboveAsset == "" or debugH4TPDBelowAsset == "" ? "na" : debugH4TPDAboveAsset + " above / " + debugH4TPDBelowAsset + " below"
+    f_tbl_row(dbgTbl, 0, "Selected triad", triadName + " (" + chartScope + ")")
+    f_tbl_row(dbgTbl, 1, "Recommended Chart TF", recommendedTfText)
+    f_tbl_row(dbgTbl, 2, "Alerts Allowed", alertsAllowed ? "true" : "false")
+    f_tbl_row(dbgTbl, 3, "State", f_debug_state_name(sequenceState))
+    f_tbl_row(dbgTbl, 4, "Weekly source quarter", weeklySourceQuarterText)
+    f_tbl_row(dbgTbl, 5, "Weekly source cycle", f_fmt_time(weeklySourceCycleStart))
+    f_tbl_row(dbgTbl, 6, "W.SSMT pair", lastWSSMTPair == "" ? (wTriadPair == "" ? "na" : wTriadPair) : lastWSSMTPair)
+    f_tbl_row(dbgTbl, 7, "W.SSMT Type", f_ssmt_type_name(debugWSSMTType))
+    f_tbl_row(dbgTbl, 8, "W.SSMT event time", f_fmt_time(debugWSSMTTime))
+    f_tbl_row(dbgTbl, 9, "W.SSMT valid-through", wValidThroughText)
+    f_tbl_row(dbgTbl, 10, "Stored prev W.Q highs", prevHighText)
+    f_tbl_row(dbgTbl, 11, "W.SSMT invalidated?", wSSMTInvalidated ? "true" : "false")
+    f_tbl_row(dbgTbl, 12, "Active TWO values", twoText)
+    f_tbl_row(dbgTbl, 13, "H4 TPD pair", lastH4TPDPair == "" ? (h4TpdPair == "" ? "na" : h4TpdPair) : lastH4TPDPair)
+    f_tbl_row(dbgTbl, 14, "H4 TPD Polarity", debugH4TPDPolarity)
+    f_tbl_row(dbgTbl, 15, "Stored H4 TPD code", na(lastH4TPDPairCode) ? "na" : str.tostring(lastH4TPDPairCode))
+    f_tbl_row(dbgTbl, 16, "H4 TPD C3 open", f_fmt_time(h4TpdC3OpenTime))
+    f_tbl_row(dbgTbl, 17, "H4 TPD C3 close", f_fmt_time(h4TpdConfirmTime))
+    f_tbl_row(dbgTbl, 18, "D.SSMT pair", lastDSSMTPair == "" ? "na" : lastDSSMTPair)
+    f_tbl_row(dbgTbl, 19, "D.SSMT Type", f_ssmt_type_name(debugDSSMTType))
+    f_tbl_row(dbgTbl, 20, "D.SSMT TimeStamp", f_fmt_time(debugDSSMTTime))
+    f_tbl_row(dbgTbl, 21, "Last reset reason", lastResetReason)
+    f_tbl_row(dbgTbl, 22, "Full sequence status", sequenceState == STATE_FULL_BEARISH_CONFIRMED ? "Confirmed" : "Waiting")

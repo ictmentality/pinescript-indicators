@@ -1,0 +1,150 @@
+Working Indicators
+
+QT Libraries
+
+QTEngineElastic
+- Import with `import Jaw1312/QTEngineElastic/11 as qt`
+- Data-only, non-repainting quarter engine.
+- Cycles already implemented: Daily, m90, Micro, Nano, Weekly, Monthly.
+- Fixed cycle structure already handled:
+- Daily = 24h cycle, aligned to 15m.
+- m90 = 6h cycle, aligned to 5m.
+- Micro = 90m cycle, aligned to 30s.
+- Nano = 22m30s cycle, aligned to 5s.
+- Weekly and Monthly elastic cycles are already implemented.
+- Default anchor is New York `18:00`.
+- Available data from the engine includes:
+- cycle start/end timestamps
+- current cycle position and realized quarter flags
+- quarter records `q1..q5`
+- per-quarter `o/h/l/c`
+- timestamps for opens, highs, lows, closes
+- body high/body low values `bh/bl`
+- previous quarter records `prev1` and `prev2`
+- quarter boundary event info through the engine state
+- Main reusable functions:
+- `qt.qt_config_default()`
+- `qt.qt_state_new()`
+- `qt.qt_daily_update(...)`
+- `qt.qt_m90_update(...)`
+- `qt.qt_micro_update(...)`
+- `qt.qt_nano_update(...)`
+- `qt.qt_weekly_update(...)`
+- `qt.qt_monthly_update(...)`
+- `qt.f_qt_init()`
+- `qt.f_qt_init_with_cfg(cfg)`
+- `qt.f_qt_step(eng, time, time_close)`
+- Debug/read-only helpers already available:
+- `qt.qt_micro_aligned_ohlc_debug()`
+- `qt.qt_nano_aligned_ohlc_debug()`
+- `qt.qt_m90_aligned_ohlc_debug()`
+- `qt.qt_daily_aligned_ohlc_debug()`
+- `qt.qt_micro_aligned_qr_debug(st)`
+- `qt.qt_nano_aligned_qr_debug(st)`
+- `qt.qt_daily_qr_debug(st)`
+- `qt.qt_m90_qr_debug(st)`
+- `qt.qt_micro_qr_debug(st)`
+- `qt.qt_nano_qr_debug(st)`
+- `qt.qt_weekly_qr_debug(st)`
+- `qt.qt_monthly_qr_debug(st)`
+- Best reuse when the new indicator needs quarter timing, quarter OHLC/body levels, previous-quarter comparisons, or quarter boundary events.
+
+QTAssets
+- Import with `import Jaw1312/QTAssets/4 as qta`
+- Main reusable function: `qta.resolve_pair_symbols(selection_mode, badj, sym, symTicker, chartTicker, chartRoot)`
+- Extra debug helper: `qta.chart_backadjust_debug(fallback)`
+- Already handles:
+- triad peer resolution
+- dyad peer resolution
+- auto peer selection from the current chart
+- continuous vs dated contract handling
+- micro vs standard contract-size alignment
+- futures session/backadjust modifiers via `ticker.modify`
+- chart backadjust detection from `syminfo.tickerid`
+- self-peer and duplicate cleanup
+- Triads already mapped:
+- `DXY / 6E / 6B`
+- `CL / RB / HO`
+- `ZB / TN / ZF`
+- `GC / SI / HG`
+- `NQ / ES / YM`
+- Dyad logic already mapped for:
+- `ZB / TN`
+- `ES / NQ`
+- `YM / RTY`
+- `CL / RB`
+- `DXY / 6E`
+- `GC / SI`
+- spot/CFD/crypto pairs already hardcoded in the library
+- Best reuse when the new indicator needs automatic peer asset selection from the chart symbol.
+
+QT Display
+
+QTDisplay.txt is an indicator, not a library.
+- Its logic is reusable, but it currently has to be copied/extracted rather than imported.
+- It already combines `QTEngineElastic` + `QTAssets` into working intermarket SSMT logic.
+
+What QTDisplay already does
+- Resolves chart peers in `Triad`, `Dyad`, or `Off` mode.
+- Handles DXY inverse logic for the forex triad.
+- Supports futures backadjust fallback.
+- Detects regular SSMT from wick sweeps:
+- bearish from highs
+- bullish from lows
+- Detects hidden SSMT from body sweeps:
+- bearish from body highs
+- bullish from body lows
+- Uses current-quarter vs previous-quarter comparisons for chart + peers.
+- Draws and maintains active/history lines and labels.
+- Has a debug table for asset-selection verification.
+
+Cycles already wired into QTDisplay SSMT logic
+- Nano
+- Micro
+- m90
+- Daily
+- Weekly
+- Monthly
+
+Timeframe gates already written in QTDisplay
+- Nano on `5s` and `15s`
+- Micro on `30s` and `1m`
+- m90 on `5m`
+- Daily on `15m`
+- Weekly on `60m`
+- Monthly on `240m`
+
+Reusable local helper blocks already in QTDisplay
+- Symbol normalization/tagging:
+- `f_ssmt_sym_ticker`
+- `f_ssmt_match_tag`
+- `f_check_match`
+- `f_ssmt_label_sym`
+- `f_ssmt_debug_symbol_text`
+- `f_ssmt_is_dxy_symbol`
+- Sweep logic:
+- `f_ssmt_sweep_high`
+- `f_ssmt_sweep_low`
+- `f_ssmt_sweep_body_high`
+- `f_ssmt_sweep_body_low`
+- Per-cycle peer expressions:
+- `f_ssmt_weekly_highs_expr`
+- `f_ssmt_monthly_highs_expr`
+- `f_ssmt_daily_highs_expr`
+- `f_ssmt_m90_highs_expr`
+- `f_ssmt_micro_highs_expr`
+- `f_ssmt_nano_highs_expr`
+- `f_ssmt_peer_highs_expr`
+- Drawing/history helpers:
+- `f_set_or_make_line`
+- `f_set_or_make_hline_w_style`
+- `f_ssmt_hist_push`
+- `f_ssmt_hist_trim`
+- `f_ssmt_hist_clear`
+- `f_kill`
+
+Best current reuse path
+- Need quarter/cycle data: use `QTEngineElastic`.
+- Need peer symbol resolution: use `QTAssets`.
+- Need SSMT/HSSMT detection or display/history behavior: reuse the matching logic from `QTDisplay.txt`.
+- If the new indicator needs importable SSMT logic, the clean next step would be moving the local QTDisplay SSMT helpers into a dedicated library instead of rewriting them.

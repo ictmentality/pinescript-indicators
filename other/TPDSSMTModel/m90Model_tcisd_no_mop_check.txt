@@ -1,0 +1,657 @@
+// This Pine Script(R) code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+//@version=6
+indicator("m90Model", shorttitle="m90Model", overlay=true, max_labels_count=500, max_lines_count=500, dynamic_requests=true)
+import Jaw1312/QTEngineElastic/11 as qt
+
+group_model = "m90Model"
+killzone = input.session("0200-1530", "Killzone", group=group_model)
+badj = input.bool(true, "Backadjust Futures", group=group_model)
+show_debug = input.bool(false, "Show Debug Table", group=group_model)
+keep_taken_setups = input.bool(true, "Keep Taken Setups On Chart", group=group_model)
+
+group_setup_log = "Setup Log"
+show_setup_log = input.bool(true, "Show Entry Taken Log", group=group_setup_log)
+setup_log_rows = input.int(15, "Setup Date Rows", minval=1, maxval=50, group=group_setup_log)
+
+group_dyad = "Dyads"
+enable_dyad_1 = input.bool(true, "Dyad 1", inline="d1", group=group_dyad)
+dyad_1_sym1 = input.symbol("COMEX:GC1!", "", inline="d1", group=group_dyad)
+dyad_1_sym2 = input.symbol("COMEX:SI1!", "&", inline="d1", group=group_dyad)
+enable_dyad_2 = input.bool(true, "Dyad 2", inline="d2", group=group_dyad)
+dyad_2_sym1 = input.symbol("CME_MINI:ES1!", "", inline="d2", group=group_dyad)
+dyad_2_sym2 = input.symbol("CME_MINI:NQ1!", "&", inline="d2", group=group_dyad)
+enable_dyad_3 = input.bool(true, "Dyad 3", inline="d3", group=group_dyad)
+dyad_3_sym1 = input.symbol("CME:6E1!", "", inline="d3", group=group_dyad)
+dyad_3_sym2 = input.symbol("CME:6B1!", "&", inline="d3", group=group_dyad)
+enable_dyad_4 = input.bool(true, "Dyad 4", inline="d4", group=group_dyad)
+dyad_4_sym1 = input.symbol("NYMEX:CL1!", "", inline="d4", group=group_dyad)
+dyad_4_sym2 = input.symbol("NYMEX:RB1!", "&", inline="d4", group=group_dyad)
+
+group_style = "Style"
+bull_col = input.color(color.rgb(41, 98, 255), "Bull", inline="c", group=group_style)
+bear_col = input.color(color.rgb(242, 54, 69), "Bear", inline="c", group=group_style)
+bull_tcisd_col = input.color(color.rgb(0, 100, 0), "Bull tCISD", inline="l", group=group_style)
+bear_tcisd_col = input.color(color.rgb(128, 0, 32), "Bear tCISD", inline="l", group=group_style)
+mop_col = input.color(color.rgb(99, 99, 99), "MOP", inline="l", group=group_style)
+target_col = input.color(color.rgb(0, 188, 212), "2R", inline="l", group=group_style)
+signal_label_pad_ticks = input.int(8, "Signal Label Padding (ticks)", minval=0, maxval=200, group=group_style)
+
+sym_id = syminfo.tickerid
+sym = str.contains(sym_id, "replay-feed") ? (syminfo.prefix + ":" + syminfo.ticker) : sym_id
+
+f_ticker_only(string s) =>
+    str.contains(s, ":") ? array.get(str.split(s, ":"), 1) : s
+
+f_sym_ticker(string input_sym) =>
+    string s = str.upper(input_sym)
+    if str.contains(s, "\"SYMBOL\":\"")
+        string[] partsSym = str.split(s, "\"SYMBOL\":\"")
+        if array.size(partsSym) > 1
+            string right = array.get(partsSym, 1)
+            string[] partsEnd = str.split(right, "\"")
+            s := array.get(partsEnd, 0)
+    if str.contains(s, "{")
+        string[] partsBrace = str.split(s, "{")
+        s := array.get(partsBrace, 0)
+    if str.contains(s, "|")
+        string[] partsPipe = str.split(s, "|")
+        s := array.get(partsPipe, 0)
+    string[] parts = str.split(s, ":")
+    array.size(parts) > 1 ? array.get(parts, array.size(parts) - 1) : s
+
+f_match_tag(string input_sym) =>
+    string tk = str.upper(f_sym_ticker(input_sym))
+    string tag = ""
+    if str.contains(tk, "DXY")
+        tag := "DXY"
+    else if str.contains(tk, "MNQ") or str.contains(tk, "NQ")
+        tag := "NQ"
+    else if str.contains(tk, "MES") or str.contains(tk, "ES")
+        tag := "ES"
+    else if str.contains(tk, "MYM") or str.contains(tk, "YM")
+        tag := "YM"
+    else if str.contains(tk, "MCL") or str.contains(tk, "CL")
+        tag := "CL"
+    else if str.contains(tk, "MRB") or str.contains(tk, "RB")
+        tag := "RB"
+    else if str.contains(tk, "M6E") or str.contains(tk, "6E")
+        tag := "6E"
+    else if str.contains(tk, "M6B") or str.contains(tk, "6B")
+        tag := "6B"
+    else if str.contains(tk, "MGC") or str.contains(tk, "GC")
+        tag := "GC"
+    else if str.contains(tk, "SIL") or str.contains(tk, "SI")
+        tag := "SI"
+    tag
+
+f_check_match(string input_sym) =>
+    bool valid = str.length(input_sym) > 0
+    if not valid
+        false
+    else
+        string inputUp = str.upper(input_sym)
+        string tSym = f_sym_ticker(input_sym)
+        string curTicker = str.upper(syminfo.ticker)
+        string curId = str.upper(syminfo.tickerid)
+        bool directMatch = (curTicker == tSym) or str.contains(curId, tSym) or str.contains(inputUp, curTicker)
+        if directMatch
+            true
+        else
+            string inTag = f_match_tag(input_sym)
+            string curTag = f_match_tag(syminfo.tickerid)
+            str.length(inTag) > 0 and str.length(curTag) > 0 and inTag == curTag
+
+f_pair(string a, string b) =>
+    f_check_match(a) ? b : f_check_match(b) ? a : ""
+
+string csym_raw = ""
+if enable_dyad_1 and csym_raw == ""
+    csym_raw := f_pair(dyad_1_sym1, dyad_1_sym2)
+if enable_dyad_2 and csym_raw == ""
+    csym_raw := f_pair(dyad_2_sym1, dyad_2_sym2)
+if enable_dyad_3 and csym_raw == ""
+    csym_raw := f_pair(dyad_3_sym1, dyad_3_sym2)
+if enable_dyad_4 and csym_raw == ""
+    csym_raw := f_pair(dyad_4_sym1, dyad_4_sym2)
+
+if syminfo.type == "futures" and str.contains(csym_raw, ":")
+    csym_raw := syminfo.prefix + ":" + f_ticker_only(csym_raw)
+
+string csym = syminfo.type == "futures" and csym_raw != "" ? ticker.modify(csym_raw, session=syminfo.session, backadjustment=badj ? backadjustment.on : backadjustment.off) : csym_raw
+
+f_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3, qt.QuarterRecord q4) =>
+    qt.QuarterRecord out = q1
+    if idx == 2
+        out := q2
+    else if idx == 3
+        out := q3
+    else if idx == 4
+        out := q4
+    out
+
+f_sixh_session_end_ts(int src_ts) =>
+    string tz = syminfo.timezone
+    int y = year(src_ts, tz)
+    int m = month(src_ts, tz)
+    int d = dayofmonth(src_ts, tz)
+    int h = hour(src_ts, tz)
+    int day_start = timestamp(tz, y, m, d, 0, 0)
+    int sixh_ms = 6 * 60 * 60 * 1000
+    int out = h < 6 ? day_start + sixh_ms : h < 12 ? day_start + sixh_ms * 2 : h < 18 ? day_start + sixh_ms * 3 : day_start + sixh_ms * 4
+    out
+
+f_m90_c123() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    [st0, m90] = qt.qt_m90_update(st, cfg, time, time_close)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(m90.curQuarterIndex, m90.q1, m90.q2, m90.q3, m90.q4)
+    qt.QuarterRecord qprev = m90.curQuarterIndex == 1 ? st.m90.prev1 : m90.curQuarterIndex == 2 ? m90.q1 : m90.curQuarterIndex == 3 ? m90.q2 : m90.q3
+    qt.QuarterRecord qprev2 = m90.curQuarterIndex == 1 ? st.m90.prev2 : m90.curQuarterIndex == 2 ? st.m90.prev1 : m90.curQuarterIndex == 3 ? m90.q1 : m90.q2
+    [qprev2.h, qprev2.l, qprev2.c, qprev2.o, qprev2.boundaryTs, qprev.h, qprev.l, qprev.c, qprev.o, qprev.boundaryTs, qprev.lTs, qprev.hTs, qcur.h, qcur.l, qcur.c, qcur.o, qcur.boundaryTs, qcur.oTs, qcur.lTs, qcur.hTs, m90.endTs]
+
+[mh2, ml2, mc2, mo2, mt2, mh1, ml1, mc1, mo1, mt1, ml1t, mh1t, mh0, ml0, mc0, mo0, mt0, mop_ts, ml0t, mh0t, m90_end_ts] = f_m90_c123()
+
+float oh2 = na
+float ol2 = na
+float oc2 = na
+float oo2 = na
+int ot2 = na
+float oh1 = na
+float ol1 = na
+float oc1 = na
+float oo1 = na
+int ot1 = na
+int ol1t = na
+int oh1t = na
+float oh0 = na
+float ol0 = na
+float oc0 = na
+float oo0 = na
+int ot0 = na
+int omop_ts = na
+int ol0t = na
+int oh0t = na
+int om90_end_ts = na
+
+int peer_bar_time = na
+float peer_bar_open = na
+float peer_bar_close = na
+
+if csym != ""
+    [p_h2, p_l2, p_c2, p_o2, p_t2, p_h1, p_l1, p_c1, p_o1, p_t1, p_l1t, p_h1t, p_h0, p_l0, p_c0, p_o0, p_t0, p_mop_ts, p_l0t, p_h0t, p_end_ts] = request.security(csym, timeframe.period, f_m90_c123(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    oh2 := p_h2
+    ol2 := p_l2
+    oc2 := p_c2
+    oo2 := p_o2
+    ot2 := p_t2
+    oh1 := p_h1
+    ol1 := p_l1
+    oc1 := p_c1
+    oo1 := p_o1
+    ot1 := p_t1
+    ol1t := p_l1t
+    oh1t := p_h1t
+    oh0 := p_h0
+    ol0 := p_l0
+    oc0 := p_c0
+    oo0 := p_o0
+    ot0 := p_t0
+    omop_ts := p_mop_ts
+    ol0t := p_l0t
+    oh0t := p_h0t
+    om90_end_ts := p_end_ts
+
+if csym != ""
+    [p_bt, p_bo, p_bc] = request.security(csym, timeframe.period, [time, open, close], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    peer_bar_time := p_bt
+    peer_bar_open := p_bo
+    peer_bar_close := p_bc
+
+in_killzone = not na(time(timeframe.period, killzone, syminfo.timezone))
+is_m5 = timeframe.in_seconds(timeframe.period) == 5 * 60
+has_pair = csym != "" and not na(oc0)
+new_m90 = ta.change(mt0) != 0
+
+main_c2_up = mc1 > mo1
+main_c2_down = mc1 < mo1
+pair_c2_up = oc1 > oo1
+pair_c2_down = oc1 < oo1
+crack1 = (main_c2_up and pair_c2_down) or (main_c2_down and pair_c2_up)
+
+main_c3_above_c1 = mo0 > mc2
+main_c3_below_c1 = mo0 < mc2
+pair_c3_above_c1 = oo0 > oc2
+pair_c3_below_c1 = oo0 < oc2
+crack2 = (main_c3_above_c1 and pair_c3_below_c1) or (main_c3_below_c1 and pair_c3_above_c1)
+
+// TPD structure uses C1 = two m90 quarters back, C2 = previous m90 quarter, C3 = current m90 quarter.
+// Bullish TPD: C2 low < C1 low on at least one asset, C2 color divergence, and the tradable asset is the higher C3-open asset.
+// Bearish TPD is mirrored: C2 high > C1 high on at least one asset, C2 color divergence, and the tradable asset is the lower C3-open asset.
+main_c2_low = ml1 < ml2
+pair_c2_low = ol1 < ol2
+main_c2_high = mh1 > mh2
+pair_c2_high = oh1 > oh2
+
+main_higher_c3_open = main_c3_above_c1 and pair_c3_below_c1
+main_lower_c3_open = main_c3_below_c1 and pair_c3_above_c1
+
+valid_bull_tpd = has_pair and crack1 and (main_c2_low or pair_c2_low) and main_higher_c3_open
+valid_bear_tpd = has_pair and crack1 and (main_c2_high or pair_c2_high) and main_lower_c3_open
+
+tpd_c2_color_txt = main_c2_down ? "Bear" : main_c2_up ? "Bull" : "Doji"
+
+main_low_sweep = not na(ml1) and ml0 < ml1
+pair_low_sweep = not na(ol1) and ol0 < ol1
+main_high_sweep = not na(mh1) and mh0 > mh1
+pair_high_sweep = not na(oh1) and oh0 > oh1
+bull_ssmt = (main_low_sweep and not pair_low_sweep) or (pair_low_sweep and not main_low_sweep)
+bear_ssmt = (main_high_sweep and not pair_high_sweep) or (pair_high_sweep and not main_high_sweep)
+
+var int dir = 0
+var bool tpd_active = false
+var bool ssmt_confirmed = false
+var bool tcisd_confirmed = false
+var bool entry_done = false
+var float tcisd_level = na
+var int tcisd_ts = na
+var int tcisd_confirm_idx = na
+var int tcisd_confirm_ts = na
+var float tcisd_candidate_level = na
+var int tcisd_candidate_ts = na
+var int ssmt_confirm_idx = na
+var int ssmt_confirm_ts = na
+var int ssmt_anchor_ts = na
+var int ssmt_purge_ts = na
+var bool ssmt_invalidated = false
+var int ssmt_invalidated_ts = na
+var float ssmt_invalidation_level = na
+var int invalidated_counter = 0
+var float last_bull_open = na
+var int last_bull_open_ts = na
+var float last_bear_open = na
+var int last_bear_open_ts = na
+var float stop_level = na
+var float mop_level = na
+var int model_end_ts = na
+var float active_target_level = na
+var int active_entry_idx = na
+var int active_trade_dir = 0
+var bool trade_active = false
+var line mop_line = na
+var line tcisd_line = na
+var line stop_line = na
+var line target_line = na
+var label tcisd_lbl = na
+var label signal_lbl = na
+var int entry_taken_counter = 0
+var int win_counter = 0
+var int loss_counter = 0
+var int expired_counter = 0
+var array<string> setup_dates = array.new_string()
+
+var array<int> bar_time_hist = array.new_int()
+var array<float> bar_open_hist = array.new_float()
+var array<float> bar_close_hist = array.new_float()
+var array<int> peer_bar_time_hist = array.new_int()
+var array<float> peer_bar_open_hist = array.new_float()
+var array<float> peer_bar_close_hist = array.new_float()
+
+if barstate.isnew
+    array.push(bar_time_hist, time)
+    array.push(bar_open_hist, open)
+    array.push(bar_close_hist, close)
+    while array.size(bar_time_hist) > 1000
+        array.shift(bar_time_hist)
+        array.shift(bar_open_hist)
+        array.shift(bar_close_hist)
+    if not na(peer_bar_time)
+        array.push(peer_bar_time_hist, peer_bar_time)
+        array.push(peer_bar_open_hist, peer_bar_open)
+        array.push(peer_bar_close_hist, peer_bar_close)
+        while array.size(peer_bar_time_hist) > 1000
+            array.shift(peer_bar_time_hist)
+            array.shift(peer_bar_open_hist)
+            array.shift(peer_bar_close_hist)
+
+f_open_at_ts(int ts) =>
+    float out = na
+    int n = array.size(bar_time_hist)
+    if not na(ts) and n > 0
+        for j = 0 to n - 1
+            int idx = n - 1 - j
+            if array.get(bar_time_hist, idx) == ts
+                out := array.get(bar_open_hist, idx)
+                break
+    out
+
+f_find_tcisd_anchor_ts(int start_ts, bool want_bull_candle, array<int> tArr, array<float> oArr, array<float> cArr) =>
+    int out = na
+    int n = array.size(tArr)
+    if not na(start_ts) and n > 0
+        for j = 0 to n - 1
+            int idx = n - 1 - j
+            int t0 = array.get(tArr, idx)
+            if t0 <= start_ts
+                float o0 = array.get(oArr, idx)
+                float c0 = array.get(cArr, idx)
+                bool color_ok = want_bull_candle ? c0 > o0 : c0 < o0
+                if color_ok
+                    out := t0
+                    break
+    out
+
+f_del_line(line l) =>
+    if not na(l)
+        line.delete(l)
+    line out = na
+    out
+
+f_del_label(label l) =>
+    if not na(l)
+        label.delete(l)
+    label out = na
+    out
+
+if trade_active and not na(active_entry_idx) and bar_index > active_entry_idx
+    bool target_hit = active_trade_dir == 1 ? high >= active_target_level : active_trade_dir == -1 ? low <= active_target_level : false
+    bool stop_hit = active_trade_dir == 1 ? low <= stop_level : active_trade_dir == -1 ? high >= stop_level : false
+    bool time_expired_after_entry = not na(model_end_ts) and time >= model_end_ts
+    if stop_hit or target_hit or time_expired_after_entry
+        trade_active := false
+        string prior_log = array.size(setup_dates) > 0 ? array.get(setup_dates, 0) : ""
+        if stop_hit
+            loss_counter += 1
+            if array.size(setup_dates) > 0
+                array.set(setup_dates, 0, str.replace_all(prior_log, "Open", "Loss"))
+        else if target_hit
+            win_counter += 1
+            if array.size(setup_dates) > 0
+                array.set(setup_dates, 0, str.replace_all(prior_log, "Open", "Win"))
+        else
+            expired_counter += 1
+            if array.size(setup_dates) > 0
+                array.set(setup_dates, 0, str.replace_all(prior_log, "Open", "Expired"))
+
+bool setup_expired = tpd_active and not entry_done and not na(model_end_ts) and time >= model_end_ts
+bool can_reset_for_new_m90 = not tpd_active or setup_expired or (entry_done and not trade_active)
+
+if setup_expired
+    mop_line := f_del_line(mop_line)
+    tcisd_line := f_del_line(tcisd_line)
+    stop_line := f_del_line(stop_line)
+    target_line := f_del_line(target_line)
+    tcisd_lbl := f_del_label(tcisd_lbl)
+    signal_lbl := f_del_label(signal_lbl)
+    dir := 0
+    tpd_active := false
+    ssmt_confirmed := false
+    tcisd_confirmed := false
+    entry_done := false
+    tcisd_level := na
+    tcisd_ts := na
+    tcisd_confirm_idx := na
+    tcisd_confirm_ts := na
+    tcisd_candidate_level := na
+    tcisd_candidate_ts := na
+    ssmt_confirm_idx := na
+    ssmt_confirm_ts := na
+    ssmt_anchor_ts := na
+    ssmt_purge_ts := na
+    ssmt_invalidated := false
+    ssmt_invalidated_ts := na
+    ssmt_invalidation_level := na
+    last_bull_open := na
+    last_bull_open_ts := na
+    last_bear_open := na
+    last_bear_open_ts := na
+    stop_level := na
+    mop_level := na
+    model_end_ts := na
+
+if new_m90 and can_reset_for_new_m90
+    bool keep_previous_setup = keep_taken_setups and entry_done
+    if not keep_previous_setup
+        mop_line := f_del_line(mop_line)
+        tcisd_line := f_del_line(tcisd_line)
+        stop_line := f_del_line(stop_line)
+        target_line := f_del_line(target_line)
+        tcisd_lbl := f_del_label(tcisd_lbl)
+        signal_lbl := f_del_label(signal_lbl)
+    else
+        mop_line := na
+        tcisd_line := na
+        stop_line := na
+        target_line := na
+        tcisd_lbl := na
+        signal_lbl := na
+    dir := 0
+    tpd_active := false
+    ssmt_confirmed := false
+    tcisd_confirmed := false
+    entry_done := false
+    tcisd_level := na
+    tcisd_ts := na
+    tcisd_confirm_idx := na
+    tcisd_confirm_ts := na
+    tcisd_candidate_level := na
+    tcisd_candidate_ts := na
+    ssmt_confirm_idx := na
+    ssmt_confirm_ts := na
+    ssmt_anchor_ts := na
+    ssmt_purge_ts := na
+    ssmt_invalidated := false
+    ssmt_invalidated_ts := na
+    ssmt_invalidation_level := na
+    last_bull_open := na
+    last_bull_open_ts := na
+    last_bear_open := na
+    last_bear_open_ts := na
+    stop_level := na
+    mop_level := mo0
+    model_end_ts := na(m90_end_ts) ? f_sixh_session_end_ts(mt0) : m90_end_ts
+    active_target_level := na
+    active_entry_idx := na
+    active_trade_dir := 0
+    trade_active := false
+
+    if in_killzone and is_m5 and valid_bull_tpd
+        dir := 1
+        tpd_active := true
+        stop_level := na
+    else if in_killzone and is_m5 and valid_bear_tpd
+        dir := -1
+        tpd_active := true
+        stop_level := na
+
+    if tpd_active and not na(mop_level) and not na(model_end_ts)
+        mop_line := line.new(mt0, mop_level, model_end_ts, mop_level, xloc=xloc.bar_time, extend=extend.none, color=color.new(mop_col, 25), style=line.style_dashed)
+
+model_time_ok = tpd_active and not na(model_end_ts) and time < model_end_ts
+entry_time_ok = model_time_ok and in_killzone
+
+if tpd_active and model_time_ok and in_killzone and not tcisd_confirmed
+    if close > open
+        last_bull_open := open
+        last_bull_open_ts := time
+    else if close < open
+        last_bear_open := open
+        last_bear_open_ts := time
+
+if tpd_active and not ssmt_confirmed and model_time_ok and in_killzone
+    bool failure_is_main = dir == 1 ? (not main_low_sweep and pair_low_sweep) : dir == -1 ? (not main_high_sweep and pair_high_sweep) : false
+    if failure_is_main and ((dir == 1 and bull_ssmt) or (dir == -1 and bear_ssmt))
+        ssmt_confirmed := true
+        ssmt_confirm_idx := bar_index
+        ssmt_confirm_ts := time
+        bool pair_caused_ssmt = dir == 1 ? pair_low_sweep : dir == -1 ? pair_high_sweep : false
+        bool main_caused_ssmt = dir == 1 ? main_low_sweep : dir == -1 ? main_high_sweep : false
+        ssmt_purge_ts := dir == 1 ? (pair_caused_ssmt ? ol0t : main_caused_ssmt ? ml0t : na) : dir == -1 ? (pair_caused_ssmt ? oh0t : main_caused_ssmt ? mh0t : na) : na
+        bool want_bull_tcisd_candle = dir == -1
+        int color_anchor_ts = pair_caused_ssmt ? f_find_tcisd_anchor_ts(ssmt_purge_ts, want_bull_tcisd_candle, peer_bar_time_hist, peer_bar_open_hist, peer_bar_close_hist) : main_caused_ssmt ? f_find_tcisd_anchor_ts(ssmt_purge_ts, want_bull_tcisd_candle, bar_time_hist, bar_open_hist, bar_close_hist) : na
+        ssmt_anchor_ts := color_anchor_ts
+        stop_level := dir == 1 ? ml1 : dir == -1 ? mh1 : na
+        ssmt_invalidation_level := stop_level
+        float anchor_open = f_open_at_ts(ssmt_anchor_ts)
+        tcisd_candidate_level := anchor_open
+        tcisd_candidate_ts := ssmt_anchor_ts
+        if not na(tcisd_candidate_level) and not na(tcisd_candidate_ts) and not na(model_end_ts)
+            tcisd_line := f_del_line(tcisd_line)
+            tcisd_lbl := f_del_label(tcisd_lbl)
+            color tcisd_candidate_col = dir == 1 ? bull_tcisd_col : bear_tcisd_col
+            tcisd_line := line.new(tcisd_candidate_ts, tcisd_candidate_level, model_end_ts, tcisd_candidate_level, xloc=xloc.bar_time, extend=extend.none, color=tcisd_candidate_col, width=1, style=line.style_solid)
+            tcisd_lbl := label.new(model_end_ts, tcisd_candidate_level, "m5 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=tcisd_candidate_col)
+
+bool ssmt_invalidates_before_entry = tpd_active and ssmt_confirmed and not entry_done and not ssmt_invalidated and model_time_ok and not na(ssmt_invalidation_level) and ((dir == 1 and low < ssmt_invalidation_level) or (dir == -1 and high > ssmt_invalidation_level))
+if ssmt_invalidates_before_entry
+    ssmt_invalidated := true
+    ssmt_invalidated_ts := time
+    invalidated_counter += 1
+    mop_line := f_del_line(mop_line)
+    tcisd_line := f_del_line(tcisd_line)
+    stop_line := f_del_line(stop_line)
+    target_line := f_del_line(target_line)
+    tcisd_lbl := f_del_label(tcisd_lbl)
+    signal_lbl := f_del_label(signal_lbl)
+    dir := 0
+    tpd_active := false
+    ssmt_confirmed := false
+    tcisd_confirmed := false
+    entry_done := false
+    tcisd_level := na
+    tcisd_ts := na
+    tcisd_confirm_idx := na
+    tcisd_confirm_ts := na
+    tcisd_candidate_level := na
+    tcisd_candidate_ts := na
+    ssmt_confirm_idx := na
+    ssmt_confirm_ts := na
+    ssmt_anchor_ts := na
+    ssmt_purge_ts := na
+    ssmt_invalidation_level := na
+    last_bull_open := na
+    last_bear_open := na
+    stop_level := na
+    mop_level := na
+    model_end_ts := na
+
+bool tcisd_just_confirmed = false
+if tpd_active and ssmt_confirmed and not tcisd_confirmed and model_time_ok and in_killzone
+    if dir == 1
+        bool bull_tcisd_close = barstate.isconfirmed and not na(tcisd_candidate_level) and not na(tcisd_candidate_ts) and time > tcisd_candidate_ts and close > tcisd_candidate_level
+        if bull_tcisd_close
+            tcisd_level := tcisd_candidate_level
+            tcisd_ts := tcisd_candidate_ts
+            tcisd_confirmed := true
+            tcisd_confirm_idx := bar_index
+            tcisd_confirm_ts := time
+            tcisd_just_confirmed := true
+    else if dir == -1
+        bool bear_tcisd_close = barstate.isconfirmed and not na(tcisd_candidate_level) and not na(tcisd_candidate_ts) and time > tcisd_candidate_ts and close < tcisd_candidate_level
+        if bear_tcisd_close
+            tcisd_level := tcisd_candidate_level
+            tcisd_ts := tcisd_candidate_ts
+            tcisd_confirmed := true
+            tcisd_confirm_idx := bar_index
+            tcisd_confirm_ts := time
+            tcisd_just_confirmed := true
+
+if tcisd_just_confirmed and not na(tcisd_level) and not na(tcisd_ts) and not na(model_end_ts)
+    tcisd_line := f_del_line(tcisd_line)
+    tcisd_lbl := f_del_label(tcisd_lbl)
+    color tcisd_line_col = dir == 1 ? bull_tcisd_col : bear_tcisd_col
+    tcisd_line := line.new(tcisd_ts, tcisd_level, model_end_ts, tcisd_level, xloc=xloc.bar_time, extend=extend.none, color=tcisd_line_col, width=1, style=line.style_solid)
+    tcisd_lbl := label.new(model_end_ts, tcisd_level, "m5 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=tcisd_line_col)
+
+bool after_tcisd_confirm_bar = tcisd_confirmed and not na(tcisd_confirm_idx) and bar_index > tcisd_confirm_idx
+bool retests_tcisd_level = not na(tcisd_level) and high >= tcisd_level and low <= tcisd_level
+entry_touch = entry_time_ok and after_tcisd_confirm_bar and not entry_done and retests_tcisd_level
+risk = dir == 1 ? tcisd_level - stop_level : dir == -1 ? stop_level - tcisd_level : na
+
+if entry_touch and risk > 0
+    entry_done := true
+    float target = dir == 1 ? tcisd_level + risk * 2.0 : tcisd_level - risk * 2.0
+    active_target_level := target
+    active_entry_idx := bar_index
+    active_trade_dir := dir
+    trade_active := true
+    stop_line := line.new(time, stop_level, model_end_ts, stop_level, xloc=xloc.bar_time, extend=extend.none, color=color.new(color.gray, 20), width=1)
+    target_line := line.new(time, target, model_end_ts, target, xloc=xloc.bar_time, extend=extend.none, color=target_col, width=1)
+    float signal_label_pad = signal_label_pad_ticks * syminfo.mintick
+    float signal_label_y = dir == 1 ? (na(ml0) ? tcisd_level : ml0 - signal_label_pad) : (na(mh0) ? tcisd_level : mh0 + signal_label_pad)
+    signal_lbl := label.new(time, signal_label_y, dir == 1 ? "Buy\n2R" : "Sell\n2R", xloc=xloc.bar_time, yloc=yloc.price, style=dir == 1 ? label.style_label_up : label.style_label_down, size=size.small, color=dir == 1 ? bull_col : bear_col, textcolor=color.white)
+
+bull_entry = entry_done and not entry_done[1] and dir == 1
+bear_entry = entry_done and not entry_done[1] and dir == -1
+
+if bull_entry or bear_entry
+    entry_taken_counter += 1
+    string entry_dir_txt = bull_entry ? "Bull" : "Bear"
+    string entry_dt_txt = str.format_time(time, "yyyy-MM-dd HH:mm", syminfo.timezone)
+    array.unshift(setup_dates, entry_dt_txt + " " + entry_dir_txt + " | Open")
+    if array.size(setup_dates) > 50
+        array.pop(setup_dates)
+
+alertcondition(bull_entry, "m90Model Bullish Entry", "m90Model bullish entry: m90 TPD confirmed by m90 SSMT and m5 tCISD, target 2R")
+alertcondition(bear_entry, "m90Model Bearish Entry", "m90Model bearish entry: m90 TPD confirmed by m90 SSMT and m5 tCISD, target 2R")
+
+var table dbg = table.new(position.bottom_right, 2, 14, border_width=1)
+if barstate.islast and show_debug
+    table.cell(dbg, 0, 0, "Peer", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 0, f_ticker_only(csym_raw), text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 1, "Chart", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 1, is_m5 ? "m5" : "Use m5", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 2, "Killzone", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 2, in_killzone ? "Y" : "N", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 3, "TPD", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 3, dir == 1 ? "Bull" : dir == -1 ? "Bear" : "-", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 4, "SSMT", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 4, ssmt_confirmed ? "Y" : "N", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 5, "tCISD", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 5, tcisd_confirmed ? "Y" : "N", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 6, "MOP Check", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 6, "OFF", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 7, "tCISD Candidate", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 7, na(tcisd_candidate_level) ? "-" : str.tostring(tcisd_candidate_level), text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 8, "SSMT Anchor TS", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 8, na(ssmt_anchor_ts) ? "-" : str.format_time(ssmt_anchor_ts, "HH:mm", syminfo.timezone), text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 9, "tCISD Confirm TS", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 9, na(tcisd_confirm_ts) ? "-" : str.format_time(tcisd_confirm_ts, "HH:mm", syminfo.timezone), text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 10, "SSMT Invalid Lvl", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 10, na(ssmt_invalidation_level) ? "-" : str.tostring(ssmt_invalidation_level), text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 11, "Invalidated", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 11, ssmt_invalidated ? str.format_time(ssmt_invalidated_ts, "HH:mm", syminfo.timezone) : "N", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 12, "C2 Color", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 12, tpd_c2_color_txt, text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 0, 13, "SSMT Purge TS", text_color=color.black, text_size=size.tiny)
+    table.cell(dbg, 1, 13, na(ssmt_purge_ts) ? "-" : str.format_time(ssmt_purge_ts, "HH:mm", syminfo.timezone), text_color=color.black, text_size=size.tiny)
+
+var table setup_log_dbg = table.new(position.top_right, 2, 60, border_width=1)
+if barstate.islast
+    if show_setup_log
+        int decided_trades = win_counter + loss_counter
+        float win_rate = decided_trades > 0 ? (win_counter * 100.0) / decided_trades : na
+        table.cell(setup_log_dbg, 0, 0, "Entry Taken", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 1, 0, str.tostring(entry_taken_counter), text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 0, 1, "Wins", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 1, 1, str.tostring(win_counter), text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 0, 2, "Losses", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 1, 2, str.tostring(loss_counter), text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 0, 3, "Win Rate", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 1, 3, na(win_rate) ? "-" : str.tostring(win_rate, "#.##") + "%", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 0, 4, "Expired", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 1, 4, str.tostring(expired_counter), text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 0, 5, "Invalidated", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 1, 5, str.tostring(invalidated_counter), text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 0, 6, "Setup Dates", text_color=color.black, text_size=size.tiny)
+        table.cell(setup_log_dbg, 1, 6, "Newest First", text_color=color.black, text_size=size.tiny)
+        for i = 0 to 49
+            bool show_row = i < setup_log_rows and i < array.size(setup_dates)
+            table.cell(setup_log_dbg, 0, i + 7, show_row ? str.tostring(i + 1) : "", text_color=color.black, text_size=size.tiny)
+            table.cell(setup_log_dbg, 1, i + 7, show_row ? array.get(setup_dates, i) : "", text_color=color.black, text_size=size.tiny)
+    else
+        for i = 0 to 59
+            table.cell(setup_log_dbg, 0, i, "", text_color=color.black, text_size=size.tiny)
+            table.cell(setup_log_dbg, 1, i, "", text_color=color.black, text_size=size.tiny)

@@ -1,34 +1,10 @@
-6:28:25 PM	Compiling...
-6:29:17 PM	Warning at 1201:33 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1203:33 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1369:34 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1371:34 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1498:39 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1500:39 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1656:40 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1658:40 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1912:36 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 1914:36 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2078:37 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2080:37 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2242:37 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2244:37 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2400:38 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2402:38 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2671:38 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2673:38 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2833:39 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2835:39 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2981:39 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 2983:39 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3140:40 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3142:40 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3402:37 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3404:37 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3563:38 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3565:38 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3724:38 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3726:38 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3882:39 The function "f_set_or_make_hline_w" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	Warning at 3884:39 The function "f_set_or_make_line" should be called on each calculation for consistency. It is recommended to extract the call from this scope
-6:29:17 PM	"QTEngine Test" saved.
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aO" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aH" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aL" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aC" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aT" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aTClose" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aActualOpen" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aActualOpenTs" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aActualBoundaryTs" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?
+7:21:14 PM	Warning at 1417:9 Shadowing variable "aActualQi" which exists in parent scope. Did you want to use the ":=" operator instead of "=" ?

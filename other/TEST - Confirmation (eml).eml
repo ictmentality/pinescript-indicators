@@ -1,0 +1,336 @@
+Delivered-To: jackwpbcoach@gmail.com
+Received: by 2002:a05:640c:2b54:b0:25f:7be1:fc9a with SMTP id y20csp612329eiv;
+        Fri, 6 Mar 2026 06:16:14 -0800 (PST)
+X-Received: by 2002:a05:600c:4451:b0:483:71f9:37ef with SMTP id 5b1f17b1804b1-48526923bf0mr37117545e9.8.1772806574554;
+        Fri, 06 Mar 2026 06:16:14 -0800 (PST)
+ARC-Seal: i=2; a=rsa-sha256; t=1772806574; cv=pass;
+        d=google.com; s=arc-20240605;
+        b=YHQUYaSgm5I9w4+bwONWuW6jfH9OMcJvwwveq5nQ7Wo+4EEHOQ3WzVseUrM0JCgFVR
+         PjNHK6QCt+6Bkex7RJTxoQFlA2ZH56SQZCO8LGVNDMMIu4Sv6Zqj/QuYcwsxIXlDawkG
+         cwgpZA6jxfiLpvuUxZCoCAQoi/zJxXcoDS33K+hI5OubW9IkW3dpOGZASRpT3xWDvkTD
+         QvCL2o+odn2/eWT6rEgBQMpBybKiIZW2dFdi2x0tvEnK61wZIHhlOLqjp4/8lx8dznGS
+         dfnvhHXEsAG8g90gnEa3eENyM63yKxjPrbfxclCn0yaHsMELgxqVeaof4KEwyceqLy3O
+         9RCA==
+ARC-Message-Signature: i=2; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=to:subject:message-id:date:from:mime-version:dkim-signature;
+        bh=Tq+2h8YQ17mwCyq4fmggVzUA+c+UZkugkIhqdc0B+SE=;
+        fh=y78NhmM79AzeaWyNOnyClrNSO8dmN/FgqwMcgjcNLgw=;
+        b=f2DDQ+gqtLJFfUn1dQuU0BxsXmTU7xNeVh8+iQlqc+GC2AMm/Vz8XgsknBlmGrUU4A
+         MO2NEBKEyrvwNOevPHljE3GONqNYuu3AUGzZ+3uEU888Odw+I7MmvNTWKFkApE7LGxrp
+         DwuCHJNOAL1WBRfGS1JMZFpAGoSYDstm6eU0to0XX78VM4lq7nNuu/N/mpoD+BzoV3O1
+         NGeZ4nbZnmq71YThdQumDn8WesTq437NHCcyWvWT8L2oH6gWAPNd0RpF9YHvgxroarON
+         p6rfv3xQlrIQoePu0DfgkQ+fctZey1OtEL0Y8soc+3vYCv3J8rfyqoA6jd7yeiYzfMVH
+         xYKA==;
+        dara=google.com
+ARC-Authentication-Results: i=2; mx.google.com;
+       dkim=pass header.i=@gmail.com header.s=20230601 header.b=UF414pVU;
+       arc=pass (i=1);
+       spf=pass (google.com: domain of jaw1312@gmail.com designates 209.85.220.41 as permitted sender) smtp.mailfrom=jaw1312@gmail.com;
+       dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com;
+       dara=pass header.i=@gmail.com
+Return-Path: <jaw1312@gmail.com>
+Received: from mail-sor-f41.google.com (mail-sor-f41.google.com. [209.85.220.41])
+        by mx.google.com with SMTPS id ffacd0b85a97d-439dacebee1sor311168f8f.4.2026.03.06.06.16.14
+        for <jackwpbcoach@gmail.com>
+        (Google Transport Security);
+        Fri, 06 Mar 2026 06:16:14 -0800 (PST)
+Received-SPF: pass (google.com: domain of jaw1312@gmail.com designates 209.85.220.41 as permitted sender) client-ip=209.85.220.41;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@gmail.com header.s=20230601 header.b=UF414pVU;
+       arc=pass (i=1);
+       spf=pass (google.com: domain of jaw1312@gmail.com designates 209.85.220.41 as permitted sender) smtp.mailfrom=jaw1312@gmail.com;
+       dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com;
+       dara=pass header.i=@gmail.com
+ARC-Seal: i=1; a=rsa-sha256; t=1772806574; cv=none;
+        d=google.com; s=arc-20240605;
+        b=ZUabXFXCZ7sRXE2uf7PgrerLEvP4QAlJac4okNJOjKb8p+0LWG9mCyxoksjGu+NNjX
+         k36EZ/l0iWS8DtehO7LpAL9gNkHcULndCXejHTjtlc6Pocz3BbDocjrMSZRMWJ4uhDYI
+         MSVFsivzON3hMdDo02ToCE7JKPIG02d17guWpsga8j5+Lv+tct8kdup30Pgq6x6q0Otz
+         6ap6ICtJ09JvWNdC1zqsnyoaseoGM4mRXo5GNjfRNPgAegjw5G6A4xubyH5ZPjm4Tlwq
+         5jGXvRxm40HXFKObcOY5Y7cGpmi8iYCl3MvYOj8p5DoDJmvEfwj/pfNF1Tw3nIAgtj8r
+         BCdw==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=to:subject:message-id:date:from:mime-version:dkim-signature;
+        bh=Tq+2h8YQ17mwCyq4fmggVzUA+c+UZkugkIhqdc0B+SE=;
+        fh=y78NhmM79AzeaWyNOnyClrNSO8dmN/FgqwMcgjcNLgw=;
+        b=TApNjFqduzSzOKh0OU0Vd6YtiFjPn5BgPDVxuTX367wa70Hrdw/ePl36NnodVgLv+s
+         Z+3K2jhENKZqE2hV3idFsSQeYb1TS0bVngHyt4QDNUWSYJTteQhc+aznJmewfMqcQSK0
+         N4qvqnLWUsKg+6vw2UF6b98VFNDfTr4nL8vBzA1O7GgR1pMzhYUhLTWRe62exG8RwjVk
+         F+eXy0H+NZzy0c2w5AzwC4vp6icfZHxOxCazv0QfucZRuMQ9WK3Hvjq9v5ik137hNxGt
+         aiLumpgGs5zEZt6AM1uXZNtOtzhf9yfYMdN28wEFsUwBiVffwmp+J4pKa2WpyNEpmRVW
+         kILg==;
+        dara=google.com
+ARC-Authentication-Results: i=1; mx.google.com; arc=none
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=gmail.com; s=20230601; t=1772806574; x=1773411374; dara=google.com;
+        h=to:subject:message-id:date:from:mime-version:from:to:cc:subject
+         :date:message-id:reply-to;
+        bh=Tq+2h8YQ17mwCyq4fmggVzUA+c+UZkugkIhqdc0B+SE=;
+        b=UF414pVU84Lj8YxzczAVVPYA/uGSOVCMLGxRdzogk4/BpYgcS8vReSOvh1oetkAxpz
+         fPkrvHBN3dYcWxvtrGvWOpZM7S+IaiyGMZze/zrK53WpKBl7OwE4nsUkT8kNmk7ONK4K
+         NgMbMOPLewB2HAUoeiipluGQNKQ8ioopjCqRFxd2ZVTgxd98y4gdH65/Dijv7523lRJ7
+         1eA8G0e8qGeTsZp5qPsILUm36IvQtTcMnqfRD5j9Du6hvKg+v/cnNrZoaBvuOUF/9EVK
+         Md8ZmK1ahNYcuR8+D5m+0rnPq/AFBOBlYvzl05h9M12xi/iHsh0O1vlI9zsL3C9EKSxH
+         gnLA==
+X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;
+        d=1e100.net; s=20230601; t=1772806574; x=1773411374;
+        h=to:subject:message-id:date:from:mime-version:x-gm-gg
+         :x-gm-message-state:from:to:cc:subject:date:message-id:reply-to;
+        bh=Tq+2h8YQ17mwCyq4fmggVzUA+c+UZkugkIhqdc0B+SE=;
+        b=TeKXLFi6OiDCcuNCx/F7Lxj0g67DjGW9lVApj6lVJbbglC8doYFMXWNu2s4+HS5hv6
+         3IhUjpdJpXACiPB2oC+/KHfl40PvDYoKc+aoh7ULQBkFGCBK973Ariz4wOTaSnPsqGRz
+         J0c3Irhi4HUcV5623FTlMiCLfneCZ0jDtk2uu/0KchNhWfIdHHkHnMqj30visvmyWPtl
+         Bz0N2AtI7HTWZtOxhMFCN6URL5FMKZEWBKVIbE4swUaouate1Fop2oCCqKBBnAfMsTyJ
+         tJLgJjV3L7pxQXRb/l1f0u33FT3uQABNQreGqu48izmgc6ndLdI4PAUx2NOTcwhRDxJD
+         nlRg==
+X-Gm-Message-State: AOJu0Yyd1NvBqVLzo8h9gxiei1k+QCpOdoHffB/Ub8THxLldefCN8GRZ
+	v1xsIFVeOMcr1tHsZJ8VX7+T0/KTauBWal0cv6PP2JdlRJyd/QCCnnKzOm9tLD/JCf+uSmQhi7/
+	Fv+lfq+K5Jcj/hW9qihzQdhLdQcR3gDrHaw==
+X-Gm-Gg: ATEYQzy/s4A/1JSxRniLGXKNNcv3RCrs5thvewqvS17F/CgB6TShCeD53uMeMGntUq7
+	Vkxa3d1vDAkHjwY3rm1rETnQjJQHtv7KYt5WsYdaBMzV3ScHPSRDPec58FWBnW10tn9K+Ow0+pM
+	Cd3XDa+wetBZjk+qmIawcUjlqYIFzBqWenT3LI9KOv3cLXxnRT8Kc89gjZ0qQbbSe9InsJqXSam
+	A0U3XCWYwL1HKKRKNSNKbJp6m3OeR7YAD/YhCCBuYsGawJTbhYIpZzZL+xZ04Eaq6Og2TkFJ1Ba
+	iDhVt/uq
+X-Received: by 2002:adf:ee06:0:b0:439:ddf9:a205 with SMTP id
+ ffacd0b85a97d-439ddf9a345mr1590660f8f.10.1772806573691; Fri, 06 Mar 2026
+ 06:16:13 -0800 (PST)
+MIME-Version: 1.0
+From: Jack Wasserman <jaw1312@gmail.com>
+Date: Fri, 6 Mar 2026 09:16:02 -0500
+X-Gm-Features: AaiRm50YaYSaxHHNL47MvuoyXYs1OjDkj73lI0ec9UW5i0u2w5R9Eao-gV3kRhs
+Message-ID: <CABpQe+mJ-c10yoXnvWL3z3L1wB0EQ=_-ucaZY-45ZR2wuowNUg@mail.gmail.com>
+Subject: TEST - Confirmation (eml)
+To: "jackwpbcoach@gmail.com" <jackwpbcoach@gmail.com>
+Content-Type: multipart/mixed; boundary="00000000000014ae82064c5bb2f1"
+
+--00000000000014ae82064c5bb2f1
+Content-Type: multipart/alternative; boundary="00000000000014ae81064c5bb2ef"
+
+--00000000000014ae81064c5bb2ef
+Content-Type: text/plain; charset="UTF-8"
+
+
+
+--00000000000014ae81064c5bb2ef
+Content-Type: text/html; charset="UTF-8"
+
+<div dir="ltr"><br></div>
+
+--00000000000014ae81064c5bb2ef--
+--00000000000014ae82064c5bb2f1
+Content-Type: message/rfc822; name="Confirmation.eml"
+Content-Disposition: attachment; filename="Confirmation.eml"
+Content-Transfer-Encoding: 8bit
+Content-ID: <f_mmez8ggp0>
+X-Attachment-Id: f_mmez8ggp0
+
+Delivered-To: jaw1312@gmail.com
+Received: by 2002:a5d:649d:0:b0:439:bd72:b03c with SMTP id o29csp757395wri;
+        Thu, 5 Mar 2026 07:43:04 -0800 (PST)
+X-Forwarded-Encrypted: i=2; AJvYcCX0/NTE7jzQmkjGPkqVQGZ3ZvxAF99FqW2iQMmt0NXtxig+E3obKNmfILQEL8+VbvbOraRP7vUq@gmail.com
+X-Received: by 2002:a05:622a:14d:b0:501:45d7:10cd with SMTP id d75a77b69052e-508e6946618mr33003561cf.20.1772725384236;
+        Thu, 05 Mar 2026 07:43:04 -0800 (PST)
+ARC-Seal: i=1; a=rsa-sha256; t=1772725384; cv=none;
+        d=google.com; s=arc-20240605;
+        b=YVYU7pM2ZQAAE8Dqnxo9C9AqWqGP6MMn4+xPILpfvxO7pu4uldgOJOP0f+Vj6ihdMH
+         I9EbyhhEP+/viW6/zFtTQoV9qIT4PKVEt2t8jyik6AdXkMte4ZX0XAdvniHPMSH4qU4p
+         Ciz/HQb5Q5iZScZjqAbzIh/WWn8/QSborWXI9/wiYcmzQs+37eqE1xPO0gFqwVOMo1Vc
+         R8WQkpNEfjgEKbXbitw042yf+4RbNYl0KP4MO06/CFMYJXRNwKt2JiE9xdgDcXE41uQf
+         4QyR0RlWea8CG4GmKuGeknHc3CguFMJVGuzh+Mp4bbUWIVxxwQIygYUlJhOX8vMzj3x+
+         Bt1Q==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;
+        h=feedback-id:content-transfer-encoding:mime-version:subject
+         :message-id:to:reply-to:from:date:dkim-signature:dkim-signature;
+        bh=uVJwNK2MqsXSd236iaD/QiIK12uz1OgS3gQZFTOwKKw=;
+        fh=UaJKwlZMcXC7Tkq1GsuPN02YN9b886vWGID94ObmEhg=;
+        b=U9HRMKaY0q2flH1GGIPwwo1p3PXGx94lLUD3N2fYEADtNaZA4BWGnH6aQDCLcES6o7
+         XpcQ71hyRKAdNQAtOx+KxUCo74eQYKcq7vpm2cONNQQAMO/zG/os1jDvsKhh06t1GfGn
+         bymCtLdCJ9YLUArhmQ3h0dkwEiEVXFq/JFhPyox/yGzmvfT0frsv6S7Krjm3sdG+UhwZ
+         eQovDSLB3cgEdrIEhlMxMGRRAn7/XiAcLe+ZaR2LOdBZmpwQIv+y3AMKrEWDHyXQ0AD0
+         jAe4UmJTPmS1baisRi2feQ+GGXDYt7G22en/3MDLEDbCk4zJ34DZZTVZnWDeI+ICJiOF
+         mV2Q==;
+        dara=google.com
+ARC-Authentication-Results: i=1; mx.google.com;
+       dkim=pass header.i=@playbypoint.com header.s=l55xr6vre4ldeqq3t5bxmlgcqs6zmvfl header.b=cNA9itup;
+       dkim=pass header.i=@amazonses.com header.s=6gbrjpgwjskckoa6a5zn6fwqkn67xbtw header.b=EfjlM3tA;
+       spf=pass (google.com: domain of 0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000@mailing.playbypoint.com designates 54.240.125.22 as permitted sender) smtp.mailfrom=0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000@mailing.playbypoint.com;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=playbypoint.com
+Return-Path: <0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000@mailing.playbypoint.com>
+Received: from a125-22.smtp-out.amazonses.com (a125-22.smtp-out.amazonses.com. [54.240.125.22])
+        by mx.google.com with ESMTPS id 6a1803df08f44-899c7390b15si238524476d6.240.2026.03.05.07.43.04
+        for <jaw1312@gmail.com>
+        (version=TLS1_3 cipher=TLS_AES_128_GCM_SHA256 bits=128/128);
+        Thu, 05 Mar 2026 07:43:04 -0800 (PST)
+Received-SPF: pass (google.com: domain of 0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000@mailing.playbypoint.com designates 54.240.125.22 as permitted sender) client-ip=54.240.125.22;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@playbypoint.com header.s=l55xr6vre4ldeqq3t5bxmlgcqs6zmvfl header.b=cNA9itup;
+       dkim=pass header.i=@amazonses.com header.s=6gbrjpgwjskckoa6a5zn6fwqkn67xbtw header.b=EfjlM3tA;
+       spf=pass (google.com: domain of 0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000@mailing.playbypoint.com designates 54.240.125.22 as permitted sender) smtp.mailfrom=0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000@mailing.playbypoint.com;
+       dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=playbypoint.com
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
+	s=l55xr6vre4ldeqq3t5bxmlgcqs6zmvfl; d=playbypoint.com;
+	t=1772725383;
+	h=Date:From:Reply-To:To:Message-ID:Subject:Mime-Version:Content-Type:Content-Transfer-Encoding;
+	bh=f7qVP3dF1OP4pb2EhyzIRTiLScJLvuAHAtQX2+nQ2H0=;
+	b=cNA9itupduxpytA7OTAx2xXokCPrMTc0zBEmLk+Cm4ZREOpVkeBBaZpdc3kUnhcM
+	sCdQL3G91qiMb/vTUZ4IeFzB1LgTjRZUbYUI7hP63olXWC9qarUNLgFjK3b3WdNbcKc
+	0nTCgreLu56C7hR+FtqnT0QNSRBxM3YJFNMG1qnVn7e5cQj0Q/EnmnLIHHfqF6jFHrq
+	cRxKNO9SQa6BhSWFJ6X1qd4pWRxPSe28iDzsv0OR3yzYigNK/zDp8cBYO/DyxEZW4lB
+	djW+Wjh6S8DEXkii+XvPeSWaDMtjtwYFMLlBnYDc6uygKqYyplZLr4h4soWSZ/FeMVr
+	vKxIuC/Row==
+DKIM-Signature: v=1; a=rsa-sha256; q=dns/txt; c=relaxed/simple;
+	s=6gbrjpgwjskckoa6a5zn6fwqkn67xbtw; d=amazonses.com; t=1772725383;
+	h=Date:From:Reply-To:To:Message-ID:Subject:Mime-Version:Content-Type:Content-Transfer-Encoding:Feedback-ID;
+	bh=f7qVP3dF1OP4pb2EhyzIRTiLScJLvuAHAtQX2+nQ2H0=;
+	b=EfjlM3tAmjd9EFqjK+OfI/CsFOa3OOgrXg+RrbmN4lepuSyAUJsOGf8KHmZH8382
+	n7hUhraPWD2ZH3Ga3axMck2KiH6DdlyYiov6o8KzCQxeg+Koi4OHALgCae9MTFqzp7b
+	0k/6u4KnsnlsmkhOWxgqL0SPrrTLm+cwMlZavnyg=
+Date: Thu, 5 Mar 2026 15:43:03 +0000
+From: PinPointMyrtle@playbypoint.com
+Reply-To: nmb@pinpointindoor.com
+To: michele_merced@hotmail.com
+Message-ID: <0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000@email.amazonses.com>
+Subject: Confirmation
+Mime-Version: 1.0
+Content-Type: text/html;
+ charset=UTF-8
+Content-Transfer-Encoding: 7bit
+Feedback-ID: ::1.us-east-1.Zp02J9OdTkX5TqRbJKKYLzw6sBNBcrBMdpooj8AK1B0=:AmazonSES
+X-SES-Outgoing: 2026.03.05-54.240.125.22
+
+<!DOCTYPE html>
+<html>
+  <head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    
+
+    <style type="text/css">
+      @import url('https://fonts.googleapis.com/css?family=Poppins:400,700|Roboto:400,500');
+
+      a { color: #4ca2d2; }
+a.visited { color: #4492bd; }
+.action_button { background: #4ca2d2; }
+.header_top_line { background-color: #4ca2d2 }
+
+    </style>
+
+  <style>body {
+margin: 0; padding: 0;
+}
+img {
+height: auto; line-height: 100%; max-width: 100%; outline: none; text-decoration: none;
+}
+img {
+border: 0;
+}
+</style>
+</head>
+
+  <body style="margin: 0; padding: 0;">
+    <table border="0" cellpadding="0" cellspacing="0" class="email" style="border-collapse: collapse; background-color: #fafafa; border-spacing: 0; color: #293636; font-family: Roboto,Helvetica Neue,Helvetica,sans-serif; font-size: 15px; height: 100%; width: 100%; margin: 0; padding: 0; border-style: none;">
+      <tbody>
+        <tr style="vertical-align: top;">
+          <td align="center" valign="top" style="border-collapse: collapse;">
+            <table border="0" cellpadding="0" cellspacing="0" class="container" style="border-collapse: collapse; background-color: #fff; border-spacing: 0; max-width: 600px; width: 100%; margin: 0 auto; padding: 0; border-style: none;">
+              <tbody>
+                <tr style="vertical-align: top;"><td class="top_space" style="border-collapse: collapse; background-color: #fafafa; height: 10px;"></td></tr>
+                <tr style="vertical-align: top;">
+                  <td align="center" valign="top" style="border-collapse: collapse;">
+                    <table border="0" cellpadding="0" cellspacing="0" class="header" style="border-collapse: collapse; border-spacing: 0; width: 100%; background: #fff no-repeat 50% / cover; padding: 0; border-style: none;">
+                      <tbody>
+                        <tr style="vertical-align: top;">
+                          <td class="header_top_line" style="border-collapse: collapse; height: 5px; background-color: #4ca2d2;"></td>
+                        </tr>
+                        <tr style="vertical-align: top;">
+                          <td class="header_bottom_line" style="border-collapse: collapse; background-color: #000; height: 4px;"></td>
+                        </tr>
+                        <tr style="vertical-align: top;">
+                          <td align="center" valign="top" style="border-collapse: collapse;">
+                            <table border="0" cellpadding="0" cellspacing="0" class="logo_content" style="border-collapse: collapse; border-spacing: 0; margin-bottom: 25px; margin-top: 25px; max-width: 87%; text-align: center; width: 100%; padding: 0; border-style: none;">
+                              <tr style="vertical-align: top;">
+                                <td style="border-collapse: collapse;">
+                                    <div class="item"><a href="https://lq8pvpv2.r.us-east-1.awstrack.me/L0/https:%2F%2Fbookmyrtle.pinpointindoor.com%2F/1/0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000/ghpqXzYa1y7Bnvkp30zZiWROfKc=468" style="text-decoration: none; color: #4ca2d2;"><img class="ui image" alt="Pin Point Myrtle " data-fallback="false" src="https://paybycourts3.s3.amazonaws.com/uploads/facility/logo_email/1496/PinPoint_Logo_for_Emails__1_.png" style="height: auto; line-height: 100%; max-width: 100%; outline: none; text-decoration: none; border-width: 0;"></a></div>
+                                </td>
+                              </tr>
+                            </table>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <table border="0" cellpadding="0" cellspacing="0" class="body" style="border-collapse: collapse; border-spacing: 0; margin-bottom: 30px; margin-top: 30px; max-width: 87%; width: 100%; padding: 0; border-style: none;">
+                      <tbody>
+                         <tr style="vertical-align: top;">
+                          <td style="border-collapse: collapse;">
+                            
+<div class="main text" style="font-size: 20px; margin-bottom: 10px;"> Hello michele </div>
+<div class="secondary text" style="font-size: 17px; margin-bottom: 10px;"> Your <a href="https://lq8pvpv2.r.us-east-1.awstrack.me/L0/https:%2F%2Fbookmyrtle.pinpointindoor.com%2Flessons%2FLES58DCA92312/1/0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000/ABTGWsHBIHuxOp6odit2ntSLFRg=468" style="text-decoration: none; color: #4ca2d2;">lesson</a> has been booked successfully</div>
+
+<div class="big separator" style="background-color: #e8e8e8; height: 3px; margin: 20px 0;"></div>
+
+<table class="content" style="border-collapse: collapse; border-spacing: 0; margin-bottom: 20px; width: 100%; padding: 0; border-style: none;">
+  <tr style="vertical-align: top;">
+    <td style="border-collapse: collapse; font-size: 15px; font-weight: 500; padding: 10px 0;">Lessons: 3</td>
+    <td style="border-collapse: collapse; font-size: 15px; color: #85889d !important; text-align: right; padding: 10px 0;">Jack Wasserman - 3 Lesson Package</td>
+  </tr>
+  <tr style="vertical-align: top;">
+    <td style="border-collapse: collapse; font-size: 15px; font-weight: 500; padding: 10px 0;">Teacher</td>
+    <td style="border-collapse: collapse; font-size: 15px; color: #85889d !important; text-align: right; padding: 10px 0;">Jack Wasserman</td>
+  </tr>
+  <tr style="vertical-align: top;">
+    <td style="border-collapse: collapse; font-size: 15px; font-weight: 500; padding: 10px 0;">Players: Private</td>
+    <td style="border-collapse: collapse; font-size: 15px; color: #85889d !important; text-align: right; padding: 10px 0;">michele merced</td>
+  </tr>
+  <tr style="vertical-align: top;">
+    <td style="border-collapse: collapse; font-size: 15px; font-weight: 500; padding: 10px 0;">Confirmation Number</td>
+    <td style="border-collapse: collapse; font-size: 15px; color: #85889d !important; text-align: right; padding: 10px 0;">LES58DCA92312</td>
+  </tr>
+  <tr style="vertical-align: top;">
+    <td style="border-collapse: collapse; font-size: 15px; font-weight: 500; padding: 10px 0;">Payment</td>
+    <td style="border-collapse: collapse; font-size: 15px; color: #85889d !important; text-align: right; padding: 10px 0;">
+      <div>$270.00  Paid on Thu, Mar 05</div>
+      <span><span>mastercard</span><span> xxxx-4117</span></span>
+    </td>
+  </tr>
+</table>
+
+<a class="action_button" href="https://lq8pvpv2.r.us-east-1.awstrack.me/L0/https:%2F%2Fbookmyrtle.pinpointindoor.com%2Flessons%2FLES58DCA92312/2/0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000/UpkdE2OgKinRhs7q1Nm1fCcRhKM=468" style="text-decoration: none; color: #fff; background-color: #4ca2d2; border-radius: 3px; box-shadow: 0 5px 20px 0 rgba(220,222,229,.8) !important; display: block; font-family: Poppins,Helvetica Neue,Helvetica,sans-serif; font-size: 12px; letter-spacing: .5px; max-width: 350px; text-align: center; text-transform: uppercase; margin: 25px auto; padding: 12px;">View details</a>
+
+                          </td>
+                         </tr>
+                      </tbody>
+                    </table>
+
+
+                  </td>
+                </tr>
+                  <tr style="vertical-align: top;">
+                    <td class="bottom_space" style="border-collapse: collapse; background-color: #fafafa; color: #85889d; font-size: 11px; padding: 10px 20px;">
+                      <table border="0" cellpadding="0" cellspacing="0" class="disclaimer" style="border-collapse: collapse; border-spacing: 0; width: 100%; padding: 0; border-style: none;">
+                        <tr style="vertical-align: top;">
+                          <td style="border-collapse: collapse;">
+                            You are receiving this email because you subscribed to Pin Point Myrtle . <br>
+                            To unsubscribe, simply click the "Unsubscribe" link at the bottom right of this email.
+                          </td>
+<td style="border-collapse: collapse;">
+                          </td>
+<td class="text right" style="border-collapse: collapse; text-align: right;"><a target="blank" href="https://lq8pvpv2.r.us-east-1.awstrack.me/L0/https:%2F%2Fapp.playbypoint.com%2Fnotifications_unsubscribes%2FBAhpA7eVLw==--1899e9cc0a4362f96f68980891cc027400cb6376/1/0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000/b3kX0IVM5zqSxhIViyNND_Lk_9s=468" style="text-decoration: underline; color: #85889d; font-size: 11px;">Unsubscribe</a></td>
+<td style="border-collapse: collapse;">
+                        </td>
+</tr>
+                      </table>
+                    </td>
+                  </tr>
+              </tbody>
+            </table>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+  <img alt="" src="https://lq8pvpv2.r.us-east-1.awstrack.me/I0/0100019cbeaab23e-05a16571-9d2a-4ac2-9d77-3bd15c8a4137-000000/YblhhqyfpjfK16SeXbhk42Ffrxk=468" style="display: none; width: 1px; height: 1px;">
+</body>
+
+</html>
+
+--00000000000014ae82064c5bb2f1--

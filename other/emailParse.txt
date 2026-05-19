@@ -1,0 +1,624 @@
+/********************* CONFIG *********************/
+const ROOT_FOLDER_ID = "1aNR5EI6tOSzx5Znz4wsEzVeU8CM7RvjQ";
+const INDEX_SHEET_ID = "126rkx8fULIi6Ju_XDbw_neMZ2CuiAtWaVS7wffwHedU";
+const INDEX_TAB_NAME = "Clients";
+
+const LABEL_CONFIRMATION = "Pinpoint/Confirmation";
+const LABEL_BOOKING      = "Pinpoint/Booking";
+const LABEL_PROCESSED    = "Pinpoint/Processed";
+const LABEL_NEEDSREVIEW  = "Pinpoint/NeedsReview";
+/**************************************************/
+
+/**
+ * 1) Confirmation emails (package purchase): create client folder keyed by email + write/update index row.
+ * Works with real emails OR forwarded .eml attachments (wrapper emails).
+ */
+function processConfirmations() {
+  const processedLabel = getOrCreateLabel_(LABEL_PROCESSED);
+  const reviewLabel    = getOrCreateLabel_(LABEL_NEEDSREVIEW);
+  getOrCreateLabel_(LABEL_CONFIRMATION);
+
+  // For testing: you manually applied Pinpoint/Confirmation to wrapper emails
+  const query = `label:"${LABEL_CONFIRMATION}" -label:"${LABEL_PROCESSED}" newer_than:365d`;
+  const threads = GmailApp.search(query, 0, 50);
+
+  const root = DriveApp.getFolderById(ROOT_FOLDER_ID);
+  const sheet = getIndexSheet_();
+
+  threads.forEach(thread => {
+    const payload = findPayloadInThread_(thread, isConfirmationSubject_);
+    if (!payload) {
+      thread.addLabel(reviewLabel);
+      thread.addLabel(processedLabel);
+      return;
+    }
+
+    const email = extractEmail_(payload.to) || extractEmail_(payload.bodyText);
+    const playerRaw = extractPlayerName_(payload.bodyText);
+    const playerName = playerRaw ? titleCase_(playerRaw) : "";
+
+    if (!email || !playerName) {
+      thread.addLabel(reviewLabel);
+      thread.addLabel(processedLabel);
+      return;
+    }
+
+    const folderName = toClientFolderName_(playerName, email);
+    const clientFolder = getOrCreateFolder_(root, folderName);
+
+    // Subfolders
+    const intakeFolder   = getOrCreateFolder_(clientFolder, "01 Intake");
+    getOrCreateFolder_(clientFolder, "02 Sessions");
+    getOrCreateFolder_(clientFolder, "03 Video");
+
+    const packageId = extractPackageId_(payload.bodyText); // e.g., LES...
+    const createdAt = new Date();
+
+    // Index row
+    upsertClientRow_(sheet, {
+      email,
+      playerName,
+      folderId: clientFolder.getId(),
+      folderName,
+      packageId: packageId || "",
+      createdAt
+    });
+
+    // Intake doc (avoid collisions by including LES id when present)
+    const dateStr = Utilities.formatDate(createdAt, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    const intakeDocName = packageId
+      ? `Intake - Purchase Confirmation - ${dateStr} (${packageId})`
+      : `Intake - Purchase Confirmation - ${dateStr}`;
+
+    const intakeBody = buildPurchaseIntakeBody_(payload.bodyText, { email, playerName, packageId });
+    getOrCreateDoc_(intakeFolder, intakeDocName, intakeBody);
+
+    thread.addLabel(processedLabel);
+  });
+}
+
+/**
+ * 2) Booking Confirmation emails (session booking): create session note doc with auto-increment L##.
+ * Skips duplicates if a session note already exists for that date.
+ */
+function processBookings() {
+  const processedLabel = getOrCreateLabel_(LABEL_PROCESSED);
+  const reviewLabel    = getOrCreateLabel_(LABEL_NEEDSREVIEW);
+  getOrCreateLabel_(LABEL_BOOKING);
+
+  // For testing: you manually applied Pinpoint/Booking to wrapper emails
+  const query = `label:"${LABEL_BOOKING}" -label:"${LABEL_PROCESSED}" newer_than:365d`;
+  const threads = GmailApp.search(query, 0, 50);
+
+  const sheet = getIndexSheet_();
+
+  threads.forEach(thread => {
+    const payload = findPayloadInThread_(thread, isBookingSubject_);
+    if (!payload) {
+      thread.addLabel(reviewLabel);
+      thread.addLabel(processedLabel);
+      return;
+    }
+
+    const playerRaw = extractPlayerName_(payload.bodyText);
+    if (!playerRaw) {
+      thread.addLabel(reviewLabel);
+      thread.addLabel(processedLabel);
+      return;
+    }
+    const playerName = titleCase_(playerRaw);
+
+    const isoDate = extractISODate_(payload.bodyText);
+    if (!isoDate) {
+      thread.addLabel(reviewLabel);
+      thread.addLabel(processedLabel);
+      return;
+    }
+
+    const resId = extractResId_(payload.bodyText); // stored in doc body only
+    const email = extractEmail_(payload.to) || extractEmail_(payload.bodyText);
+
+    // Find client folder
+    const client = email
+      ? getClientByEmail_(sheet, email)
+      : getClientByUniqueName_(sheet, playerName);
+
+    if (!client) {
+      thread.addLabel(reviewLabel);
+      thread.addLabel(processedLabel);
+      return;
+    }
+
+    const clientFolder = DriveApp.getFolderById(client.folderId);
+    const sessionsFolder = getOrCreateFolder_(clientFolder, "02 Sessions");
+
+    // Dedup by date (prevents duplicates from repeated sends)
+    if (sessionDocExistsForDate_(sessionsFolder, isoDate)) {
+      thread.addLabel(processedLabel);
+      return;
+    }
+
+    const nextNum = getNextLessonNumber_(sessionsFolder);
+    const docName = `L${String(nextNum).padStart(2, "0")} - ${isoDate} - Notes`;
+
+    const body = buildSessionTemplate_(client.playerName, isoDate, nextNum, resId);
+    getOrCreateDoc_(sessionsFolder, docName, body);
+
+    thread.addLabel(processedLabel);
+  });
+}
+
+/********************* ORIGINAL EMAIL (.eml) SUPPORT *********************/
+
+function getOriginalPayloads_(msg) {
+  const atts = msg.getAttachments({ includeInlineImages: false, includeAttachments: true }) || [];
+  const emls = atts.filter(a => {
+    const name = (a.getName() || "").toLowerCase();
+    const ct = (a.getContentType() || "").toLowerCase();
+    return name.endsWith(".eml") || ct === "message/rfc822";
+  });
+
+  if (emls.length === 0) {
+    return [{
+      subject: msg.getSubject() || "",
+      to: msg.getTo() || "",
+      from: msg.getFrom() || "",
+      bodyText: safePlain_(msg),
+      topEncoding: ""
+    }];
+  }
+
+  return emls.map(att => parseEmlToPayload_(att));
+}
+
+function findPayloadInThread_(thread, subjectMatcher) {
+  const messages = thread.getMessages();
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const payloads = getOriginalPayloads_(messages[i]);
+    const payload = payloads.find(p => subjectMatcher(p.subject));
+    if (payload) return payload;
+  }
+  return null;
+}
+
+function parseEmlToPayload_(att) {
+  const raw = att.getDataAsString() || "";
+  const parsed = parseEml_(raw);
+
+  return {
+    subject: parsed.headers.subject || "",
+    to: parsed.headers.to || "",
+    from: parsed.headers.from || "",
+    bodyText: parsed.bodyText || ""
+  };
+}
+
+function isConfirmationSubject_(subject) {
+  const s = String(subject || "").toLowerCase();
+  return s.includes("confirmation") && !s.includes("booking confirmation");
+}
+
+function isBookingSubject_(subject) {
+  const s = String(subject || "").toLowerCase();
+  return s.includes("booking confirmation") && !s.includes("pro copy");
+}
+
+function parseEml_(raw) {
+  const text = String(raw).replace(/\r\n/g, "\n");
+  const headerEnd = text.indexOf("\n\n");
+  const headerText = headerEnd >= 0 ? text.slice(0, headerEnd) : "";
+  const bodyRaw = headerEnd >= 0 ? text.slice(headerEnd + 2) : text;
+
+  const headers = parseHeaders_(headerText);
+
+  const ct = String(headers["content-type"] || "");
+  const boundary = extractBoundaryFromContentType_(ct);
+  const topEnc = String(headers["content-transfer-encoding"] || "");
+
+  const bodyText = extractBestBodyFromEml_(bodyRaw, boundary, topEnc);
+
+  return { headers, bodyText };
+}
+
+function parseHeaders_(headerText) {
+  const lines = String(headerText || "").split("\n");
+  const unfolded = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s/.test(line) && unfolded.length) {
+      unfolded[unfolded.length - 1] += " " + line.trim();
+    } else {
+      unfolded.push(line.trim());
+    }
+  }
+
+  const headers = {};
+  unfolded.forEach(l => {
+    const idx = l.indexOf(":");
+    if (idx > 0) {
+      const k = l.slice(0, idx).trim().toLowerCase();
+      const v = l.slice(idx + 1).trim();
+      if (!headers[k]) headers[k] = v;
+    }
+  });
+
+  return headers;
+}
+
+function extractBoundaryFromContentType_(contentType) {
+  const ct = String(contentType || "");
+  const m1 = ct.match(/boundary="([^"]+)"/i);
+  if (m1) return m1[1];
+  const m2 = ct.match(/boundary=([^\s;]+)/i);
+  if (m2) return m2[1].replace(/["']/g, "");
+  return null;
+}
+
+function extractBestBodyFromEml_(bodyRaw, boundary, topEncoding) {
+  const raw = String(bodyRaw || "");
+
+  if (boundary) {
+    const parts = splitMimeParts_(raw, boundary);
+
+    let textPlain = null;
+    let textHtml = null;
+
+    parts.forEach(p => {
+      const pHeaders = parseHeaders_(p.headers);
+      const ct = String(pHeaders["content-type"] || "").toLowerCase();
+      const enc = String(pHeaders["content-transfer-encoding"] || "").toLowerCase();
+      const decoded = decodeMimeBody_(p.body, enc);
+
+      if (!textPlain && ct.includes("text/plain")) textPlain = decoded;
+      if (!textHtml && ct.includes("text/html")) textHtml = decoded;
+    });
+
+    if (textPlain && textPlain.trim()) return normalizeBody_(textPlain);
+    if (textHtml && textHtml.trim()) return normalizeBody_(stripHtml_(textHtml));
+  }
+
+  // Not multipart — decode using top-level encoding if present, then strip HTML
+  const decoded = decodeMimeBody_(raw, String(topEncoding || "").toLowerCase());
+  return normalizeBody_(stripHtml_(decoded));
+}
+
+function splitMimeParts_(raw, boundary) {
+  const norm = String(raw).replace(/\r\n/g, "\n");
+  const marker = "--" + boundary;
+  const chunks = norm.split(marker).slice(1);
+
+  const parts = [];
+  chunks.forEach(c => {
+    if (c.startsWith("--")) return; // end marker
+    const trimmed = c.replace(/^\s*\n/, "");
+    const idx = trimmed.indexOf("\n\n");
+    if (idx < 0) return;
+    const headers = trimmed.slice(0, idx);
+    const body = trimmed.slice(idx + 2);
+    parts.push({ headers, body });
+  });
+
+  return parts;
+}
+
+function decodeMimeBody_(body, encoding) {
+  const enc = String(encoding || "").toLowerCase();
+
+  if (enc.includes("base64")) {
+    const b64 = String(body || "").replace(/\s+/g, "");
+    try {
+      const bytes = Utilities.base64Decode(b64);
+      return Utilities.newBlob(bytes).getDataAsString("UTF-8");
+    } catch (e) {
+      return String(body || "");
+    }
+  }
+
+  if (enc.includes("quoted-printable")) {
+    return decodeQuotedPrintable_(String(body || ""));
+  }
+
+  return String(body || "");
+}
+
+function decodeQuotedPrintable_(s) {
+  let str = String(s || "").replace(/=\r?\n/g, ""); // soft breaks
+  const bytes = [];
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === "=" && i + 2 < str.length) {
+      const hex = str.substr(i + 1, 2);
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) {
+        bytes.push(parseInt(hex, 16));
+        i += 2;
+        continue;
+      }
+    }
+    bytes.push(ch.charCodeAt(0));
+  }
+  try {
+    return Utilities.newBlob(bytes).getDataAsString("UTF-8");
+  } catch (e) {
+    return str;
+  }
+}
+
+function stripHtml_(html) {
+  let h = String(html || "");
+  h = h.replace(/<\s*br\s*\/?>/gi, "\n")
+       .replace(/<\/\s*p\s*>/gi, "\n")
+       .replace(/<\/\s*div\s*>/gi, "\n");
+  h = h.replace(/<[^>]+>/g, " ");
+  h = h.replace(/&nbsp;/g, " ")
+       .replace(/&amp;/g, "&")
+       .replace(/&lt;/g, "<")
+       .replace(/&gt;/g, ">")
+       .replace(/&#39;/g, "'")
+       .replace(/&quot;/g, "\"");
+  return h;
+}
+
+function normalizeBody_(t) {
+  return String(t || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+/********************* INDEX SHEET *********************/
+
+function getIndexSheet_() {
+  const ss = SpreadsheetApp.openById(INDEX_SHEET_ID);
+  let sheet = ss.getSheetByName(INDEX_TAB_NAME);
+  if (!sheet) sheet = ss.insertSheet(INDEX_TAB_NAME);
+
+  const headers = ["Email", "PlayerName", "FolderId", "FolderName", "PackageConfirmation", "CreatedAt"];
+  const firstRow = sheet.getRange(1, 1, 1, headers.length).getValues()[0];
+  const empty = firstRow.every(v => String(v).trim() === "");
+  if (empty) sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+
+  return sheet;
+}
+
+function upsertClientRow_(sheet, data) {
+  const values = sheet.getDataRange().getValues();
+  const emailLc = data.email.toLowerCase();
+
+  for (let r = 1; r < values.length; r++) {
+    const rowEmail = String(values[r][0] || "").toLowerCase();
+    if (rowEmail === emailLc) {
+      sheet.getRange(r + 1, 2).setValue(data.playerName);
+      sheet.getRange(r + 1, 3).setValue(data.folderId);
+      sheet.getRange(r + 1, 4).setValue(data.folderName);
+      sheet.getRange(r + 1, 5).setValue(data.packageId || "");
+      sheet.getRange(r + 1, 6).setValue(data.createdAt);
+      return;
+    }
+  }
+
+  sheet.appendRow([data.email, data.playerName, data.folderId, data.folderName, data.packageId || "", data.createdAt]);
+}
+
+function getClientByEmail_(sheet, email) {
+  const values = sheet.getDataRange().getValues();
+  const emailLc = email.toLowerCase();
+
+  for (let r = 1; r < values.length; r++) {
+    const rowEmail = String(values[r][0] || "").toLowerCase();
+    if (rowEmail === emailLc) {
+      return {
+        email: values[r][0],
+        playerName: values[r][1],
+        folderId: values[r][2],
+        folderName: values[r][3]
+      };
+    }
+  }
+  return null;
+}
+
+function getClientByUniqueName_(sheet, playerName) {
+  const values = sheet.getDataRange().getValues();
+  const target = normalizeName_(playerName);
+
+  const matches = [];
+  for (let r = 1; r < values.length; r++) {
+    const rowName = normalizeName_(String(values[r][1] || ""));
+    if (rowName === target) {
+      matches.push({
+        email: values[r][0],
+        playerName: values[r][1],
+        folderId: values[r][2],
+        folderName: values[r][3]
+      });
+    }
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/********************* DRIVE/GMAIL HELPERS *********************/
+
+function getOrCreateLabel_(name) {
+  return GmailApp.getUserLabelByName(name) || GmailApp.createLabel(name);
+}
+
+function getOrCreateFolder_(parentFolder, folderName) {
+  const it = parentFolder.getFoldersByName(folderName);
+  return it.hasNext() ? it.next() : parentFolder.createFolder(folderName);
+}
+
+function getOrCreateDoc_(parentFolder, docName, bodyText) {
+  const files = parentFolder.getFilesByName(docName);
+  if (files.hasNext()) return;
+
+  const doc = DocumentApp.create(docName);
+  doc.getBody().setText(bodyText || "");
+  doc.saveAndClose();
+
+  const file = DriveApp.getFileById(doc.getId());
+  parentFolder.addFile(file);
+  DriveApp.getRootFolder().removeFile(file);
+}
+
+function safePlain_(msg) {
+  try { return msg.getPlainBody() || ""; } catch (e) { return ""; }
+}
+
+/********************* PARSING (BODY TEXT) *********************/
+
+function extractEmail_(text) {
+  if (!text) return null;
+  const m = String(text).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return m ? m[0] : null;
+}
+
+function extractPlayerName_(plainBody) {
+  const lines = String(plainBody || "").split(/\n/).map(s => s.trim()).filter(Boolean);
+
+  // Pattern A: "Players" section
+  for (let i = 0; i < lines.length; i++) {
+    if (/^Players\b/i.test(lines[i])) {
+      for (let j = i + 1; j < Math.min(i + 12, lines.length); j++) {
+        if (/^\d+\s*\/\s*\d+$/.test(lines[j])) continue;
+        if (/^complete$/i.test(lines[j])) continue;
+        if (/^What is the Cancellation Policy/i.test(lines[j])) break;
+        if (/[A-Za-z]/.test(lines[j])) return lines[j];
+      }
+    }
+  }
+
+  // Pattern B: "Players: Private ..."
+  for (let i = 0; i < lines.length; i++) {
+    if (/^Players:\s*Private/i.test(lines[i])) {
+      const tail = lines[i].replace(/^Players:\s*Private/i, "").trim();
+      if (tail && /[A-Za-z]/.test(tail)) return tail;
+      if (i + 1 < lines.length && /[A-Za-z]/.test(lines[i + 1])) return lines[i + 1];
+    }
+  }
+
+  // Fallback
+  const m = String(plainBody || "").match(/Players(?:\s*:\s*Private)?[\s\S]{0,200}\n([A-Za-z][A-Za-z .,'-]{1,60})\n/i);
+  return m ? m[1].trim() : null;
+}
+
+function extractISODate_(plainBody) {
+  const t = String(plainBody || "");
+  const m = t.match(/\b(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)\s*,\s*([A-Za-z]+)\s+(\d{1,2})\s*,\s*(\d{4})\b/);
+  if (!m) return null;
+
+  const monthName = m[2].toLowerCase();
+  const day = parseInt(m[3], 10);
+  const year = parseInt(m[4], 10);
+
+  const monthMap = {
+    jan:1, january:1, feb:2, february:2, mar:3, march:3, apr:4, april:4,
+    may:5, jun:6, june:6, jul:7, july:7, aug:8, august:8, sep:9, sept:9, september:9,
+    oct:10, october:10, nov:11, november:11, dec:12, december:12
+  };
+  const month = monthMap[monthName];
+  if (!month) return null;
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function extractResId_(plainBody) {
+  const m = String(plainBody || "").match(/\b(RES[0-9A-Z]+)\b/i);
+  return m ? m[1].toUpperCase() : "";
+}
+
+function extractPackageId_(plainBody) {
+  const m = String(plainBody || "").match(/\b(LES\d[0-9A-Z]*)\b/i);
+  return m ? m[1].toUpperCase() : "";
+}
+
+/********************* NAMING / DEDUPE *********************/
+
+function toClientFolderName_(playerName, email) {
+  const norm = String(playerName || "").replace(/\s+/g, " ").trim();
+  let lastFirst = norm;
+
+  if (!norm.includes(",")) {
+    const parts = norm.split(" ");
+    if (parts.length >= 2) {
+      const last = parts[parts.length - 1];
+      const first = parts.slice(0, -1).join(" ");
+      lastFirst = `${last}, ${first}`;
+    }
+  }
+  return `${lastFirst} (${String(email || "").toLowerCase()})`;
+}
+
+function getNextLessonNumber_(sessionsFolder) {
+  const files = sessionsFolder.getFiles();
+  let maxN = 0;
+
+  while (files.hasNext()) {
+    const f = files.next();
+    const name = f.getName();
+    const m = name.match(/^L(\d{2})\s-\s/);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!isNaN(n)) maxN = Math.max(maxN, n);
+    }
+  }
+  return maxN + 1;
+}
+
+function sessionDocExistsForDate_(sessionsFolder, isoDate) {
+  const files = sessionsFolder.getFiles();
+  const needle = `- ${isoDate} - Notes`;
+  while (files.hasNext()) {
+    const name = files.next().getName();
+    if (name.includes(needle)) return true;
+  }
+  return false;
+}
+
+/********************* DOC BODIES *********************/
+
+function buildPurchaseIntakeBody_(bodyText, meta) {
+  return [
+    `Player: ${meta.playerName}`,
+    `Email: ${meta.email}`,
+    meta.packageId ? `Package Confirmation: ${meta.packageId}` : "",
+    "",
+    "Raw email (stored for reference):",
+    "-------------------------------",
+    String(bodyText || "").trim()
+  ].filter(Boolean).join("\n");
+}
+
+function buildSessionTemplate_(playerName, isoDate, lessonNum, resId) {
+  return [
+    `Player: ${playerName}`,
+    `Lesson: L${String(lessonNum).padStart(2, "0")}`,
+    `Date: ${isoDate}`,
+    resId ? `Reservation ID (internal): ${resId}` : "",
+    "",
+    "Goals for today:",
+    "- ",
+    "",
+    "Observations:",
+    "- ",
+    "",
+    "Fixes / Cues that landed:",
+    "- ",
+    "",
+    "Drills / Homework (10–15 min):",
+    "- ",
+    "",
+    "Next lesson plan:",
+    "- "
+  ].filter(Boolean).join("\n");
+}
+
+/********************* SMALL UTILS *********************/
+
+function titleCase_(s) {
+  return String(s || "").split(" ").map(w => w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w).join(" ");
+}
+
+function normalizeName_(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z]+/g, " ").trim();
+}

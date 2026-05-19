@@ -1,8 +1,8 @@
 //@version=6
-library("QTEngineElastic", overlay=false)
+library("QTEngineCrypto", overlay=false)
 
 // ============================================================================
-// QT Engine — Fixed + Elastic cycles (Daily / m90 / Micro / Nano / Weekly / Monthly)
+// QT Engine Crypto — Fixed + Elastic cycles (Daily / m90 / Micro / Nano / Weekly / Monthly)
 // - Data-first: timestamps + OHLC + state flags
 // - No drawings, no styling opinions
 // - Timestamp anchoring only (bar_time), never bar_index
@@ -48,6 +48,9 @@ const string MONTHLY_ALIGNED_TF = "240"
 const string NANO_TZ = "America/New_York"
 const int NANO_DAY_START_HOUR = 18
 const int NANO_DAY_START_MIN = 0
+const string MONTHLY_TZ = "America/New_York"
+const int MONTHLY_DAY_START_HOUR = 20
+const int MONTHLY_DAY_START_MIN = 0
 // ============================================================================
 // USER-DEFINED TYPES (UDTs)
 // ============================================================================
@@ -396,11 +399,23 @@ f_shift_ds_days_fixed(int t, int days) =>
     int da = dayofmonth(t, NANO_TZ)
     timestamp(NANO_TZ, y, mo, da + days, NANO_DAY_START_HOUR, NANO_DAY_START_MIN)
 
+f_shift_ds_days_monthly(int t, int days) =>
+    int y = year(t, MONTHLY_TZ)
+    int mo = month(t, MONTHLY_TZ)
+    int da = dayofmonth(t, MONTHLY_TZ)
+    timestamp(MONTHLY_TZ, y, mo, da + days, MONTHLY_DAY_START_HOUR, MONTHLY_DAY_START_MIN)
+
 f_month_week_start(int tRef, QTConfig cfg) =>
     int ds = f_qt_day_start(tRef, cfg)
     int dow = dayofweek(ds, cfg.tz)
     int back = dow == dayofweek.sunday ? 0 : dow == dayofweek.monday ? 1 : dow == dayofweek.tuesday ? 2 : dow == dayofweek.wednesday ? 3 : dow == dayofweek.thursday ? 4 : dow == dayofweek.friday ? 5 : 6
     f_shift_ds_days(ds, cfg, -back)
+
+f_month_week_start_monthly(int tRef) =>
+    int ds = f_qt_day_start_raw(tRef, MONTHLY_TZ, MONTHLY_DAY_START_HOUR, MONTHLY_DAY_START_MIN)
+    int dow = dayofweek(ds, MONTHLY_TZ)
+    int back = dow == dayofweek.sunday ? 0 : dow == dayofweek.monday ? 1 : dow == dayofweek.tuesday ? 2 : dow == dayofweek.wednesday ? 3 : dow == dayofweek.thursday ? 4 : dow == dayofweek.friday ? 5 : 6
+    f_shift_ds_days_monthly(ds, -back)
 
 f_month_week_start_fixed(int tRef) =>
     int ds = f_qt_day_start_raw(tRef, NANO_TZ, NANO_DAY_START_HOUR, NANO_DAY_START_MIN)
@@ -420,21 +435,27 @@ f_month_week_key_fixed(int weekStartTs) =>
     int mo = month(mondayTs, NANO_TZ)
     y * 100 + mo
 
+f_month_week_key_monthly(int weekStartTs) =>
+    int mondayTs = f_shift_ds_days_monthly(weekStartTs, 1)
+    int y = year(mondayTs, MONTHLY_TZ)
+    int mo = month(mondayTs, MONTHLY_TZ)
+    y * 100 + mo
+
 f_monthly_cycle_bounds(int tRef, QTConfig cfg) =>
-    int wsCur = f_month_week_start(tRef, cfg)
-    int keyCur = f_month_week_key(wsCur, cfg)
+    int wsCur = f_month_week_start_monthly(tRef)
+    int keyCur = f_month_week_key_monthly(wsCur)
 
-    int probeBack = f_shift_ds_days(wsCur, cfg, -7)
+    int probeBack = f_shift_ds_days_monthly(wsCur, -7)
     int guardBack = 0
-    while guardBack < 8 and f_month_week_key(probeBack, cfg) == keyCur
-        probeBack := f_shift_ds_days(probeBack, cfg, -7)
+    while guardBack < 8 and f_month_week_key_monthly(probeBack) == keyCur
+        probeBack := f_shift_ds_days_monthly(probeBack, -7)
         guardBack += 1
-    int cStart = f_shift_ds_days(probeBack, cfg, 7)
+    int cStart = f_shift_ds_days_monthly(probeBack, 7)
 
-    int probeFwd = f_shift_ds_days(wsCur, cfg, 7)
+    int probeFwd = f_shift_ds_days_monthly(wsCur, 7)
     int guardFwd = 0
-    while guardFwd < 8 and f_month_week_key(probeFwd, cfg) == keyCur
-        probeFwd := f_shift_ds_days(probeFwd, cfg, 7)
+    while guardFwd < 8 and f_month_week_key_monthly(probeFwd) == keyCur
+        probeFwd := f_shift_ds_days_monthly(probeFwd, 7)
         guardFwd += 1
     int cEnd = probeFwd
 
@@ -444,39 +465,39 @@ f_monthly_cycle_bounds(int tRef, QTConfig cfg) =>
     int q4Ts = int(na)
     int q5Ts = int(na)
 
-    int b2 = f_shift_ds_days(q1Ts, cfg, 7)
+    int b2 = f_shift_ds_days_monthly(q1Ts, 7)
     if b2 < cEnd
         q2Ts := b2
     if not na(q2Ts)
-        int b3 = f_shift_ds_days(q2Ts, cfg, 7)
+        int b3 = f_shift_ds_days_monthly(q2Ts, 7)
         if b3 < cEnd
             q3Ts := b3
     if not na(q3Ts)
-        int b4 = f_shift_ds_days(q3Ts, cfg, 7)
+        int b4 = f_shift_ds_days_monthly(q3Ts, 7)
         if b4 < cEnd
             q4Ts := b4
     if not na(q4Ts)
-        int b5 = f_shift_ds_days(q4Ts, cfg, 7)
+        int b5 = f_shift_ds_days_monthly(q4Ts, 7)
         if b5 < cEnd
             q5Ts := b5
 
     [cStart, cEnd, q1Ts, q2Ts, q3Ts, q4Ts, q5Ts]
 
 f_monthly_cycle_bounds_fixed(int tRef) =>
-    int wsCur = f_month_week_start_fixed(tRef)
-    int keyCur = f_month_week_key_fixed(wsCur)
+    int wsCur = f_month_week_start_monthly(tRef)
+    int keyCur = f_month_week_key_monthly(wsCur)
 
-    int probeBack = f_shift_ds_days_fixed(wsCur, -7)
+    int probeBack = f_shift_ds_days_monthly(wsCur, -7)
     int guardBack = 0
-    while guardBack < 8 and f_month_week_key_fixed(probeBack) == keyCur
-        probeBack := f_shift_ds_days_fixed(probeBack, -7)
+    while guardBack < 8 and f_month_week_key_monthly(probeBack) == keyCur
+        probeBack := f_shift_ds_days_monthly(probeBack, -7)
         guardBack += 1
-    int cStart = f_shift_ds_days_fixed(probeBack, 7)
+    int cStart = f_shift_ds_days_monthly(probeBack, 7)
 
-    int probeFwd = f_shift_ds_days_fixed(wsCur, 7)
+    int probeFwd = f_shift_ds_days_monthly(wsCur, 7)
     int guardFwd = 0
-    while guardFwd < 8 and f_month_week_key_fixed(probeFwd) == keyCur
-        probeFwd := f_shift_ds_days_fixed(probeFwd, 7)
+    while guardFwd < 8 and f_month_week_key_monthly(probeFwd) == keyCur
+        probeFwd := f_shift_ds_days_monthly(probeFwd, 7)
         guardFwd += 1
     int cEnd = probeFwd
 
@@ -486,19 +507,19 @@ f_monthly_cycle_bounds_fixed(int tRef) =>
     int q4Ts = int(na)
     int q5Ts = int(na)
 
-    int b2 = f_shift_ds_days_fixed(q1Ts, 7)
+    int b2 = f_shift_ds_days_monthly(q1Ts, 7)
     if b2 < cEnd
         q2Ts := b2
     if not na(q2Ts)
-        int b3 = f_shift_ds_days_fixed(q2Ts, 7)
+        int b3 = f_shift_ds_days_monthly(q2Ts, 7)
         if b3 < cEnd
             q3Ts := b3
     if not na(q3Ts)
-        int b4 = f_shift_ds_days_fixed(q3Ts, 7)
+        int b4 = f_shift_ds_days_monthly(q3Ts, 7)
         if b4 < cEnd
             q4Ts := b4
     if not na(q4Ts)
-        int b5 = f_shift_ds_days_fixed(q4Ts, 7)
+        int b5 = f_shift_ds_days_monthly(q4Ts, 7)
         if b5 < cEnd
             q5Ts := b5
 
@@ -535,8 +556,8 @@ f_make_empty_q(int qStart) =>
 f_fixed_cycle_window(int tRef, QTConfig cfg, int lenMs) =>
     bool isWeeklyElastic = lenMs == LEN_WEEK_ELASTIC
     bool isMonthlyElastic = lenMs == LEN_MONTH_ELASTIC
-    int cStart = isWeeklyElastic ? time("W") : int(na)
-    int cEnd = isWeeklyElastic ? time_close("W") : int(na)
+    int cStart = isWeeklyElastic ? f_month_week_start(tRef, cfg) : int(na)
+    int cEnd = isWeeklyElastic ? f_shift_ds_days(cStart, cfg, 7) : int(na)
     if not isWeeklyElastic and not isMonthlyElastic
         int ds = f_qt_day_start(tRef, cfg)
         cStart := f_cycle_start(tRef, ds, lenMs)
@@ -858,8 +879,8 @@ f_daily_aligned_ohlc_current() =>
 
 f_weekly_aligned_ohlc_expr() =>
     int tRef = time
-    int q1Ts = time("W")
-    int endTs = time_close("W")
+    int q1Ts = f_month_week_start_fixed(tRef)
+    int endTs = f_shift_ds_days_fixed(q1Ts, 7)
     int q2Ts = f_next_ds_after_fixed(q1Ts)
     int q3Ts = q2Ts + LEN_24H
     int q4Ts = q3Ts + LEN_24H

@@ -2,7 +2,6 @@ Oil Indicator Brainstorm
 
 - High Impact News Envents to Backtest
 Wednesday, 10:30am US Crude Oil Inventories HIN
-Thursday, 10:30am US Natural Gas Storage HIN
 
 
 - Main goal: Determine repeating trade setups across the different Quarterly Cycles. 

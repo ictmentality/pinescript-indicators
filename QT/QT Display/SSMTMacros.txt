@@ -1,5 +1,5 @@
 //@version=6
-indicator("QT Display", overlay=true, max_lines_count=500, max_labels_count=500)
+indicator("SSMT Macros", overlay=true, max_lines_count=500, max_labels_count=500)
 import Jaw1312/QTEngineElastic/11 as qt
 import Jaw1312/QTAssets/4 as qta
 
@@ -27,14 +27,15 @@ f_ssmt_cycle_gate(bool cycleEnabled, bool cycleLive, bool modeEnabled) =>
 groupSSMT = "SSMT DISPLAY MODES"
 showBearBoth = input.bool(true, "Show Bearish SSMT", group=groupSSMT)
 showBullBoth = input.bool(true, "Show Bullish SSMT", group=groupSSMT)
+showMicroSsmtMacros = input.bool(false, "Display Micro.SSMT Macros", group=groupSSMT)
 
-groupSSMTCycles = "SSMT CYCLES (SCAFFOLD)"
-enableNanoSSMT = input.bool(false, "Enable Nano SSMT", group=groupSSMTCycles)
-enableMicroSSMT = input.bool(false, "Enable Micro SSMT", group=groupSSMTCycles)
-enableM90SSMT = input.bool(true, "Enable m90 SSMT", group=groupSSMTCycles)
-enableDailySSMT = input.bool(true, "Enable Daily SSMT", group=groupSSMTCycles)
-enableWeeklySSMT = input.bool(true, "Enable Weekly SSMT", group=groupSSMTCycles)
-enableMonthlySSMT = input.bool(true, "Enable Monthly SSMT", group=groupSSMTCycles)
+groupSSMTCycles = "SSMT CYCLES"
+enableNanoSSMT = input.bool(true, "Enable Nano SSMT", group=groupSSMTCycles)
+enableMicroSSMT = input.bool(true, "Enable Micro SSMT", group=groupSSMTCycles)
+bool enableM90SSMT = false
+bool enableDailySSMT = false
+bool enableWeeklySSMT = false
+bool enableMonthlySSMT = false
 
 groupSSMTFut = "Futures"
 
@@ -55,8 +56,8 @@ ssmtLineWidth = input.int(1, "SSMT Line Width", minval=1, maxval=4, group=groupS
 ssmtKeep = input.int(5, "SSMT History", minval=0, maxval=50, group=groupSSMT)
 
 groupDebug = "DEBUG"
-showWeeklyQOpenTable = input.bool(true, "Show Asset Selection Debug Table", group=groupDebug)
-showWeeklySSMTDebug = input.bool(false, "Show Monthly SSMT Debug (Data Window)", group=groupDebug)
+showWeeklyQOpenTable = input.bool(true, "Show Asset Selection Table", group=groupDebug)
+showWeeklySSMTDebug = input.bool(false, "Show SSMT Debug (Data Window)", group=groupDebug)
 
 // ============================================================================
 // HELPERS
@@ -209,6 +210,27 @@ f_ssmt_sweep_body_high(float bhCur, float bhPrev, float blCur, float blPrev, boo
 
 f_ssmt_sweep_body_low(float bhCur, float bhPrev, float blCur, float blPrev, bool inverse) =>
     inverse ? (bhCur > bhPrev) : (blCur < blPrev)
+
+f_micro_ssmt_macro_name(int ts) =>
+    int minsNy = hour(ts, "America/New_York") * 60 + minute(ts, "America/New_York")
+    string macroName = ""
+    if minsNy >= 153 and minsNy < 180
+        macroName := "London Macro"
+    else if minsNy >= 243 and minsNy < 270
+        macroName := "London Macro"
+    else if minsNy >= 530 and minsNy < 550
+        macroName := "New-York AM Macro"
+    else if minsNy >= 590 and minsNy < 610
+        macroName := "New-York AM Macro"
+    else if minsNy >= 650 and minsNy < 670
+        macroName := "New-York AM Macro"
+    else if minsNy >= 710 and minsNy < 730
+        macroName := "New York Lunch Macro"
+    else if minsNy >= 790 and minsNy < 820
+        macroName := "New York PM Macro"
+    else if minsNy >= 915 and minsNy < 945
+        macroName := "New York Last Hour Macro"
+    macroName
 
 f_ssmt_weekly_highs_expr() =>
     var qt.QTConfig peerCfg = qt.qt_config_default()
@@ -942,16 +964,6 @@ f_kill(line ln) =>
         line.delete(ln)
     out
 
-f_clear_all_ssmt_drawings() =>
-    while array.size(line.all) > 0
-        line.delete(array.get(line.all, array.size(line.all) - 1))
-    while array.size(label.all) > 0
-        label.delete(array.get(label.all, array.size(label.all) - 1))
-    0
-
-if barstate.isfirst
-    f_clear_all_ssmt_drawings()
-
 // ============================================================================
 // TIMEFRAME GATING
 // ============================================================================
@@ -1114,6 +1126,12 @@ var line wHSsmtLine2 = na
 var label wHSsmtLbl = na
 var int wHSsmtEventKey = na
 var int wHSsmtPurgeTs = na
+var line[] microMacroBearHistLines = array.new_line()
+var label[] microMacroBearHistLbls = array.new_label()
+var int microMacroBearEventKey = na
+var line[] microMacroBullHistLines = array.new_line()
+var label[] microMacroBullHistLbls = array.new_label()
+var int microMacroBullEventKey = na
 
 // Weekly SSMT debug probes (Data Window only)
 var float dbgWRegBearSplit = na
@@ -1860,6 +1878,14 @@ if (weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSs
                 wSsmtEventKey := eventKey
                 wSsmtPurgeTs := na
 
+            string microMacroNameBear = showMicroSsmtMacros and microSsmtLive ? f_micro_ssmt_macro_name(time) : ""
+            if split and str.length(microMacroNameBear) > 0 and not na(eventKey) and (na(microMacroBearEventKey) or eventKey != microMacroBearEventKey)
+                label macroBearLbl = label.new(time, high, microMacroNameBear, xloc=xloc.bar_time, style=label.style_label_down, textcolor=color.white, color=color.new(color.orange, 0), size=size.tiny)
+                array.push(microMacroBearHistLines, na)
+                array.push(microMacroBearHistLbls, macroBearLbl)
+                f_ssmt_hist_trim(microMacroBearHistLines, microMacroBearHistLbls, ssmtKeep)
+                microMacroBearEventKey := eventKey
+
             bool hasPoints = not na(prevH) and not na(prevHTs) and not na(curQTs)
             regularVisualCandidate := split and hasPoints
             regularVisualQuarterTs := regularVisualCandidate ? curQTs : na
@@ -1969,6 +1995,14 @@ if (weeklySsmtLive or monthlySsmtLive or dailySsmtLive or m90SsmtLive or microSs
                 wBSsmtLbl := na
                 wBSsmtEventKey := eventKeyB
                 wBSsmtPurgeTs := na
+
+            string microMacroNameBull = showMicroSsmtMacros and microSsmtLive ? f_micro_ssmt_macro_name(time) : ""
+            if splitB and str.length(microMacroNameBull) > 0 and not na(eventKeyB) and (na(microMacroBullEventKey) or eventKeyB != microMacroBullEventKey)
+                label macroBullLbl = label.new(time, low, microMacroNameBull, xloc=xloc.bar_time, style=label.style_label_up, textcolor=color.white, color=color.new(color.orange, 0), size=size.tiny)
+                array.push(microMacroBullHistLines, na)
+                array.push(microMacroBullHistLbls, macroBullLbl)
+                f_ssmt_hist_trim(microMacroBullHistLines, microMacroBullHistLbls, ssmtKeep)
+                microMacroBullEventKey := eventKeyB
 
             bool hasPointsB = not na(prevL) and not na(prevLTs) and not na(curQTsB)
             regularVisualCandidateBull := splitB and hasPointsB
@@ -2373,18 +2407,18 @@ else
 // plot(showWeeklySSMTDebug ? (dailySsmtLive ? 1.0 : 0.0) : na, "DBG SSMT Daily Gate", display=display.data_window)
 // plot(showWeeklySSMTDebug ? (weeklySsmtLive ? 1.0 : 0.0) : na, "DBG SSMT Weekly Gate", display=display.data_window)
 // plot(showWeeklySSMTDebug ? (monthlySsmtLive ? 1.0 : 0.0) : na, "DBG SSMT Monthly Gate", display=display.data_window)
-plot(showWeeklySSMTDebug ? (monthlySsmtLive ? 1.0 : 0.0) : na, "DBG M Gate (BullPack)", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullReady : na, "DBG M HidBull Ready", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullSplit : na, "DBG M HidBull Split", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullChartSweep : na, "DBG M HidBull ChartSweep", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullPeer2Sweep : na, "DBG M HidBull Peer2Sweep", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullPeer3Sweep : na, "DBG M HidBull Peer3Sweep", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullChartBodyLowCur : na, "DBG M Hidden Bull Chart Body Low Current", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullChartBodyLowPrev : na, "DBG M Hidden Bull Chart Body Low Previous", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullPeer2BodyLowCur : na, "DBG M Hidden Bull Peer 2 Body Low Current", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullPeer2BodyLowPrev : na, "DBG M Hidden Bull Peer 2 Body Low Previous", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullPeer3BodyLowCur : na, "DBG M Hidden Bull Peer 3 Body Low Current", display=display.data_window)
-plot(showWeeklySSMTDebug ? dbgWHidBullPeer3BodyLowPrev : na, "DBG M Hidden Bull Peer 3 Body Low Previous", display=display.data_window)
+plot(showWeeklySSMTDebug ? (nanoSsmtLive ? 2.0 : microSsmtLive ? 1.0 : 0.0) : na, "DBG Nano/Micro Gate", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullReady : na, "DBG HidBull Ready", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullSplit : na, "DBG HidBull Split", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullChartSweep : na, "DBG HidBull ChartSweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullPeer2Sweep : na, "DBG HidBull Peer2Sweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullPeer3Sweep : na, "DBG HidBull Peer3Sweep", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullChartBodyLowCur : na, "DBG HidBull Chart Body Low Current", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullChartBodyLowPrev : na, "DBG HidBull Chart Body Low Previous", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullPeer2BodyLowCur : na, "DBG HidBull Peer 2 Body Low Current", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullPeer2BodyLowPrev : na, "DBG HidBull Peer 2 Body Low Previous", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullPeer3BodyLowCur : na, "DBG HidBull Peer 3 Body Low Current", display=display.data_window)
+plot(showWeeklySSMTDebug ? dbgWHidBullPeer3BodyLowPrev : na, "DBG HidBull Peer 3 Body Low Previous", display=display.data_window)
 
 if barstate.islast
     if showWeeklyQOpenTable

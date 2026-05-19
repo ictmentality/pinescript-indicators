@@ -1,0 +1,268 @@
+// This Pine Script(R) code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+
+//@version=6
+indicator("m90Model", shorttitle="m90Model", overlay=true, max_labels_count=500, max_lines_count=500, dynamic_requests=true)
+import Jaw1312/QTEngine/34 as qt
+
+group_model = "m90Model"
+killzone = input.session("0200-1530", "Killzone", group=group_model)
+badj = input.bool(true, "Backadjust Futures", group=group_model)
+show_debug = input.bool(false, "Show Debug Table", group=group_model)
+
+group_dyad = "Dyads"
+enable_dyad_1 = input.bool(true, "Dyad 1", inline="d1", group=group_dyad)
+dyad_1_sym1 = input.symbol("COMEX:GC1!", "", inline="d1", group=group_dyad)
+dyad_1_sym2 = input.symbol("COMEX:SI1!", "&", inline="d1", group=group_dyad)
+enable_dyad_2 = input.bool(true, "Dyad 2", inline="d2", group=group_dyad)
+dyad_2_sym1 = input.symbol("CME_MINI:ES1!", "", inline="d2", group=group_dyad)
+dyad_2_sym2 = input.symbol("CME_MINI:NQ1!", "&", inline="d2", group=group_dyad)
+enable_dyad_3 = input.bool(true, "Dyad 3", inline="d3", group=group_dyad)
+dyad_3_sym1 = input.symbol("CME:6E1!", "", inline="d3", group=group_dyad)
+dyad_3_sym2 = input.symbol("CME:6B1!", "&", inline="d3", group=group_dyad)
+enable_dyad_4 = input.bool(true, "Dyad 4", inline="d4", group=group_dyad)
+dyad_4_sym1 = input.symbol("NYMEX:CL1!", "", inline="d4", group=group_dyad)
+dyad_4_sym2 = input.symbol("NYMEX:RB1!", "&", inline="d4", group=group_dyad)
+
+group_style = "Style"
+bull_col = input.color(color.rgb(41, 98, 255), "Bull", inline="c", group=group_style)
+bear_col = input.color(color.rgb(242, 54, 69), "Bear", inline="c", group=group_style)
+tcisd_col = input.color(color.rgb(128, 0, 32), "tCISD", inline="l", group=group_style)
+mop_col = input.color(color.rgb(99, 99, 99), "MOP", inline="l", group=group_style)
+target_col = input.color(color.rgb(0, 188, 212), "2R", inline="l", group=group_style)
+
+sym_id = syminfo.tickerid
+sym = str.contains(sym_id, "replay-feed") ? (syminfo.prefix + ":" + syminfo.ticker) : sym_id
+
+f_ticker_only(string s) =>
+    str.contains(s, ":") ? array.get(str.split(s, ":"), 1) : s
+
+f_check_match(string input_sym) =>
+    string t = f_ticker_only(input_sym)
+    str.length(t) > 0 and ((syminfo.ticker == t) or str.contains(sym, t) or str.contains(input_sym, syminfo.ticker))
+
+f_pair(string a, string b) =>
+    f_check_match(a) ? b : f_check_match(b) ? a : ""
+
+string csym_raw = ""
+if enable_dyad_1 and csym_raw == ""
+    csym_raw := f_pair(dyad_1_sym1, dyad_1_sym2)
+if enable_dyad_2 and csym_raw == ""
+    csym_raw := f_pair(dyad_2_sym1, dyad_2_sym2)
+if enable_dyad_3 and csym_raw == ""
+    csym_raw := f_pair(dyad_3_sym1, dyad_3_sym2)
+if enable_dyad_4 and csym_raw == ""
+    csym_raw := f_pair(dyad_4_sym1, dyad_4_sym2)
+
+if syminfo.type == "futures" and str.contains(csym_raw, ":")
+    csym_raw := syminfo.prefix + ":" + f_ticker_only(csym_raw)
+
+string csym = syminfo.type == "futures" and csym_raw != "" ? ticker.modify(csym_raw, session=syminfo.session, backadjustment=badj ? backadjustment.on : backadjustment.off) : csym_raw
+
+f_pick_qr(int idx, qt.QuarterRecord q1, qt.QuarterRecord q2, qt.QuarterRecord q3, qt.QuarterRecord q4) =>
+    qt.QuarterRecord out = q1
+    if idx == 2
+        out := q2
+    else if idx == 3
+        out := q3
+    else if idx == 4
+        out := q4
+    out
+
+f_m90_c123() =>
+    var qt.QTConfig cfg = qt.qt_config_default()
+    var qt.CycleState st = qt.qt_state_new()
+    [st0, m90] = qt.qt_m90_update(st, cfg, time, time_close)
+    st := st0
+
+    qt.QuarterRecord qcur = f_pick_qr(m90.curQuarterIndex, m90.q1, m90.q2, m90.q3, m90.q4)
+    qt.QuarterRecord qprev = m90.curQuarterIndex == 1 ? st.m90.prev1 : m90.curQuarterIndex == 2 ? m90.q1 : m90.curQuarterIndex == 3 ? m90.q2 : m90.q3
+    qt.QuarterRecord qprev2 = m90.curQuarterIndex == 1 ? st.m90.prev2 : m90.curQuarterIndex == 2 ? st.m90.prev1 : m90.curQuarterIndex == 3 ? m90.q1 : m90.q2
+    [qprev2.h, qprev2.l, qprev2.c, qprev2.o, qprev2.boundaryTs, qprev.h, qprev.l, qprev.c, qprev.o, qprev.boundaryTs, qprev.lTs, qprev.hTs, qcur.h, qcur.l, qcur.c, qcur.o, qcur.boundaryTs, qcur.oTs, m90.endTs]
+
+[mh2, ml2, mc2, mo2, mt2, mh1, ml1, mc1, mo1, mt1, ml1t, mh1t, mh0, ml0, mc0, mo0, mt0, mop_ts, m90_end_ts] = f_m90_c123()
+
+float oh2 = na
+float ol2 = na
+float oc2 = na
+float oo2 = na
+int ot2 = na
+float oh1 = na
+float ol1 = na
+float oc1 = na
+float oo1 = na
+int ot1 = na
+int ol1t = na
+int oh1t = na
+float oh0 = na
+float ol0 = na
+float oc0 = na
+float oo0 = na
+int ot0 = na
+int omop_ts = na
+int om90_end_ts = na
+
+if csym != ""
+    [p_h2, p_l2, p_c2, p_o2, p_t2, p_h1, p_l1, p_c1, p_o1, p_t1, p_l1t, p_h1t, p_h0, p_l0, p_c0, p_o0, p_t0, p_mop_ts, p_end_ts] = request.security(csym, timeframe.period, f_m90_c123(), gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off, ignore_invalid_symbol=true)
+    oh2 := p_h2
+    ol2 := p_l2
+    oc2 := p_c2
+    oo2 := p_o2
+    ot2 := p_t2
+    oh1 := p_h1
+    ol1 := p_l1
+    oc1 := p_c1
+    oo1 := p_o1
+    ot1 := p_t1
+    ol1t := p_l1t
+    oh1t := p_h1t
+    oh0 := p_h0
+    ol0 := p_l0
+    oc0 := p_c0
+    oo0 := p_o0
+    ot0 := p_t0
+    omop_ts := p_mop_ts
+    om90_end_ts := p_end_ts
+
+in_killzone = not na(time(timeframe.period, killzone, syminfo.timezone))
+is_m5 = timeframe.in_seconds(timeframe.period) == 5 * 60
+has_pair = csym != "" and not na(oc0)
+new_m90 = ta.change(mt0) != 0
+
+main_c2_up = mc1 > mo1
+main_c2_down = mc1 < mo1
+pair_c2_up = oc1 > oo1
+pair_c2_down = oc1 < oo1
+crack1 = (main_c2_up and pair_c2_down) or (main_c2_down and pair_c2_up)
+
+main_c3_above_c1 = mo0 > mc2
+main_c3_below_c1 = mo0 < mc2
+pair_c3_above_c1 = oo0 > oc2
+pair_c3_below_c1 = oo0 < oc2
+crack2 = (main_c3_above_c1 and pair_c3_below_c1) or (main_c3_below_c1 and pair_c3_above_c1)
+
+main_c2_low = array.min(array.from(ml2, ml1, ml0)) == ml1
+pair_c2_low = array.min(array.from(ol2, ol1, ol0)) == ol1
+main_c2_high = array.max(array.from(mh2, mh1, mh0)) == mh1
+pair_c2_high = array.max(array.from(oh2, oh1, oh0)) == oh1
+
+valid_bull_tpd = has_pair and crack1 and crack2 and (main_c2_low or pair_c2_low)
+valid_bear_tpd = has_pair and crack1 and crack2 and (main_c2_high or pair_c2_high)
+
+main_low_sweep = not na(ml1) and ml0 < ml1
+pair_low_sweep = not na(ol1) and ol0 < ol1
+main_high_sweep = not na(mh1) and mh0 > mh1
+pair_high_sweep = not na(oh1) and oh0 > oh1
+bull_ssmt = (main_low_sweep and not pair_low_sweep) or (pair_low_sweep and not main_low_sweep)
+bear_ssmt = (main_high_sweep and not pair_high_sweep) or (pair_high_sweep and not main_high_sweep)
+
+var int dir = 0
+var bool tpd_active = false
+var bool ssmt_confirmed = false
+var bool tcisd_confirmed = false
+var bool entry_done = false
+var float tcisd_level = na
+var int tcisd_ts = na
+var float stop_level = na
+var float mop_level = na
+var int model_end_ts = na
+var line mop_line = na
+var line tcisd_line = na
+var line stop_line = na
+var line target_line = na
+var label tcisd_lbl = na
+var label signal_lbl = na
+
+f_del_line(line l) =>
+    if not na(l)
+        line.delete(l)
+    line out = na
+    out
+
+f_del_label(label l) =>
+    if not na(l)
+        label.delete(l)
+    label out = na
+    out
+
+if new_m90
+    mop_line := f_del_line(mop_line)
+    tcisd_line := f_del_line(tcisd_line)
+    stop_line := f_del_line(stop_line)
+    target_line := f_del_line(target_line)
+    tcisd_lbl := f_del_label(tcisd_lbl)
+    signal_lbl := f_del_label(signal_lbl)
+    dir := 0
+    tpd_active := false
+    ssmt_confirmed := false
+    tcisd_confirmed := false
+    entry_done := false
+    tcisd_level := na
+    tcisd_ts := na
+    stop_level := na
+    mop_level := mo0
+    model_end_ts := m90_end_ts
+
+    if in_killzone and is_m5 and valid_bull_tpd
+        dir := 1
+        tpd_active := true
+        stop_level := ml1
+    else if in_killzone and is_m5 and valid_bear_tpd
+        dir := -1
+        tpd_active := true
+        stop_level := mh1
+
+    if tpd_active and not na(mop_level) and not na(model_end_ts)
+        mop_line := line.new(mt0, mop_level, model_end_ts, mop_level, xloc=xloc.bar_time, extend=extend.none, color=color.new(mop_col, 25), style=line.style_dashed)
+
+if tpd_active and not ssmt_confirmed
+    bool failure_is_main = dir == 1 ? (not main_low_sweep and pair_low_sweep) : dir == -1 ? (not main_high_sweep and pair_high_sweep) : false
+    if failure_is_main and ((dir == 1 and bull_ssmt) or (dir == -1 and bear_ssmt))
+        ssmt_confirmed := true
+        bool anchor0 = dir == 1 ? close < open : close > open
+        bool anchor1 = dir == 1 ? close[1] < open[1] : close[1] > open[1]
+        if anchor0
+            tcisd_level := open
+            tcisd_ts := time
+        else if anchor1
+            tcisd_level := open[1]
+            tcisd_ts := time[1]
+        if not na(tcisd_level) and not na(tcisd_ts) and not na(model_end_ts)
+            tcisd_line := line.new(tcisd_ts, tcisd_level, model_end_ts, tcisd_level, xloc=xloc.bar_time, extend=extend.none, color=tcisd_col, width=1)
+            tcisd_lbl := label.new(model_end_ts, tcisd_level, "m5 tCISD", xloc=xloc.bar_time, yloc=yloc.price, style=label.style_label_left, size=size.tiny, color=color.new(color.white, 100), textcolor=color.black)
+
+if tpd_active and ssmt_confirmed and not tcisd_confirmed and not na(tcisd_level)
+    tcisd_confirmed := barstate.isconfirmed and ((dir == 1 and close > tcisd_level) or (dir == -1 and close < tcisd_level))
+
+entry_touch = tcisd_confirmed and not entry_done and not na(tcisd_level) and high >= tcisd_level and low <= tcisd_level and time > tcisd_ts
+mop_ok = dir == 1 ? tcisd_level < mop_level : dir == -1 ? tcisd_level > mop_level : false
+risk = dir == 1 ? tcisd_level - stop_level : dir == -1 ? stop_level - tcisd_level : na
+
+if entry_touch and mop_ok and risk > 0
+    entry_done := true
+    float target = dir == 1 ? tcisd_level + risk * 2.0 : tcisd_level - risk * 2.0
+    stop_line := line.new(time, stop_level, model_end_ts, stop_level, xloc=xloc.bar_time, extend=extend.none, color=color.new(color.gray, 20), width=1)
+    target_line := line.new(time, target, model_end_ts, target, xloc=xloc.bar_time, extend=extend.none, color=target_col, width=1)
+    signal_lbl := label.new(time, tcisd_level, dir == 1 ? "Buy\n2R" : "Sell\n2R", xloc=xloc.bar_time, yloc=yloc.price, style=dir == 1 ? label.style_label_up : label.style_label_down, size=size.small, color=dir == 1 ? bull_col : bear_col, textcolor=color.white)
+
+bull_entry = entry_done and not entry_done[1] and dir == 1
+bear_entry = entry_done and not entry_done[1] and dir == -1
+
+alertcondition(bull_entry, "m90Model Bullish Entry", "m90Model bullish entry: m90 TPD confirmed by m90 SSMT, m5 tCISD, below MOP, target 2R")
+alertcondition(bear_entry, "m90Model Bearish Entry", "m90Model bearish entry: m90 TPD confirmed by m90 SSMT, m5 tCISD, above MOP, target 2R")
+
+var table dbg = table.new(position.bottom_right, 2, 7, border_width=1)
+if barstate.islast and show_debug
+    table.cell(dbg, 0, 0, "Peer", text_color=color.black)
+    table.cell(dbg, 1, 0, f_ticker_only(csym_raw), text_color=color.black)
+    table.cell(dbg, 0, 1, "Chart", text_color=color.black)
+    table.cell(dbg, 1, 1, is_m5 ? "m5" : "Use m5", text_color=color.black)
+    table.cell(dbg, 0, 2, "Killzone", text_color=color.black)
+    table.cell(dbg, 1, 2, in_killzone ? "Y" : "N", text_color=color.black)
+    table.cell(dbg, 0, 3, "TPD", text_color=color.black)
+    table.cell(dbg, 1, 3, dir == 1 ? "Bull" : dir == -1 ? "Bear" : "-", text_color=color.black)
+    table.cell(dbg, 0, 4, "SSMT", text_color=color.black)
+    table.cell(dbg, 1, 4, ssmt_confirmed ? "Y" : "N", text_color=color.black)
+    table.cell(dbg, 0, 5, "tCISD", text_color=color.black)
+    table.cell(dbg, 1, 5, tcisd_confirmed ? "Y" : "N", text_color=color.black)
+    table.cell(dbg, 0, 6, "MOP", text_color=color.black)
+    table.cell(dbg, 1, 6, mop_ok ? "Y" : "N", text_color=color.black)
